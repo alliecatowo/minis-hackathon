@@ -55,6 +55,35 @@ _PERSONALITY_SIGNALS = re.compile(
     re.IGNORECASE,
 )
 
+# Patterns that reveal decision-making and prioritization style
+_DECISION_SIGNALS = re.compile(
+    r"\b("
+    r"let'?s use|let'?s go with|i'?d rather|instead of"
+    r"|more important|trade-?off|compromise|ship it|good enough"
+    r"|not worth|over-?engineer|yak shav|scope creep|technical debt"
+    r"|refactor|rewrite|migrate|deprecate"
+    r"|the priority is|we need to focus|that'?s more important"
+    r"|pros and cons|weigh|consider|evaluate|worth it"
+    r"|keep it simple|kiss|yagni|premature|overkill"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Patterns that reveal architectural/design thinking
+_ARCHITECTURE_SIGNALS = re.compile(
+    r"\b("
+    r"architect(?:ure)?|structur(?:e|ing)|organiz(?:e|ing|ation)"
+    r"|pattern|approach|design|component|module|service|layer"
+    r"|separation|coupling|cohesion|abstraction|interface"
+    r"|dependency|inject|inversion|encapsulat"
+    r"|monolith|microservice|monorepo|hexagonal|domain.driven"
+    r"|single.responsib|solid|dry|separation.of.concerns"
+    r"|file.structure|project.structure|folder.structure"
+    r"|data.model|schema|migration|endpoint|route"
+    r")\b",
+    re.IGNORECASE,
+)
+
 # Technologies/tools that signal technical preferences when mentioned
 _TECH_MENTION_PATTERNS = re.compile(
     r"\b(?:python|javascript|typescript|react|vue|angular|svelte|nextjs|next\.js|"
@@ -119,12 +148,16 @@ class ClaudeCodeSource(IngestionSource):
         # Apply smart filtering
         filtered_projects: dict[str, list[dict[str, Any]]] = {}
         personality_count = 0
+        decision_count = 0
+        architecture_count = 0
         tech_mention_count = 0
         for proj, messages in projects.items():
             kept = _filter_messages(messages)
             if kept:
                 filtered_projects[proj] = kept
                 personality_count += sum(1 for m in kept if m.get("has_personality"))
+                decision_count += sum(1 for m in kept if m.get("has_decision"))
+                architecture_count += sum(1 for m in kept if m.get("has_architecture"))
                 tech_mention_count += sum(1 for m in kept if m.get("has_tech_mention"))
 
         total_kept = sum(len(msgs) for msgs in filtered_projects.values())
@@ -144,6 +177,8 @@ class ClaudeCodeSource(IngestionSource):
                 "total_user_messages_raw": total_raw,
                 "total_user_messages_kept": total_kept,
                 "personality_signal_messages": personality_count,
+                "decision_signal_messages": decision_count,
+                "architecture_signal_messages": architecture_count,
                 "tech_mention_messages": tech_mention_count,
                 "evidence_length": len(evidence),
             },
@@ -288,6 +323,8 @@ def _parse_jsonl(filepath: Path) -> list[dict[str, Any]]:
                             "timestamp": timestamp,
                             "project_cwd": cwd,
                             "has_personality": bool(_PERSONALITY_SIGNALS.search(text)),
+                            "has_decision": bool(_DECISION_SIGNALS.search(text)),
+                            "has_architecture": bool(_ARCHITECTURE_SIGNALS.search(stripped)),
                             "has_tech_mention": bool(_TECH_MENTION_PATTERNS.search(stripped)),
                         }
                     )
@@ -322,11 +359,20 @@ def _extract_text_content(content: str | list[Any]) -> list[str]:
 
 
 def _strip_code_blocks(text: str) -> str:
-    """Remove fenced and inline code blocks, keeping natural language."""
+    """Remove fenced code blocks but keep short inline code mentions.
+
+    Short inline code (< 30 chars) often names technologies, functions, or
+    tools that are valuable personality/preference signals (e.g. ``React``,
+    ``useEffect``, ``FastAPI``).  Only fenced code blocks and long inline code
+    are removed.
+    """
     # Remove fenced code blocks
     result = _CODE_BLOCK_RE.sub("", text)
-    # Remove inline code
-    result = _INLINE_CODE_RE.sub("", result)
+    # Remove long inline code but keep short mentions (tech names, function names)
+    result = _INLINE_CODE_RE.sub(
+        lambda m: m.group(0) if len(m.group(0)) < 32 else "",  # 32 = 30 + 2 backticks
+        result,
+    )
     # Redact anything that looks like a secret/API key
     result = _SECRET_RE.sub("[REDACTED]", result)
     # Clean up leftover whitespace
@@ -389,15 +435,20 @@ def _filter_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
 
         has_personality = msg.get("has_personality", False)
+        has_decision = msg.get("has_decision", False)
+        has_architecture = msg.get("has_architecture", False)
         has_tech_mention = msg.get("has_tech_mention", False)
 
-        # Keep if message has personality signal OR tech mention
-        if has_personality or has_tech_mention:
+        # Keep if message has any high-value signal
+        if has_personality or has_decision or has_architecture or has_tech_mention:
             kept.append(msg)
 
-    # Sort: personality-signal messages first, then tech mentions, then by timestamp
+    # Sort: decision/personality signals first, then architecture, then tech,
+    # then by timestamp
     kept.sort(key=lambda m: (
+        not m.get("has_decision"),
         not m.get("has_personality"),
+        not m.get("has_architecture"),
         not m.get("has_tech_mention"),
         m.get("timestamp", ""),
     ))
@@ -431,30 +482,59 @@ def _format_evidence(projects: dict[str, list[dict[str, Any]]]) -> str:
 
         sections.append(f"### Project: {project}")
 
-        personality_msgs = [m for m in messages if m.get("has_personality")]
-        tech_msgs = [
-            m for m in messages
-            if m.get("has_tech_mention") and not m.get("has_personality")
-        ]
-        regular_msgs = [
-            m for m in messages
-            if not m.get("has_personality") and not m.get("has_tech_mention")
-        ]
+        # Categorize messages into distinct evidence buckets.
+        # A message can appear in at most one bucket — the highest-priority
+        # one it matches — so we don't duplicate evidence.
+        decision_msgs: list[dict[str, Any]] = []
+        personality_msgs: list[dict[str, Any]] = []
+        architecture_msgs: list[dict[str, Any]] = []
+        tech_msgs: list[dict[str, Any]] = []
+        regular_msgs: list[dict[str, Any]] = []
+
+        for m in messages:
+            if m.get("has_decision"):
+                decision_msgs.append(m)
+            elif m.get("has_personality"):
+                personality_msgs.append(m)
+            elif m.get("has_architecture"):
+                architecture_msgs.append(m)
+            elif m.get("has_tech_mention"):
+                tech_msgs.append(m)
+            else:
+                regular_msgs.append(m)
+
+        if decision_msgs:
+            sections.append(
+                "*Decision-Making & Priorities "
+                "(reveals how this person weighs trade-offs and makes choices):*"
+            )
+            for msg in decision_msgs[:40]:
+                text = _truncate(msg["text"], 500)
+                sections.append(f'- "{text}"')
 
         if personality_msgs:
             sections.append(
-                "*Messages showing opinions, decisions, and personality:*"
+                "\n*Messages showing opinions, emotions, and personality:*"
             )
-            for msg in personality_msgs[:30]:
+            for msg in personality_msgs[:40]:
+                text = _truncate(msg["text"], 500)
+                sections.append(f'- "{text}"')
+
+        if architecture_msgs:
+            sections.append(
+                "\n*Architecture & Design Thinking "
+                "(project structure, patterns, system design):*"
+            )
+            for msg in architecture_msgs[:30]:
                 text = _truncate(msg["text"], 500)
                 sections.append(f'- "{text}"')
 
         if tech_msgs:
             sections.append(
-                "\n*Technical Preferences from Claude Code "
+                "\n*Technical Preferences "
                 "(tools, languages, frameworks mentioned):*"
             )
-            for msg in tech_msgs[:20]:
+            for msg in tech_msgs[:30]:
                 text = _truncate(msg["text"], 400)
                 sections.append(f'- "{text}"')
 

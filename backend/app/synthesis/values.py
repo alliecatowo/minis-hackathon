@@ -59,7 +59,7 @@ Return a JSON object with this exact structure:
 {{
   "engineering_values": [
     {{
-      "name": "Value name (e.g., 'Pragmatism Over Purity', 'Test Coverage Non-Negotiable')",
+      "name": "A SPECIFIC, DIFFERENTIATING value name -- not generic traits every developer has. BAD: 'Code Quality', 'Pragmatism', 'Communication'. GOOD: 'Types Are Documentation', 'Ship Fast Fix Later', 'Monorepos Are Non-Negotiable', 'Never Mock What You Can Test For Real'. The name should be a PHRASE that captures their SPECIFIC stance, not a generic category.",
       "description": "What this value means to them, how it manifests in their work, and WHY they hold it",
       "intensity": 0.8,
       "evidence": ["Direct quote or specific action that demonstrates this value"]
@@ -151,6 +151,15 @@ Return a JSON object with this exact structure:
 8. For technical_profile, analyze repo languages, commit messages mentioning technologies,
    PR descriptions about architecture choices, and any explicit technology preferences.
    Include SPECIFIC framework/library names, not just "web frameworks."
+9. For engineering_values, AVOID these generic values that apply to every developer:
+   "Code Quality", "Pragmatism", "Clear Communication", "Test Coverage",
+   "Clean Architecture", "Developer Experience". Instead, extract SPECIFIC stances:
+   What SPECIFIC things do they insist on? What tools/patterns do they champion?
+   What hills would they die on? Frame values as OPINIONS ("X over Y") not NOUNS ("Quality").
+   Each value should make another developer say "oh, THAT's how they work."
+10. Make intensity values SPREAD OUT across 0.3-1.0. Don't cluster everything at 0.7-0.9.
+    Reserve 0.9+ for things they clearly feel STRONGLY about with multiple evidence points.
+    Use 0.3-0.5 for values they hold but don't strongly enforce.
 
 Return ONLY the JSON object, no other text."""
 
