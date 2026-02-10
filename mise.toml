@@ -1,0 +1,17 @@
+[tools]
+pnpm = "latest"
+uv = "latest"
+node = "22"
+python = "3.13"
+
+[tasks.dev-backend]
+run = "cd backend && uv run uvicorn app.main:app --reload --port 8000"
+description = "Run FastAPI backend dev server"
+
+[tasks.dev-frontend]
+run = "cd frontend && pnpm dev"
+description = "Run Next.js frontend dev server"
+
+[tasks.dev]
+depends = ["dev-backend", "dev-frontend"]
+description = "Run both dev servers"
