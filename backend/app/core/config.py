@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite+aiosqlite:///./minis.db"
     github_token: str = ""
-    default_llm_model: str = "gemini/gemini-2.0-flash"
+    default_llm_model: str = "gemini/gemini-2.5-flash"
 
     # OAuth / Auth
     github_client_id: str = ""

@@ -146,13 +146,16 @@ export function PersonalityRadar({ values }: { values: Value[] }) {
             y={p.labelY}
             textAnchor={getTextAnchor(p.angle)}
             dominantBaseline="middle"
-            className={`text-[8px] transition-opacity duration-150 ${
+            className={`text-[8px] cursor-pointer transition-opacity duration-150 ${
               hoveredIndex === i
                 ? "fill-foreground font-medium"
                 : "fill-muted-foreground"
             }`}
+            onMouseEnter={() => setHoveredIndex(i)}
+            onMouseLeave={() => setHoveredIndex(null)}
           >
             {p.name.length > 14 ? p.name.slice(0, 13) + "..." : p.name}
+            {p.description && <title>{p.name}: {p.description}</title>}
           </text>
         ))}
       </svg>

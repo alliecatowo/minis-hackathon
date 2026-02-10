@@ -111,6 +111,7 @@ export default function MiniProfilePage() {
         ]);
 
         let buffer = "";
+        let currentEvent = "";
 
         while (true) {
           const { done, value } = await reader.read();
@@ -122,26 +123,31 @@ export default function MiniProfilePage() {
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
 
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              const data = line.slice(6);
-              if (data === "[DONE]") continue;
-              try {
-                const parsed = JSON.parse(data);
-                const token =
-                  parsed.token || parsed.content || parsed.delta || "";
+          for (const rawLine of lines) {
+            const line = rawLine.replace(/\r$/, "");
+
+            if (line.startsWith("event:")) {
+              currentEvent = line.slice(6).trim();
+              continue;
+            }
+
+            if (line === "") {
+              // Empty line resets event type per SSE spec
+              currentEvent = "";
+              continue;
+            }
+
+            if (line.startsWith("data:")) {
+              const data = line.slice(5);
+              // Trim leading space per SSE spec (single space after "data:")
+              const token = data.startsWith(" ") ? data.slice(1) : data;
+
+              if (currentEvent === "done" || token === "[DONE]") {
+                break;
+              }
+
+              if (currentEvent === "chunk" || currentEvent === "") {
                 assistantContent += token;
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  updated[updated.length - 1] = {
-                    role: "assistant",
-                    content: assistantContent,
-                  };
-                  return updated;
-                });
-              } catch {
-                // If not JSON, treat as raw token
-                assistantContent += data;
                 setMessages((prev) => {
                   const updated = [...prev];
                   updated[updated.length - 1] = {
