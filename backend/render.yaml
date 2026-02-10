@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: minis-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///./minis.db
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: DEBUG
+        value: "false"
+    healthCheckPath: /api/health
