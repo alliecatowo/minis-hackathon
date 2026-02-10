@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.core.auth import get_optional_user
+from app.core.auth import get_current_user, get_optional_user
 from app.db import async_session, get_session
 from app.models.mini import Mini
 from app.models.schemas import CreateMiniRequest, MiniDetail, MiniSummary
@@ -109,6 +109,25 @@ async def get_mini(
     if not mini:
         raise HTTPException(status_code=404, detail="Mini not found")
     return MiniDetail.model_validate(mini)
+
+
+@router.delete("/{username}", status_code=204)
+async def delete_mini(
+    username: str,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """Delete a mini. Owner only."""
+    result = await session.execute(
+        select(Mini).where(Mini.username == username.lower())
+    )
+    mini = result.scalar_one_or_none()
+    if not mini:
+        raise HTTPException(status_code=404, detail="Mini not found")
+    if mini.owner_id != user.id:
+        raise HTTPException(status_code=403, detail="Not the owner of this mini")
+    await session.delete(mini)
+    await session.commit()
 
 
 @router.get("/{username}/status")

@@ -3,7 +3,7 @@
 import { createContext, useContext } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
-export const GITHUB_CLIENT_ID = "Iv23li1IxaxqoIOJfacG";
+export const GITHUB_CLIENT_ID = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID || "";
 const TOKEN_KEY = "minis_token";
 
 export interface AuthUser {

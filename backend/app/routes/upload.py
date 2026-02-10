@@ -39,10 +39,14 @@ async def upload_claude_code(
                 for name in zf.namelist():
                     if name.endswith(".jsonl"):
                         dest = upload_dir / Path(name).name
+                        if not dest.resolve().is_relative_to(upload_dir.resolve()):
+                            continue  # skip malicious paths
                         dest.write_bytes(zf.read(name))
                         saved_count += 1
         elif file.filename.endswith(".jsonl"):
-            dest = upload_dir / file.filename
+            dest = upload_dir / Path(file.filename).name
+            if not dest.resolve().is_relative_to(upload_dir.resolve()):
+                continue  # skip malicious paths
             dest.write_bytes(content)
             saved_count += 1
         else:

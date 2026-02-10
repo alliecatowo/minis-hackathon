@@ -2,14 +2,16 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MiniCard } from "@/components/mini-card";
 import { listMinis, type Mini } from "@/lib/api";
-import { Users } from "lucide-react";
+import { Search, Users } from "lucide-react";
 
 export default function GalleryPage() {
   const [minis, setMinis] = useState<Mini[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     listMinis()
@@ -25,6 +27,19 @@ export default function GalleryPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Browse all created developer minis.
         </p>
+      </div>
+
+      <div className="relative mb-6">
+        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+          <Search className="h-4 w-4 text-muted-foreground" />
+        </div>
+        <Input
+          type="text"
+          placeholder="Search minis..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-9"
+        />
       </div>
 
       {loading ? (
@@ -70,9 +85,15 @@ export default function GalleryPage() {
         </div>
       ) : (
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-          {minis.map((mini) => (
-            <MiniCard key={mini.id} mini={mini} />
-          ))}
+          {minis
+            .filter(
+              (m) =>
+                m.username.includes(search.toLowerCase()) ||
+                m.display_name?.toLowerCase().includes(search.toLowerCase())
+            )
+            .map((mini) => (
+              <MiniCard key={mini.id} mini={mini} />
+            ))}
         </div>
       )}
     </div>

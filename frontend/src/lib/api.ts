@@ -80,6 +80,14 @@ export async function listMinis(): Promise<Mini[]> {
   return res.json();
 }
 
+export async function deleteMini(username: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/minis/${username}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to delete mini");
+}
+
 export function subscribePipelineStatus(username: string): EventSource {
   return new EventSource(`${API_BASE}/minis/${username}/status`);
 }

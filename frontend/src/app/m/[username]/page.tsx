@@ -1,11 +1,20 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,12 +25,13 @@ import {
 } from "@/components/personality-radar";
 import {
   getMini,
+  deleteMini,
   fetchChatStream,
   type Mini,
   type ChatMessage,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { Send, ChevronLeft, Trash2, ArrowLeft, Github, MessageSquare, Sparkles } from "lucide-react";
+import { Send, ChevronLeft, ChevronRight, Trash2, ArrowLeft, Github, MessageSquare, Sparkles, AlertCircle } from "lucide-react";
 
 const STARTERS = [
   "What's your strongest engineering opinion?",
@@ -43,6 +53,7 @@ function parseSourcesUsed(sourcesUsed?: string): string[] {
 
 export default function MiniProfilePage() {
   const params = useParams();
+  const router = useRouter();
   const username = params.username as string;
   const { user } = useAuth();
 
@@ -51,10 +62,13 @@ export default function MiniProfilePage() {
   const [mini, setMini] = useState<Mini | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [spiritOpen, setSpiritOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -170,6 +184,17 @@ export default function MiniProfilePage() {
     textareaRef.current?.focus();
   };
 
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteMini(username);
+      router.push("/gallery");
+    } catch {
+      setDeleting(false);
+      setDeleteOpen(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="mx-auto flex max-w-6xl flex-col gap-6 p-4 lg:flex-row">
@@ -193,16 +218,36 @@ export default function MiniProfilePage() {
     );
   }
 
-  if (error || !mini) {
+  if (error || !mini || mini.status === "failed") {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
-        <p className="text-muted-foreground">{error || "Mini not found."}</p>
-        <Link
-          href="/gallery"
-          className="text-sm text-chart-1 underline hover:text-chart-1/80"
-        >
-          Back to gallery
-        </Link>
+      <div className="flex min-h-[60vh] flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
+            <AlertCircle className="h-6 w-6 text-destructive" />
+          </div>
+          <h2 className="mb-2 text-lg font-semibold">
+            {mini?.status === "failed" ? "Mini Creation Failed" : "Mini Not Found"}
+          </h2>
+          <p className="mb-6 text-sm text-muted-foreground">
+            {error || (mini?.status === "failed"
+              ? `Something went wrong while creating @${username}'s mini. You can try creating it again.`
+              : `We couldn't find a mini for @${username}.`)}
+          </p>
+          <div className="flex flex-col items-center gap-3">
+            <Link href={`/create?username=${username}`}>
+              <Button variant="default" className="gap-2">
+                <Sparkles className="h-4 w-4" />
+                Retry Creation
+              </Button>
+            </Link>
+            <Link
+              href="/gallery"
+              className="text-sm text-muted-foreground underline transition-colors hover:text-foreground"
+            >
+              Back to Gallery
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
@@ -238,9 +283,46 @@ export default function MiniProfilePage() {
 
           {/* Owner badge */}
           {isOwner && (
-            <div className="flex items-center gap-2 rounded-lg border border-chart-1/30 bg-chart-1/5 px-3 py-2">
-              <Sparkles className="h-3.5 w-3.5 text-chart-1" />
-              <span className="text-xs font-medium text-chart-1">This is your mini</span>
+            <div className="flex items-center justify-between rounded-lg border border-chart-1/30 bg-chart-1/5 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-3.5 w-3.5 text-chart-1" />
+                <span className="text-xs font-medium text-chart-1">This is your mini</span>
+              </div>
+              <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+                <DialogTrigger asChild>
+                  <button
+                    className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                    title="Delete mini"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Delete @{username}?</DialogTitle>
+                    <DialogDescription>
+                      This will permanently delete this mini and all associated data.
+                      This action cannot be undone.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setDeleteOpen(false)}
+                      disabled={deleting}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={handleDelete}
+                      disabled={deleting}
+                    >
+                      {deleting ? "Deleting..." : "Delete"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           )}
 
@@ -341,6 +423,24 @@ export default function MiniProfilePage() {
               </div>
             </>
           )}
+
+          {mini.spirit_content && (
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => setSpiritOpen(!spiritOpen)}
+                className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ChevronRight className={`h-4 w-4 transition-transform ${spiritOpen ? "rotate-90" : ""}`} />
+                About this Mini
+              </button>
+              {spiritOpen && (
+                <div className="mt-3 rounded-lg bg-secondary/30 p-4 text-sm text-muted-foreground whitespace-pre-wrap max-h-96 overflow-y-auto">
+                  {mini.spirit_content}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </aside>
 
@@ -413,6 +513,20 @@ export default function MiniProfilePage() {
                 }
               />
             ))}
+            {isStreaming && messages.length > 0 && messages[messages.length - 1].role === "user" && (
+              <div className="flex gap-3 px-4 py-3">
+                <Avatar className="h-8 w-8 shrink-0">
+                  <AvatarImage src={mini?.avatar_url} />
+                  <AvatarFallback className="text-xs">{username.slice(0, 2).toUpperCase()}</AvatarFallback>
+                </Avatar>
+                <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                  <span className="animate-pulse">Thinking</span>
+                  <span className="animate-bounce" style={{ animationDelay: "0ms" }}>.</span>
+                  <span className="animate-bounce" style={{ animationDelay: "150ms" }}>.</span>
+                  <span className="animate-bounce" style={{ animationDelay: "300ms" }}>.</span>
+                </div>
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
         </div>

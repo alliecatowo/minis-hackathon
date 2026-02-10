@@ -21,6 +21,15 @@ export default function Home() {
   const [minis, setMinis] = useState<Mini[]>([]);
   const [minisLoading, setMinisLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [myMini, setMyMini] = useState<Mini | null>(null);
+
+  // Check if logged-in user has a mini
+  useEffect(() => {
+    if (!user) return;
+    import("@/lib/api").then(({ getMini }) =>
+      getMini(user.github_username).then(setMyMini).catch(() => setMyMini(null))
+    );
+  }, [user]);
 
   // Debounced avatar preview
   useEffect(() => {
@@ -125,14 +134,14 @@ export default function Home() {
         <section className="w-full max-w-6xl px-4 pb-8">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {/* My Mini CTA */}
-            <Link href={`/m/${user.github_username}`} className="group">
+            <Link href={myMini ? `/m/${user.github_username}` : `/create?username=${user.github_username}`} className="group">
               <div className="flex items-center gap-4 rounded-xl border border-chart-1/30 bg-chart-1/5 p-6 transition-all hover:border-chart-1/50">
                 <Avatar className="h-12 w-12">
                   <AvatarImage src={user.avatar_url || undefined} alt={user.github_username} />
                   <AvatarFallback className="font-mono">{user.github_username.slice(0, 2).toUpperCase()}</AvatarFallback>
                 </Avatar>
                 <div>
-                  <p className="font-medium">My Mini</p>
+                  <p className="font-medium">{myMini ? "My Mini" : "Create My Mini"}</p>
                   <p className="text-xs text-muted-foreground">@{user.github_username}</p>
                 </div>
               </div>

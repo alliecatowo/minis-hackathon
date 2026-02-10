@@ -1,7 +1,10 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import settings
 from app.db import engine
@@ -20,6 +23,8 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     load_plugins()
     await registry.setup_clients(app)
+    if settings.jwt_secret == "dev-secret-change-in-production":
+        logger.warning("Using default JWT secret! Set JWT_SECRET env var for production.")
     yield
 
 
