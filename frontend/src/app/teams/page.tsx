@@ -23,17 +23,12 @@ export default function TeamsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem("minis_token");
-    fetch(`${API_BASE}/teams`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch teams");
-        return res.json();
-      })
-      .then(setTeams)
-      .catch(() => setTeams([]))
-      .finally(() => setLoading(false));
+    import("@/lib/api").then(({ listTeams }) =>
+      listTeams()
+        .then(setTeams)
+        .catch(() => setTeams([]))
+        .finally(() => setLoading(false))
+    );
   }, []);
 
   return (

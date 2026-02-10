@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AddMiniDialog } from "@/components/add-mini-dialog";
+import { useAuth } from "@/lib/auth";
 import { ArrowLeft, Plus, X, Users } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
@@ -32,6 +33,7 @@ interface TeamDetail {
 export default function TeamDetailPage() {
   const params = useParams();
   const teamId = Number(params.id);
+  const { user } = useAuth();
 
   const [team, setTeam] = useState<TeamDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -56,27 +58,13 @@ export default function TeamDetailPage() {
     fetchTeam();
   }, [fetchTeam]);
 
-  const isOwner = (() => {
-    if (!team) return false;
-    // Check if the logged-in user is the owner
-    // We compare with stored username if available
-    const token = localStorage.getItem("minis_token");
-    const storedUser = localStorage.getItem("minis_username");
-    return !!token && storedUser === team.owner_username;
-  })();
+  const isOwner = !!user && !!team && user.github_username === team.owner_username;
 
-  const handleRemove = async (username: string) => {
-    setRemoving(username);
-    const token = localStorage.getItem("minis_token");
+  const handleRemove = async (memberUsername: string) => {
+    setRemoving(memberUsername);
     try {
-      const res = await fetch(
-        `${API_BASE}/teams/${teamId}/members/${username}`,
-        {
-          method: "DELETE",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        }
-      );
-      if (!res.ok) throw new Error("Failed to remove member");
+      const { removeTeamMember } = await import("@/lib/api");
+      await removeTeamMember(teamId, memberUsername);
       await fetchTeam();
     } catch {
       // Silently fail, could show toast

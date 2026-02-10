@@ -23,26 +23,9 @@ export default function NewTeamPage() {
     setSubmitting(true);
     setError(null);
 
-    const token = localStorage.getItem("minis_token");
     try {
-      const res = await fetch(`${API_BASE}/teams`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim() || null,
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: "Failed to create team" }));
-        throw new Error(err.detail || "Failed to create team");
-      }
-
-      const team = await res.json();
+      const { createTeam } = await import("@/lib/api");
+      const team = await createTeam(name.trim(), description.trim() || undefined);
       router.push(`/teams/${team.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create team");

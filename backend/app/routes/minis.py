@@ -5,9 +5,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from app.core.auth import get_optional_user
 from app.db import async_session, get_session
 from app.models.mini import Mini
 from app.models.schemas import CreateMiniRequest, MiniDetail, MiniSummary
+from app.models.user import User
 from app.plugins.registry import registry
 from app.synthesis.pipeline import (
     cleanup_event_queue,
@@ -41,10 +43,12 @@ async def list_sources():
 async def create_mini(
     body: CreateMiniRequest,
     session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(get_optional_user),
 ):
     """Create a new mini. Kicks off pipeline in background with selected sources."""
     username = body.username.strip().lower()
     sources = body.sources
+    owner_id = user.id if user else None
 
     # Check if already exists
     result = await session.execute(
@@ -61,18 +65,20 @@ async def create_mini(
     if existing and existing.status in ("pending", "failed"):
         # Re-run pipeline
         existing.status = "processing"
+        if owner_id and not existing.owner_id:
+            existing.owner_id = owner_id
         await session.commit()
         mini = existing
     else:
         # Create new
-        mini = Mini(username=username, status="processing")
+        mini = Mini(username=username, status="processing", owner_id=owner_id)
         session.add(mini)
         await session.commit()
         await session.refresh(mini)
 
     # Kick off pipeline in background
     asyncio.create_task(
-        run_pipeline_with_events(username, async_session, sources=sources)
+        run_pipeline_with_events(username, async_session, sources=sources, owner_id=owner_id)
     )
 
     return MiniSummary.model_validate(mini)
