@@ -1,39 +1,114 @@
-"""Format raw GitHub data into structured evidence text for LLM analysis."""
+"""Format raw GitHub data into structured evidence text for LLM analysis.
+
+Evidence is organized by context type and weighted by personality signal strength.
+Conflict evidence (pushback, disagreement, defense of positions) is prioritized
+because it reveals authentic values more reliably than routine activity.
+"""
 
 from __future__ import annotations
 
+import re
+
 from app.ingestion.github import GitHubData
+
+# Patterns that suggest strong emotion or conflict -- these comments are gold
+_CONFLICT_PATTERNS = re.compile(
+    r"(?i)"
+    r"(?:i disagree|i don't think|i wouldn't|actually,?\s|but\s|however,?\s"
+    r"|nit:|nit\b|instead,?\s|why not|shouldn't we|have you considered"
+    r"|i'd prefer|i'd rather|the problem with|this breaks|this will cause"
+    r"|strongly feel|concerned about|not a fan of|pushback|blocker"
+    r"|LGTM.*but|approve.*but|let's not|please don't|we should avoid"
+    r"|hard disagree|respectfully)"
+)
+
+_STRONG_EMOTION_PATTERNS = re.compile(
+    r"(?:"
+    r"[A-Z]{3,}|!!+|[!?]{2,}"  # CAPS, multiple exclamation/question marks
+    r"|:\)|:\(|:D|<3|:3|;\)|xD|lol|lmao|haha"  # Emoticons and laughter
+    r"|\b(?:love|hate|amazing|terrible|awesome|awful|perfect|horrible)\b"  # Strong sentiment
+    r")"
+)
 
 
 def format_evidence(data: GitHubData) -> str:
-    """Turn raw GitHub API data into a formatted evidence document."""
+    """Turn raw GitHub API data into a formatted evidence document.
+
+    Evidence is organized into sections by type and annotated with signal
+    strength markers to guide the LLM extraction.
+    """
     sections: list[str] = []
 
-    # User profile summary
     if data.profile:
         sections.append(_format_profile(data.profile))
 
-    # Repos overview
     if data.repos:
         sections.append(_format_repos(data.repos))
 
-    # Commit messages
-    if data.commits:
-        sections.append(_format_commits(data.commits))
-
-    # PR descriptions
-    if data.pull_requests:
-        sections.append(_format_prs(data.pull_requests))
-
-    # Code review comments (highest signal for personality)
+    # HIGH SIGNAL: Code review comments (conflict, values, communication style)
     if data.review_comments:
-        sections.append(_format_review_comments(data.review_comments))
+        conflict, routine = _partition_review_comments(data.review_comments)
+        if conflict:
+            sections.append(_format_review_comments(
+                conflict,
+                header="Code Review Comments -- CONFLICT & PUSHBACK",
+                preamble=(
+                    "[HIGHEST SIGNAL] These comments contain disagreement, pushback, or "
+                    "strong opinions. They reveal the developer's true engineering values "
+                    "and decision-making priorities. Pay close attention to their exact "
+                    "wording, what they defend, and how they frame objections."
+                ),
+            ))
+        if routine:
+            sections.append(_format_review_comments(
+                routine,
+                header="Code Review Comments -- Routine",
+                preamble=(
+                    "Routine review comments showing everyday communication style, "
+                    "tone, and what they notice during reviews."
+                ),
+            ))
+    elif data.review_comments:
+        sections.append(_format_review_comments(
+            data.review_comments,
+            header="Code Review Comments",
+            preamble=(
+                "[HIGHEST SIGNAL] Review comments reveal engineering values, "
+                "communication style, and personality -- especially when there "
+                "is disagreement or pushback."
+            ),
+        ))
 
-    # Issue discussions
+    # MEDIUM-HIGH SIGNAL: Issue discussions
     if data.issue_comments:
         sections.append(_format_issue_comments(data.issue_comments))
 
+    # MEDIUM SIGNAL: PR descriptions
+    if data.pull_requests:
+        sections.append(_format_prs(data.pull_requests))
+
+    # LOWER SIGNAL: Commit messages (useful for patterns, less for personality)
+    if data.commits:
+        sections.append(_format_commits(data.commits))
+
     return "\n\n".join(sections)
+
+
+def _partition_review_comments(
+    comments: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Split review comments into conflict/opinionated vs routine."""
+    conflict = []
+    routine = []
+    for comment in comments:
+        body = (comment.get("body") or "").strip()
+        if not body:
+            continue
+        if _CONFLICT_PATTERNS.search(body):
+            conflict.append(comment)
+        else:
+            routine.append(comment)
+    return conflict, routine
 
 
 def _format_profile(profile: dict) -> str:
@@ -67,20 +142,31 @@ def _format_repos(repos: list[dict]) -> str:
 def _format_commits(commits: list[dict]) -> str:
     lines = ["## Commit Messages"]
     lines.append(
-        "(These reveal what the developer works on and how they describe changes)\n"
+        "(Commit messages reveal work patterns and how the developer "
+        "describes changes -- look for naming conventions, detail level, "
+        "and whether they write explanatory commits vs terse ones)\n"
     )
     for commit in commits[:50]:
         commit_data = commit.get("commit", {})
-        message = commit_data.get("message", "").split("\n")[0]  # First line only
+        message = commit_data.get("message", "")
+        # Include full message (first line + body) for richer signal
+        msg_lines = message.split("\n")
+        first_line = msg_lines[0] if msg_lines else ""
+        body = "\n".join(msg_lines[1:]).strip() if len(msg_lines) > 1 else ""
         repo_name = commit.get("repository", {}).get("full_name", "unknown")
-        lines.append(f"- [{repo_name}] {message}")
+
+        lines.append(f"- [{repo_name}] {first_line}")
+        if body and len(body) < 300:
+            lines.append(f"  {body}")
     return "\n".join(lines)
 
 
 def _format_prs(prs: list[dict]) -> str:
     lines = ["## Pull Request Descriptions"]
     lines.append(
-        "(PR descriptions show how the developer explains and motivates their work)\n"
+        "(PR descriptions show how the developer explains and motivates "
+        "their work, how much context they provide, and their writing style "
+        "when presenting changes to others)\n"
     )
     for pr in prs[:30]:
         title = pr.get("title", "Untitled")
@@ -91,7 +177,6 @@ def _format_prs(prs: list[dict]) -> str:
 
         lines.append(f"### [{repo_label}] {title}")
         if body:
-            # Truncate very long PR bodies
             if len(body) > 500:
                 body = body[:500] + "..."
             lines.append(body)
@@ -99,27 +184,39 @@ def _format_prs(prs: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _format_review_comments(comments: list[dict]) -> str:
-    lines = ["## Code Review Comments"]
-    lines.append(
-        "(HIGHEST SIGNAL: Review comments reveal engineering values, communication style, "
-        "and personality — especially when there is disagreement or pushback)\n"
-    )
-    for comment in comments[:30]:
+def _format_review_comments(
+    comments: list[dict],
+    header: str,
+    preamble: str,
+) -> str:
+    lines = [f"## {header}"]
+    lines.append(f"({preamble})\n")
+
+    for comment in comments[:40]:
         body = (comment.get("body") or "").strip()
         if not body:
             continue
         diff_hunk = comment.get("diff_hunk", "")
         path = comment.get("path", "")
 
+        # Annotate emotional intensity
+        emotion_markers = _STRONG_EMOTION_PATTERNS.findall(body)
+        emotion_tag = ""
+        if emotion_markers:
+            emotion_tag = f" [STRONG EMOTION: {', '.join(emotion_markers[:3])}]"
+
         if path:
-            lines.append(f"**File: {path}**")
+            lines.append(f"**File: {path}**{emotion_tag}")
+        elif emotion_tag:
+            lines.append(f"**Comment**{emotion_tag}")
+
         if diff_hunk:
-            # Show last few lines of diff for context
             diff_lines = diff_hunk.strip().split("\n")
             context = "\n".join(diff_lines[-5:]) if len(diff_lines) > 5 else diff_hunk
             lines.append(f"```diff\n{context}\n```")
-        lines.append(f"> {body}")
+
+        # Preserve exact quote formatting for few-shot extraction
+        lines.append(f'> "{body}"')
         lines.append("")
     return "\n".join(lines)
 
@@ -127,17 +224,30 @@ def _format_review_comments(comments: list[dict]) -> str:
 def _format_issue_comments(comments: list[dict]) -> str:
     lines = ["## Issue Discussion Comments"]
     lines.append(
-        "(Issue comments show how the developer communicates about problems and solutions)\n"
+        "(Issue comments show how the developer communicates about "
+        "problems and solutions, how they ask questions, and how they "
+        "interact with collaborators in open discussion)\n"
     )
-    for comment in comments[:20]:
+    for comment in comments[:25]:
         body = (comment.get("body") or "").strip()
         if not body:
             continue
         issue_url = comment.get("html_url", "")
-        # Truncate long comments
-        if len(body) > 400:
-            body = body[:400] + "..."
-        lines.append(f"- {body}")
+
+        # Flag conflict/emotion
+        has_conflict = bool(_CONFLICT_PATTERNS.search(body))
+        has_emotion = bool(_STRONG_EMOTION_PATTERNS.search(body))
+        tags = []
+        if has_conflict:
+            tags.append("CONFLICT/OPINION")
+        if has_emotion:
+            tags.append("STRONG EMOTION")
+        tag_str = f" [{', '.join(tags)}]" if tags else ""
+
+        if len(body) > 500:
+            body = body[:500] + "..."
+
+        lines.append(f'- {tag_str}"{body}"')
         if issue_url:
             lines.append(f"  *Source: {issue_url}*")
         lines.append("")
