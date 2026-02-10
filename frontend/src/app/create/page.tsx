@@ -127,23 +127,23 @@ function CreatePageInner() {
       // Subscribe to SSE for pipeline updates
       const es = subscribePipelineStatus(username);
 
-      es.onmessage = (event) => {
+      es.addEventListener("progress", (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.step) setCurrentStep(data.step);
+          if (data.stage) setCurrentStep(data.stage);
           if (data.message) setMessage(data.message);
-          if (data.progress != null) setProgress(data.progress);
-
-          if (data.step === "complete" || data.progress >= 100) {
-            es.close();
-            setTimeout(() => {
-              router.replace(`/m/${username}`);
-            }, 1000);
-          }
+          if (data.progress != null) setProgress(data.progress * 100);
         } catch {
           // ignore parse errors
         }
-      };
+      });
+
+      es.addEventListener("done", () => {
+        es.close();
+        setTimeout(() => {
+          router.replace(`/m/${username}`);
+        }, 1000);
+      });
 
       es.onerror = () => {
         es.close();

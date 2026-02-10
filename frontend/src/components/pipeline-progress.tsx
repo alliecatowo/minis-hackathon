@@ -4,11 +4,11 @@ import { cn } from "@/lib/utils";
 import { Check, Loader2, Circle } from "lucide-react";
 
 const PIPELINE_STEPS = [
-  { key: "fetching", label: "Fetching GitHub data" },
-  { key: "analyzing", label: "Analyzing evidence" },
-  { key: "extracting", label: "Extracting values" },
-  { key: "synthesizing", label: "Synthesizing spirit" },
-  { key: "complete", label: "Complete" },
+  { key: "fetch", label: "Fetching data" },
+  { key: "format", label: "Formatting evidence" },
+  { key: "extract", label: "Extracting values" },
+  { key: "synthesize", label: "Synthesizing spirit" },
+  { key: "save", label: "Saving mini" },
 ];
 
 type StepStatus = "pending" | "active" | "complete";

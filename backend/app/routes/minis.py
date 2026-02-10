@@ -21,7 +21,20 @@ router = APIRouter(prefix="/minis", tags=["minis"])
 @router.get("/sources")
 async def list_sources():
     """List available ingestion sources."""
-    return {"sources": registry.list_sources()}
+    source_names = registry.list_sources()
+    source_info = {
+        "github": {"name": "GitHub", "description": "Commits, PRs, and reviews"},
+        "claude_code": {"name": "Claude Code", "description": "Conversation history"},
+    }
+    return [
+        {
+            "id": s,
+            "name": source_info.get(s, {}).get("name", s),
+            "description": source_info.get(s, {}).get("description", ""),
+            "available": True,
+        }
+        for s in source_names
+    ]
 
 
 @router.post("", status_code=202)

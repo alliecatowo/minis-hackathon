@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import datetime
+import json
+from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 # -- Request schemas --
@@ -35,6 +37,12 @@ class MiniSummary(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class MiniDetailValue(BaseModel):
+    name: str
+    description: str
+    intensity: float
+
+
 class MiniDetail(BaseModel):
     id: int
     username: str
@@ -43,14 +51,33 @@ class MiniDetail(BaseModel):
     bio: str | None
     spirit_content: str | None
     system_prompt: str | None
-    values_json: str | None
-    metadata_json: str | None
-    sources_used: str | None
+    values_json: str | None = None
+    metadata_json: str | None = None
+    sources_used: str | None = None
+    values: list[MiniDetailValue] = []
     status: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def parse_values(self) -> MiniDetail:
+        if self.values_json:
+            try:
+                data = json.loads(self.values_json)
+                eng_values = data.get("engineering_values", [])
+                self.values = [
+                    MiniDetailValue(
+                        name=v.get("name", ""),
+                        description=v.get("description", ""),
+                        intensity=v.get("intensity", 0.5),
+                    )
+                    for v in eng_values
+                ]
+            except (json.JSONDecodeError, KeyError, TypeError):
+                pass
+        return self
 
 
 class PipelineEvent(BaseModel):

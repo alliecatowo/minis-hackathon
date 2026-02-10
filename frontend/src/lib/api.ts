@@ -24,7 +24,7 @@ export interface ChatMessage {
 }
 
 export interface PipelineEvent {
-  step: string;
+  stage: string;
   message: string;
   progress: number;
 }
