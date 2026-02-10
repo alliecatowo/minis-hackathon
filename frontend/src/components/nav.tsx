@@ -1,8 +1,14 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export function Nav() {
+  const pathname = usePathname();
+
   return (
     <header className="sticky top-0 z-50 h-14 border-b border-border/50 bg-background/80 backdrop-blur-sm">
       <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4">
@@ -16,7 +22,12 @@ export function Nav() {
           <nav className="hidden items-center gap-4 sm:flex">
             <Link
               href="/gallery"
-              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+              className={cn(
+                "text-sm transition-colors hover:text-foreground",
+                pathname === "/gallery"
+                  ? "text-foreground font-medium"
+                  : "text-muted-foreground"
+              )}
             >
               Gallery
             </Link>

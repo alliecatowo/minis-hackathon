@@ -2,21 +2,8 @@
 
 import { cn } from "@/lib/utils";
 import type { ChatMessage as ChatMessageType } from "@/lib/api";
-
-function formatMarkdown(text: string): string {
-  let html = text
-    // Code blocks
-    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="my-2 rounded-md bg-background/50 p-3 font-mono text-xs overflow-x-auto"><code>$2</code></pre>')
-    // Inline code
-    .replace(/`([^`]+)`/g, '<code class="rounded bg-background/50 px-1 py-0.5 font-mono text-xs">$1</code>')
-    // Bold
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    // Italic
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    // Line breaks
-    .replace(/\n/g, "<br />");
-  return html;
-}
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export function ChatMessageBubble({
   message,
@@ -43,17 +30,16 @@ export function ChatMessageBubble({
         )}
       >
         {isUser ? (
-          <p>{message.content}</p>
+          <p className="whitespace-pre-wrap">{message.content}</p>
         ) : (
-          <div
-            className="prose-invert prose-sm [&_pre]:my-2 [&_code]:text-xs"
-            dangerouslySetInnerHTML={{
-              __html: formatMarkdown(message.content),
-            }}
-          />
+          <div className="prose-invert prose-sm max-w-none [&_pre]:my-2 [&_pre]:rounded-md [&_pre]:bg-background/50 [&_pre]:p-3 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_code]:rounded [&_code]:bg-background/50 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_code]:font-mono [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0.5 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_a]:text-chart-1 [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-muted-foreground/30 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground [&_table]:w-full [&_th]:border [&_th]:border-border/50 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_td]:border [&_td]:border-border/50 [&_td]:px-2 [&_td]:py-1 [&_hr]:my-2 [&_hr]:border-border/50">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {message.content}
+            </ReactMarkdown>
+          </div>
         )}
         {isStreaming && (
-          <span className="ml-1 inline-block h-3 w-1.5 animate-pulse-subtle rounded-full bg-current" />
+          <span className="ml-1 inline-block h-4 w-1.5 animate-pulse rounded-full bg-chart-1" />
         )}
       </div>
     </div>

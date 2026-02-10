@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 export interface Value {
   name: string;
@@ -29,11 +29,30 @@ export interface PipelineEvent {
   progress: number;
 }
 
-export async function createMini(username: string): Promise<Mini> {
+export interface SourceInfo {
+  id: string;
+  name: string;
+  description: string;
+  available: boolean;
+}
+
+export async function getSources(): Promise<SourceInfo[]> {
+  const res = await fetch(`${API_BASE}/minis/sources`);
+  if (!res.ok) {
+    // Fallback to default if endpoint not yet available
+    return [
+      { id: "github", name: "GitHub", description: "Commits, PRs, and reviews", available: true },
+      { id: "claude_code", name: "Claude Code", description: "Conversation history", available: false },
+    ];
+  }
+  return res.json();
+}
+
+export async function createMini(username: string, sources?: string[]): Promise<Mini> {
   const res = await fetch(`${API_BASE}/minis`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username }),
+    body: JSON.stringify({ username, ...(sources && { sources }) }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Failed to create mini" }));

@@ -16,7 +16,7 @@ const statusColors: Record<Mini["status"], string> = {
 export function MiniCard({ mini }: { mini: Mini }) {
   return (
     <Link href={mini.status === "ready" ? `/m/${mini.username}` : `/create?username=${mini.username}`}>
-      <Card className="group cursor-pointer border-border/50 transition-all hover:border-border hover:bg-card/80">
+      <Card className="group cursor-pointer border-border/50 transition-all duration-200 hover:border-border hover:bg-card/80 hover:shadow-lg hover:shadow-black/5">
         <CardHeader className="flex-row items-center gap-3">
           <Avatar className="h-10 w-10">
             <AvatarImage src={mini.avatar_url} alt={mini.username} />

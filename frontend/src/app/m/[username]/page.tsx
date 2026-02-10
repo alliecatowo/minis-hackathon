@@ -2,23 +2,31 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { ChatMessageBubble } from "@/components/chat-message";
-import { PersonalityRadar, PersonalityBars } from "@/components/personality-radar";
-import { getMini, fetchChatStream, type Mini, type ChatMessage } from "@/lib/api";
-import { Send, ChevronLeft } from "lucide-react";
+import {
+  PersonalityRadar,
+  PersonalityBars,
+} from "@/components/personality-radar";
+import {
+  getMini,
+  fetchChatStream,
+  type Mini,
+  type ChatMessage,
+} from "@/lib/api";
+import { Send, ChevronLeft, Trash2, ArrowLeft } from "lucide-react";
 
 const STARTERS = [
-  "What's your take on TypeScript?",
-  "How do you approach code reviews?",
-  "What makes good software?",
-  "What's your development philosophy?",
+  "What's your strongest engineering opinion?",
+  "Tell me about a time you disagreed with a coworker's code",
+  "What's your code review philosophy?",
+  "What technology are you most passionate about?",
 ];
 
 export default function MiniProfilePage() {
@@ -32,7 +40,7 @@ export default function MiniProfilePage() {
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -42,11 +50,9 @@ export default function MiniProfilePage() {
       .finally(() => setLoading(false));
   }, [username]);
 
-  // Auto-scroll on new messages
+  // Auto-scroll to bottom on new messages
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   const sendMessage = useCallback(
@@ -93,7 +99,8 @@ export default function MiniProfilePage() {
               if (data === "[DONE]") continue;
               try {
                 const parsed = JSON.parse(data);
-                const token = parsed.token || parsed.content || parsed.delta || "";
+                const token =
+                  parsed.token || parsed.content || parsed.delta || "";
                 assistantContent += token;
                 setMessages((prev) => {
                   const updated = [...prev];
@@ -123,7 +130,8 @@ export default function MiniProfilePage() {
           ...prev.filter((m) => m.content !== ""),
           {
             role: "assistant",
-            content: "Sorry, I couldn't respond right now. Please try again.",
+            content:
+              "Sorry, I couldn't respond right now. Please try again.",
           },
         ]);
       } finally {
@@ -141,14 +149,27 @@ export default function MiniProfilePage() {
     }
   };
 
+  const clearConversation = () => {
+    setMessages([]);
+    setInput("");
+    textareaRef.current?.focus();
+  };
+
   if (loading) {
     return (
       <div className="mx-auto flex max-w-6xl flex-col gap-6 p-4 lg:flex-row">
         <div className="w-full space-y-4 lg:w-80">
-          <Skeleton className="h-20 w-20 rounded-full" />
-          <Skeleton className="h-6 w-40" />
-          <Skeleton className="h-4 w-32" />
-          <Skeleton className="h-24 w-full" />
+          <div className="flex items-start gap-4">
+            <Skeleton className="h-16 w-16 shrink-0 rounded-full" />
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-4 w-20" />
+            </div>
+          </div>
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-3/4" />
+          <Separator />
+          <Skeleton className="h-[180px] w-full rounded-lg" />
         </div>
         <div className="flex-1">
           <Skeleton className="h-[60vh] w-full rounded-xl" />
@@ -159,8 +180,14 @@ export default function MiniProfilePage() {
 
   if (error || !mini) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
         <p className="text-muted-foreground">{error || "Mini not found."}</p>
+        <Link
+          href="/gallery"
+          className="text-sm text-chart-1 underline hover:text-chart-1/80"
+        >
+          Back to gallery
+        </Link>
       </div>
     );
   }
@@ -185,6 +212,15 @@ export default function MiniProfilePage() {
         } w-full shrink-0 overflow-y-auto border-b p-6 lg:block lg:w-80 lg:border-b-0 lg:border-r`}
       >
         <div className="space-y-6">
+          {/* Back to gallery */}
+          <Link
+            href="/gallery"
+            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ArrowLeft className="h-3 w-3" />
+            Back to gallery
+          </Link>
+
           {/* Identity */}
           <div className="flex items-start gap-4">
             <Avatar className="h-16 w-16 shrink-0">
@@ -250,17 +286,46 @@ export default function MiniProfilePage() {
 
       {/* Chat area */}
       <div className="flex flex-1 flex-col">
+        {/* Chat header */}
+        {messages.length > 0 && (
+          <div className="flex items-center justify-between border-b px-4 py-2">
+            <span className="text-xs text-muted-foreground">
+              {messages.length} message{messages.length !== 1 && "s"}
+            </span>
+            <button
+              onClick={clearConversation}
+              disabled={isStreaming}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+            >
+              <Trash2 className="h-3 w-3" />
+              Clear
+            </button>
+          </div>
+        )}
+
         {/* Messages */}
-        <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+        <div className="flex-1 overflow-y-auto p-4">
           <div className="mx-auto max-w-2xl space-y-4">
             {messages.length === 0 && (
               <div className="flex min-h-[50vh] flex-col items-center justify-center space-y-6">
                 <div className="text-center">
+                  <Avatar className="mx-auto mb-3 h-12 w-12">
+                    <AvatarImage
+                      src={mini.avatar_url}
+                      alt={mini.username}
+                    />
+                    <AvatarFallback className="font-mono text-sm">
+                      {mini.username.slice(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
                   <p className="text-sm text-muted-foreground">
                     Start a conversation with{" "}
                     <span className="font-mono font-medium text-foreground">
                       {mini.display_name || mini.username}
                     </span>
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground/60">
+                    Ask about their coding philosophy, opinions, and experiences
                   </p>
                 </div>
                 <div className="grid w-full max-w-sm gap-2">
@@ -288,8 +353,9 @@ export default function MiniProfilePage() {
                 }
               />
             ))}
+            <div ref={messagesEndRef} />
           </div>
-        </ScrollArea>
+        </div>
 
         {/* Input */}
         <div className="border-t p-4">
@@ -299,7 +365,7 @@ export default function MiniProfilePage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={`Message @${mini.username}...`}
+              placeholder={`Message @${mini.username}... (Shift+Enter for newline)`}
               className="min-h-[44px] max-h-32 resize-none font-mono text-sm"
               rows={1}
               disabled={isStreaming}

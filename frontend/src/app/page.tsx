@@ -123,7 +123,7 @@ export default function Home() {
           <h2 className="mb-6 text-sm font-medium uppercase tracking-wider text-muted-foreground">
             Existing Minis
           </h2>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
             {minisLoading
               ? Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="space-y-3 rounded-xl border p-6">
