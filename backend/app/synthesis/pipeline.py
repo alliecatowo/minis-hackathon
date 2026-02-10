@@ -33,6 +33,7 @@ async def run_pipeline(
     session_factory: Any,
     on_progress: ProgressCallback | None = None,
     sources: list[str] | None = None,
+    owner_id: int | None = None,
 ) -> None:
     """Run the full mini creation pipeline.
 
@@ -63,7 +64,10 @@ async def run_pipeline(
                 logger.warning("Unknown source: %s, skipping", source_name)
                 continue
 
-            result = await source.fetch(username)
+            if source_name == "claude_code" and owner_id is not None:
+                result = await source.fetch(username, data_dir=f"data/uploads/{owner_id}/claude_code")
+            else:
+                result = await source.fetch(username)
             results.append(result)
             all_stats[source_name] = result.stats
 
@@ -211,6 +215,7 @@ async def run_pipeline_with_events(
     username: str,
     session_factory: Any,
     sources: list[str] | None = None,
+    owner_id: int | None = None,
 ) -> None:
     """Run pipeline and push events to the in-memory queue for SSE streaming."""
     queue = get_event_queue(username)
@@ -219,7 +224,7 @@ async def run_pipeline_with_events(
         await queue.put(event)
 
     await run_pipeline(
-        username, session_factory, on_progress=push_event, sources=sources
+        username, session_factory, on_progress=push_event, sources=sources, owner_id=owner_id
     )
 
     # Signal completion

@@ -9,6 +9,9 @@ from app.models.mini import Base
 from app.plugins.loader import load_plugins
 from app.plugins.registry import registry
 from app.routes import chat, minis
+from app.routes.auth import router as auth_router
+from app.routes.upload import router as upload_router
+from app.routes.teams import router as teams_router
 
 
 @asynccontextmanager
@@ -32,6 +35,9 @@ app.add_middleware(
 
 app.include_router(minis.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
+app.include_router(upload_router, prefix="/api")
+app.include_router(teams_router, prefix="/api")
 
 
 @app.get("/api/health")

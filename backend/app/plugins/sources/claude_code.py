@@ -93,7 +93,11 @@ class ClaudeCodeSource(IngestionSource):
                 max_files: Maximum JSONL files to process (default 100).
                 max_messages_per_conv: Cap messages per conversation (default 40).
         """
-        path = Path(identifier).expanduser()
+        data_dir = config.get("data_dir")
+        if data_dir:
+            path = Path(data_dir)
+        else:
+            path = Path(identifier).expanduser()
         max_files = config.get("max_files", 100)
 
         projects = _discover_projects(path, max_files=max_files)

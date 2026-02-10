@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     github_token: str = ""
     default_llm_model: str = "gemini/gemini-2.0-flash"
 
+    # OAuth / Auth
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    jwt_secret: str = "dev-secret-change-in-production"
+
     # Production settings
     cors_origins: str = "http://localhost:3000"  # comma-separated origins
     debug: bool = True

@@ -20,7 +20,8 @@ import {
   type Mini,
   type ChatMessage,
 } from "@/lib/api";
-import { Send, ChevronLeft, Trash2, ArrowLeft } from "lucide-react";
+import { useAuth } from "@/lib/auth";
+import { Send, ChevronLeft, Trash2, ArrowLeft, Github, MessageSquare, Sparkles } from "lucide-react";
 
 const STARTERS = [
   "What's your strongest engineering opinion?",
@@ -29,9 +30,23 @@ const STARTERS = [
   "What technology are you most passionate about?",
 ];
 
+function parseSourcesUsed(sourcesUsed?: string): string[] {
+  if (!sourcesUsed) return [];
+  try {
+    const parsed = JSON.parse(sourcesUsed);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {
+    return sourcesUsed.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 export default function MiniProfilePage() {
   const params = useParams();
   const username = params.username as string;
+  const { user } = useAuth();
+
+  const isOwner = user?.github_username === username;
 
   const [mini, setMini] = useState<Mini | null>(null);
   const [loading, setLoading] = useState(true);
@@ -221,6 +236,14 @@ export default function MiniProfilePage() {
             Back to gallery
           </Link>
 
+          {/* Owner badge */}
+          {isOwner && (
+            <div className="flex items-center gap-2 rounded-lg border border-chart-1/30 bg-chart-1/5 px-3 py-2">
+              <Sparkles className="h-3.5 w-3.5 text-chart-1" />
+              <span className="text-xs font-medium text-chart-1">This is your mini</span>
+            </div>
+          )}
+
           {/* Identity */}
           <div className="flex items-start gap-4">
             <Avatar className="h-16 w-16 shrink-0">
@@ -244,6 +267,43 @@ export default function MiniProfilePage() {
             <p className="text-sm leading-relaxed text-muted-foreground">
               {mini.bio}
             </p>
+          )}
+
+          {/* Source badges */}
+          {parseSourcesUsed(mini.sources_used).length > 0 && (
+            <div className="space-y-2">
+              <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Sources
+              </h2>
+              <div className="flex flex-wrap gap-1.5">
+                {parseSourcesUsed(mini.sources_used).map((source) => (
+                  <Badge key={source} variant="outline" className="gap-1 text-xs">
+                    {source === "github" ? (
+                      <Github className="h-3 w-3" />
+                    ) : source === "claude_code" ? (
+                      <MessageSquare className="h-3 w-3" />
+                    ) : null}
+                    {source === "github" ? "GitHub" : source === "claude_code" ? "Claude Code" : source}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Enhance with Claude Code CTA */}
+          {isOwner && !parseSourcesUsed(mini.sources_used).includes("claude_code") && (
+            <Link
+              href={`/create?username=${username}`}
+              className="flex items-center gap-3 rounded-lg border border-dashed border-border/50 px-4 py-3 text-sm transition-colors hover:border-border hover:bg-secondary/30"
+            >
+              <MessageSquare className="h-4 w-4 text-muted-foreground" />
+              <div>
+                <p className="font-medium">Enhance with Claude Code</p>
+                <p className="text-xs text-muted-foreground">
+                  Add conversation data for richer personality
+                </p>
+              </div>
+            </Link>
           )}
 
           <Separator />

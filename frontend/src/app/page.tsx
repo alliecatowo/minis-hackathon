@@ -2,16 +2,19 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MiniCard } from "@/components/mini-card";
 import { listMinis, type Mini } from "@/lib/api";
-import { ArrowRight, Github } from "lucide-react";
+import { useAuth } from "@/lib/auth";
+import { ArrowRight, Github, Users } from "lucide-react";
 
 export default function Home() {
   const router = useRouter();
+  const { user } = useAuth();
   const [username, setUsername] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [avatarLoading, setAvatarLoading] = useState(false);
@@ -116,6 +119,39 @@ export default function Home() {
           </Button>
         </form>
       </section>
+
+      {/* Dashboard CTAs for logged-in users */}
+      {user && (
+        <section className="w-full max-w-6xl px-4 pb-8">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {/* My Mini CTA */}
+            <Link href={`/m/${user.github_username}`} className="group">
+              <div className="flex items-center gap-4 rounded-xl border border-chart-1/30 bg-chart-1/5 p-6 transition-all hover:border-chart-1/50">
+                <Avatar className="h-12 w-12">
+                  <AvatarImage src={user.avatar_url || undefined} alt={user.github_username} />
+                  <AvatarFallback className="font-mono">{user.github_username.slice(0, 2).toUpperCase()}</AvatarFallback>
+                </Avatar>
+                <div>
+                  <p className="font-medium">My Mini</p>
+                  <p className="text-xs text-muted-foreground">@{user.github_username}</p>
+                </div>
+              </div>
+            </Link>
+            {/* Teams CTA */}
+            <Link href="/teams" className="group">
+              <div className="flex items-center gap-4 rounded-xl border border-border/50 p-6 transition-all hover:border-border hover:bg-secondary/30">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary">
+                  <Users className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="font-medium">My Teams</p>
+                  <p className="text-xs text-muted-foreground">Manage mini rosters</p>
+                </div>
+              </div>
+            </Link>
+          </div>
+        </section>
+      )}
 
       {/* Existing Minis */}
       {(minisLoading || minis.length > 0) && (

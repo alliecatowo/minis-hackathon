@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PipelineProgress } from "@/components/pipeline-progress";
+import { FileUpload } from "@/components/file-upload";
 import {
   createMini,
   getMini,
@@ -11,6 +12,7 @@ import {
   subscribePipelineStatus,
   type SourceInfo,
 } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { Github, MessageSquare, Check } from "lucide-react";
 
 function SourceToggle({
@@ -79,6 +81,9 @@ function CreatePageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const username = searchParams.get("username") || "";
+  const { user } = useAuth();
+
+  const isOwnMini = user?.github_username === username;
 
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const [selectedSources, setSelectedSources] = useState<string[]>(["github"]);
@@ -88,6 +93,7 @@ function CreatePageInner() {
   const [message, setMessage] = useState("Initializing...");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [uploadComplete, setUploadComplete] = useState(false);
   const initiated = useRef(false);
 
   // Fetch available sources
@@ -95,8 +101,15 @@ function CreatePageInner() {
     getSources()
       .then((s) => {
         setSources(s);
-        // Auto-select all available sources
-        setSelectedSources(s.filter((src) => src.available).map((src) => src.id));
+        // Auto-select available sources, but only show claude_code for own mini
+        const available = s.filter((src) => src.available);
+        if (isOwnMini) {
+          setSelectedSources(available.map((src) => src.id));
+        } else {
+          setSelectedSources(
+            available.filter((src) => src.id !== "claude_code").map((src) => src.id)
+          );
+        }
       })
       .catch(() => {
         setSources([
@@ -104,7 +117,7 @@ function CreatePageInner() {
         ]);
       })
       .finally(() => setSourcesLoading(false));
-  }, []);
+  }, [isOwnMini]);
 
   const startPipeline = useCallback(async () => {
     if (!username) return;
@@ -199,6 +212,9 @@ function CreatePageInner() {
     startPipeline();
   };
 
+  // Need upload for claude_code if selected and not yet uploaded
+  const needsUpload = isOwnMini && selectedSources.includes("claude_code") && !uploadComplete;
+
   if (!username) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -267,24 +283,38 @@ function CreatePageInner() {
             </div>
           ) : (
             <div className="space-y-2">
-              {sources.map((source) => (
-                <SourceToggle
-                  key={source.id}
-                  source={source}
-                  selected={selectedSources.includes(source.id)}
-                  onToggle={() => toggleSource(source.id)}
-                  disabled={started}
-                />
-              ))}
+              {sources
+                .filter((source) => isOwnMini || source.id !== "claude_code")
+                .map((source) => (
+                  <SourceToggle
+                    key={source.id}
+                    source={source}
+                    selected={selectedSources.includes(source.id)}
+                    onToggle={() => toggleSource(source.id)}
+                    disabled={started}
+                  />
+                ))}
+            </div>
+          )}
+
+          {/* File upload for Claude Code (own mini only) */}
+          {isOwnMini && selectedSources.includes("claude_code") && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                Upload Claude Code conversation files
+              </p>
+              <FileUpload
+                onUploadComplete={() => setUploadComplete(true)}
+              />
             </div>
           )}
 
           <button
             onClick={handleStart}
-            disabled={selectedSources.length === 0}
+            disabled={selectedSources.length === 0 || needsUpload}
             className="w-full rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Start Analysis
+            {needsUpload ? "Upload files first" : "Start Analysis"}
           </button>
         </div>
       )}
