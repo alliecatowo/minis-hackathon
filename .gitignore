@@ -16,6 +16,9 @@ out/
 .env.local
 .env.*.local
 
+# GitHub App private keys
+*.pem
+
 # IDE
 .vscode/
 .idea/

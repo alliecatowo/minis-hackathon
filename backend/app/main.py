@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import engine
 from app.models.mini import Base
+from app.plugins.loader import load_plugins
+from app.plugins.registry import registry
 from app.routes import chat, minis
 
 
@@ -12,6 +14,8 @@ from app.routes import chat, minis
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    load_plugins()
+    await registry.setup_clients(app)
     yield
 
 

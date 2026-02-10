@@ -11,10 +11,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ingestion.formatter import format_evidence
-from app.ingestion.github import fetch_github_data
 from app.models.mini import Mini
 from app.models.schemas import PipelineEvent
+from app.plugins.base import IngestionResult
+from app.plugins.registry import registry
 from app.synthesis.spirit import build_system_prompt, synthesize_spirit
 from app.synthesis.values import extract_values
 
@@ -32,44 +32,64 @@ async def run_pipeline(
     username: str,
     session_factory: Any,
     on_progress: ProgressCallback | None = None,
+    sources: list[str] | None = None,
 ) -> None:
     """Run the full mini creation pipeline.
 
     Args:
-        username: GitHub username to create a mini for.
+        username: Primary identifier (GitHub username, etc.) to create a mini for.
         session_factory: Async session factory for database access.
         on_progress: Optional async callback for pipeline progress events.
+        sources: List of ingestion source names to use. Defaults to ["github"].
     """
     emit = on_progress or _noop_callback
+    source_names = sources or ["github"]
 
     try:
-        # Stage 1: Fetch GitHub data
+        # Stage 1: Fetch data from all requested sources
         await emit(PipelineEvent(
             stage="fetch", status="started",
-            message="Fetching GitHub activity...", progress=0.0,
+            message=f"Fetching data from {', '.join(source_names)}...",
+            progress=0.0,
         ))
 
-        github_data = await fetch_github_data(username)
+        results: list[IngestionResult] = []
+        all_stats: dict[str, Any] = {}
 
-        await emit(PipelineEvent(
-            stage="fetch", status="completed",
-            message=f"Fetched {len(github_data.commits)} commits, "
-                    f"{len(github_data.pull_requests)} PRs, "
-                    f"{len(github_data.review_comments)} reviews",
-            progress=0.2,
-        ))
+        for i, source_name in enumerate(source_names):
+            try:
+                source = registry.get_source(source_name)
+            except KeyError:
+                logger.warning("Unknown source: %s, skipping", source_name)
+                continue
 
-        # Stage 2: Format evidence
+            result = await source.fetch(username)
+            results.append(result)
+            all_stats[source_name] = result.stats
+
+            progress = 0.05 + (0.2 * (i + 1) / len(source_names))
+            await emit(PipelineEvent(
+                stage="fetch", status="completed",
+                message=f"Fetched data from {source_name}",
+                progress=progress,
+            ))
+
+        if not results:
+            raise ValueError(f"No data fetched from any source: {source_names}")
+
+        # Stage 2: Combine evidence from all sources
         await emit(PipelineEvent(
             stage="format", status="started",
-            message="Formatting evidence for analysis...", progress=0.25,
+            message="Combining evidence from all sources...", progress=0.25,
         ))
 
-        evidence = format_evidence(github_data)
+        evidence_parts = [r.evidence for r in results if r.evidence]
+        evidence = "\n\n---\n\n".join(evidence_parts)
 
         await emit(PipelineEvent(
             stage="format", status="completed",
-            message=f"Formatted {len(evidence)} characters of evidence",
+            message=f"Combined {len(evidence)} characters of evidence "
+                    f"from {len(results)} source(s)",
             progress=0.3,
         ))
 
@@ -93,9 +113,17 @@ async def run_pipeline(
             message="Synthesizing personality document...", progress=0.6,
         ))
 
-        display_name = github_data.profile.get("name") or username
-        bio = github_data.profile.get("bio") or ""
-        avatar_url = github_data.profile.get("avatar_url") or ""
+        # Extract profile info from the first source that has it (prefer github)
+        display_name = username
+        bio = ""
+        avatar_url = ""
+        for r in results:
+            profile = r.raw_data.get("profile", {})
+            if profile:
+                display_name = profile.get("name") or display_name
+                bio = profile.get("bio") or bio
+                avatar_url = profile.get("avatar_url") or avatar_url
+                break
 
         spirit_content = await synthesize_spirit(username, display_name, bio, values)
         system_prompt = build_system_prompt(username, spirit_content)
@@ -129,14 +157,10 @@ async def run_pipeline(
                 mini.spirit_content = spirit_content
                 mini.system_prompt = system_prompt
                 mini.values_json = values.model_dump_json()
-                mini.metadata_json = json.dumps({
-                    "repos_count": len(github_data.repos),
-                    "commits_analyzed": len(github_data.commits),
-                    "prs_analyzed": len(github_data.pull_requests),
-                    "reviews_analyzed": len(github_data.review_comments),
-                    "issue_comments_analyzed": len(github_data.issue_comments),
-                    "evidence_length": len(evidence),
-                })
+                mini.metadata_json = json.dumps(all_stats)
+                mini.sources_used = json.dumps(
+                    [r.source_name for r in results]
+                )
                 mini.status = "ready"
 
         await emit(PipelineEvent(
@@ -184,7 +208,9 @@ def cleanup_event_queue(username: str) -> None:
 
 
 async def run_pipeline_with_events(
-    username: str, session_factory: Any
+    username: str,
+    session_factory: Any,
+    sources: list[str] | None = None,
 ) -> None:
     """Run pipeline and push events to the in-memory queue for SSE streaming."""
     queue = get_event_queue(username)
@@ -192,7 +218,9 @@ async def run_pipeline_with_events(
     async def push_event(event: PipelineEvent) -> None:
         await queue.put(event)
 
-    await run_pipeline(username, session_factory, on_progress=push_event)
+    await run_pipeline(
+        username, session_factory, on_progress=push_event, sources=sources
+    )
 
     # Signal completion
     await queue.put(None)

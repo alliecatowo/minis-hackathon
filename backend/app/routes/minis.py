@@ -8,6 +8,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.db import async_session, get_session
 from app.models.mini import Mini
 from app.models.schemas import CreateMiniRequest, MiniDetail, MiniSummary
+from app.plugins.registry import registry
 from app.synthesis.pipeline import (
     cleanup_event_queue,
     get_event_queue,
@@ -17,13 +18,20 @@ from app.synthesis.pipeline import (
 router = APIRouter(prefix="/minis", tags=["minis"])
 
 
+@router.get("/sources")
+async def list_sources():
+    """List available ingestion sources."""
+    return {"sources": registry.list_sources()}
+
+
 @router.post("", status_code=202)
 async def create_mini(
     body: CreateMiniRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    """Create a new mini from a GitHub username. Kicks off pipeline in background."""
+    """Create a new mini. Kicks off pipeline in background with selected sources."""
     username = body.username.strip().lower()
+    sources = body.sources
 
     # Check if already exists
     result = await session.execute(
@@ -50,7 +58,9 @@ async def create_mini(
         await session.refresh(mini)
 
     # Kick off pipeline in background
-    asyncio.create_task(run_pipeline_with_events(username, async_session))
+    asyncio.create_task(
+        run_pipeline_with_events(username, async_session, sources=sources)
+    )
 
     return MiniSummary.model_validate(mini)
 

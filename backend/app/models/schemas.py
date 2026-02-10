@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 class CreateMiniRequest(BaseModel):
     username: str
+    sources: list[str] = ["github"]  # Ingestion sources to use
 
 
 class ChatRequest(BaseModel):
@@ -44,6 +45,7 @@ class MiniDetail(BaseModel):
     system_prompt: str | None
     values_json: str | None
     metadata_json: str | None
+    sources_used: str | None
     status: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
