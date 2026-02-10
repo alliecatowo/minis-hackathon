@@ -25,10 +25,12 @@ class GitHubData:
     pull_requests: list[dict[str, Any]] = field(default_factory=list)
     review_comments: list[dict[str, Any]] = field(default_factory=list)
     issue_comments: list[dict[str, Any]] = field(default_factory=list)
+    repo_languages: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
 def _headers() -> dict[str, str]:
-    headers = {"Accept": "application/vnd.github+json"}
+    # mercy-preview enables topics array on repository objects
+    headers = {"Accept": "application/vnd.github.mercy-preview+json"}
     if settings.github_token:
         headers["Authorization"] = f"Bearer {settings.github_token}"
     return headers
@@ -60,14 +62,23 @@ async def fetch_github_data(username: str) -> GitHubData:
         if profile:
             data.profile = profile
 
-        # 2. Repos (top 10 by recent push)
+        # 2. Repos (top 30 by recent push, with topics)
         repos = await _get(
             client,
             f"/users/{username}/repos",
-            params={"sort": "pushed", "per_page": "10", "type": "owner"},
+            params={"sort": "pushed", "per_page": "30", "type": "owner"},
         )
         if repos:
             data.repos = repos
+
+            # 2b. Per-repo language breakdown for top 10 repos
+            for repo in repos[:10]:
+                repo_name = repo.get("full_name") or repo.get("name", "")
+                if not repo_name:
+                    continue
+                langs = await _get(client, f"/repos/{repo_name}/languages")
+                if langs and isinstance(langs, dict):
+                    data.repo_languages[repo_name] = langs
 
         # 3. Recent commits (search API)
         commits_resp = await _get(
@@ -140,12 +151,13 @@ async def fetch_github_data(username: str) -> GitHubData:
                                     data.review_comments.append(c)
 
     logger.info(
-        "Fetched GitHub data for %s: %d repos, %d commits, %d PRs, %d reviews, %d issue comments",
+        "Fetched GitHub data for %s: %d repos, %d commits, %d PRs, %d reviews, %d issue comments, %d repo language breakdowns",
         username,
         len(data.repos),
         len(data.commits),
         len(data.pull_requests),
         len(data.review_comments),
         len(data.issue_comments),
+        len(data.repo_languages),
     )
     return data

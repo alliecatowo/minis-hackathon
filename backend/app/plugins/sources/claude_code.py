@@ -55,6 +55,19 @@ _PERSONALITY_SIGNALS = re.compile(
     re.IGNORECASE,
 )
 
+# Technologies/tools that signal technical preferences when mentioned
+_TECH_MENTION_PATTERNS = re.compile(
+    r"\b(?:python|javascript|typescript|react|vue|angular|svelte|nextjs|next\.js|"
+    r"rust|go|golang|java|kotlin|swift|ruby|rails|django|flask|fastapi|express|"
+    r"node|deno|bun|docker|kubernetes|k8s|terraform|aws|gcp|azure|"
+    r"postgresql|postgres|mysql|sqlite|mongodb|redis|graphql|rest\s?api|"
+    r"tailwind|css|html|sass|webpack|vite|turbopack|"
+    r"git|github|gitlab|ci/cd|"
+    r"neovim|vim|vscode|emacs|jetbrains|"
+    r"linux|macos|windows|fedora|ubuntu|arch)\b",
+    re.IGNORECASE,
+)
+
 # Patterns that look like secrets/keys (redact these)
 _SECRET_RE = re.compile(
     r"(?:"
@@ -106,11 +119,13 @@ class ClaudeCodeSource(IngestionSource):
         # Apply smart filtering
         filtered_projects: dict[str, list[dict[str, Any]]] = {}
         personality_count = 0
+        tech_mention_count = 0
         for proj, messages in projects.items():
             kept = _filter_messages(messages)
             if kept:
                 filtered_projects[proj] = kept
                 personality_count += sum(1 for m in kept if m.get("has_personality"))
+                tech_mention_count += sum(1 for m in kept if m.get("has_tech_mention"))
 
         total_kept = sum(len(msgs) for msgs in filtered_projects.values())
         evidence = _format_evidence(filtered_projects)
@@ -129,6 +144,7 @@ class ClaudeCodeSource(IngestionSource):
                 "total_user_messages_raw": total_raw,
                 "total_user_messages_kept": total_kept,
                 "personality_signal_messages": personality_count,
+                "tech_mention_messages": tech_mention_count,
                 "evidence_length": len(evidence),
             },
         )
@@ -264,13 +280,15 @@ def _parse_jsonl(filepath: Path) -> list[dict[str, Any]]:
 
             for text in texts:
                 if text:
+                    stripped = _strip_code_blocks(text)
                     messages.append(
                         {
                             "raw_text": text,
-                            "text": _strip_code_blocks(text),
+                            "text": stripped,
                             "timestamp": timestamp,
                             "project_cwd": cwd,
                             "has_personality": bool(_PERSONALITY_SIGNALS.search(text)),
+                            "has_tech_mention": bool(_TECH_MENTION_PATTERNS.search(stripped)),
                         }
                     )
 
@@ -370,10 +388,19 @@ def _filter_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if _is_automated_content(text):
             continue
 
-        kept.append(msg)
+        has_personality = msg.get("has_personality", False)
+        has_tech_mention = msg.get("has_tech_mention", False)
 
-    # Sort: personality-signal messages first, then by timestamp
-    kept.sort(key=lambda m: (not m.get("has_personality"), m.get("timestamp", "")))
+        # Keep if message has personality signal OR tech mention
+        if has_personality or has_tech_mention:
+            kept.append(msg)
+
+    # Sort: personality-signal messages first, then tech mentions, then by timestamp
+    kept.sort(key=lambda m: (
+        not m.get("has_personality"),
+        not m.get("has_tech_mention"),
+        m.get("timestamp", ""),
+    ))
 
     return kept
 
@@ -405,7 +432,14 @@ def _format_evidence(projects: dict[str, list[dict[str, Any]]]) -> str:
         sections.append(f"### Project: {project}")
 
         personality_msgs = [m for m in messages if m.get("has_personality")]
-        regular_msgs = [m for m in messages if not m.get("has_personality")]
+        tech_msgs = [
+            m for m in messages
+            if m.get("has_tech_mention") and not m.get("has_personality")
+        ]
+        regular_msgs = [
+            m for m in messages
+            if not m.get("has_personality") and not m.get("has_tech_mention")
+        ]
 
         if personality_msgs:
             sections.append(
@@ -413,6 +447,15 @@ def _format_evidence(projects: dict[str, list[dict[str, Any]]]) -> str:
             )
             for msg in personality_msgs[:30]:
                 text = _truncate(msg["text"], 500)
+                sections.append(f'- "{text}"')
+
+        if tech_msgs:
+            sections.append(
+                "\n*Technical Preferences from Claude Code "
+                "(tools, languages, frameworks mentioned):*"
+            )
+            for msg in tech_msgs[:20]:
+                text = _truncate(msg["text"], 400)
                 sections.append(f'- "{text}"')
 
         if regular_msgs:

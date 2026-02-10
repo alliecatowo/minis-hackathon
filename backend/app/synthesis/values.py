@@ -118,6 +118,20 @@ Return a JSON object with this exact structure:
     "never_does": ["Behaviors they avoid (e.g., 'never merges without tests', 'never gives vague feedback')"],
     "pet_peeves": ["Things that visibly annoy them based on their reactions in the evidence"],
     "anti_values": ["Engineering values they actively push back against (e.g., 'hates premature optimization', 'resists over-engineering')"]
+  }},
+
+  "technical_profile": {{
+    "primary_languages": ["Languages they actively use, ordered by frequency/expertise based on repo data and discussions"],
+    "frameworks_and_tools": ["Specific frameworks, libraries, tools they use or mention (e.g., React, FastAPI, Docker, Neovim)"],
+    "domains": ["What they build: web apps, CLIs, infrastructure, ML, games, etc."],
+    "technical_opinions": [
+      {{
+        "topic": "The technology or practice",
+        "opinion": "Their specific stance with evidence",
+        "quote": "Exact quote if available"
+      }}
+    ],
+    "projects_summary": "Brief description of the types of projects they work on based on repo descriptions and commit patterns"
   }}
 }}
 
@@ -134,6 +148,9 @@ Return a JSON object with this exact structure:
    else does X but they never do, that is defining.
 7. If evidence is thin for a section, extract what you can and note uncertainty in
    the descriptions. Do not fabricate.
+8. For technical_profile, analyze repo languages, commit messages mentioning technologies,
+   PR descriptions about architecture choices, and any explicit technology preferences.
+   Include SPECIFIC framework/library names, not just "web frameworks."
 
 Return ONLY the JSON object, no other text."""
 

@@ -129,7 +129,8 @@ async def run_pipeline(
                 avatar_url = profile.get("avatar_url") or avatar_url
                 break
 
-        spirit_content = await synthesize_spirit(username, display_name, bio, values)
+        technical_profile = getattr(values, 'technical_profile', None)
+        spirit_content = await synthesize_spirit(username, display_name, bio, values, technical_profile=technical_profile)
         system_prompt = build_system_prompt(username, spirit_content)
 
         await emit(PipelineEvent(

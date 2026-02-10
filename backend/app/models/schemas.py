@@ -149,6 +149,20 @@ class BehavioralBoundary(BaseModel):
     anti_values: list[str]  # Engineering values they actively argue against
 
 
+class TechnicalOpinion(BaseModel):
+    topic: str
+    opinion: str
+    quote: str = ""
+
+
+class TechnicalProfile(BaseModel):
+    primary_languages: list[str] = []
+    frameworks_and_tools: list[str] = []
+    domains: list[str] = []
+    technical_opinions: list[TechnicalOpinion] = []
+    projects_summary: str = ""
+
+
 class ExtractedValues(BaseModel):
     engineering_values: list[EngineeringValue]
     decision_patterns: list[DecisionPattern]
@@ -157,3 +171,4 @@ class ExtractedValues(BaseModel):
     communication_style: CommunicationStyle
     personality_patterns: PersonalityPattern
     behavioral_boundaries: BehavioralBoundary
+    technical_profile: TechnicalProfile = TechnicalProfile()

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 
 from app.core.llm import llm_completion
-from app.models.schemas import ExtractedValues
+from app.models.schemas import ExtractedValues, TechnicalProfile
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,13 @@ Create a spirit document for the developer "{username}".
 ## Profile
 - **Name**: {display_name}
 - **Bio**: {bio}
+
+## Technical Background
+- **Primary Languages**: {languages}
+- **Frameworks & Tools**: {frameworks}
+- **Domains**: {domains}
+- **Key Technical Opinions**: {tech_opinions}
+- **Projects Summary**: {projects_summary}
 
 ## Extracted Engineering Values
 {values_text}
@@ -97,6 +104,12 @@ job description, but their ESSENCE as a developer. What drives them? What's thei
 energy? What would someone who works with them daily say about them? Use vivid,
 specific language grounded in the evidence.]
 
+# Technical Identity
+[What languages you write in, what frameworks you reach for, what kind of projects
+you build. This is factual -- "You write primarily in Python and TypeScript. You build
+web applications using React and FastAPI. You're familiar with Docker and deploy on..."
+Ground in the evidence, don't fabricate expertise.]
+
 # Core Values & Decision Principles
 [For each major value, state it as a PRINCIPLE with reasoning:
 "You believe X because Y. When faced with Z, you choose A."
@@ -145,8 +158,26 @@ async def synthesize_spirit(
     display_name: str,
     bio: str,
     values: ExtractedValues,
+    technical_profile: TechnicalProfile | None = None,
 ) -> str:
     """Generate a spirit document from extracted values."""
+    # Format technical profile
+    tp = technical_profile or values.technical_profile
+    languages = ", ".join(tp.primary_languages) or "Not identified"
+    frameworks = ", ".join(tp.frameworks_and_tools) or "Not identified"
+    domains = ", ".join(tp.domains) or "Not identified"
+    if tp.technical_opinions:
+        tech_opinion_parts = []
+        for op in tp.technical_opinions:
+            part = f"{op.topic}: {op.opinion}"
+            if op.quote:
+                part += f' ("{op.quote}")'
+            tech_opinion_parts.append(part)
+        tech_opinions = "; ".join(tech_opinion_parts)
+    else:
+        tech_opinions = "Not identified"
+    projects_summary = tp.projects_summary or "Not identified"
+
     # Format values
     values_lines = []
     for v in values.engineering_values:
@@ -201,6 +232,11 @@ async def synthesize_spirit(
         username=username,
         display_name=display_name or username,
         bio=bio or "No bio provided",
+        languages=languages,
+        frameworks=frameworks,
+        domains=domains,
+        tech_opinions=tech_opinions,
+        projects_summary=projects_summary,
         values_text=values_text,
         decision_patterns_text=decision_patterns_text,
         conflict_text=conflict_text,
