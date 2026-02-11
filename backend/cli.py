@@ -91,12 +91,15 @@ def get_mini(username: str):
 
 
 @app.command("create")
-def create_mini(username: str):
+def create_mini(
+    username: str,
+    sources: list[str] = typer.Option(["github"], "--source", "-s", help="Ingestion sources to use"),
+):
     """Create a mini via the API and poll until ready."""
     try:
         resp = httpx.post(
             f"{API_BASE}/minis",
-            json={"username": username},
+            json={"username": username, "sources": sources},
             timeout=30,
         )
         resp.raise_for_status()
@@ -156,10 +159,13 @@ def delete_mini(username: str):
 
 
 @app.command("recreate")
-def recreate_mini(username: str):
+def recreate_mini(
+    username: str,
+    sources: list[str] = typer.Option(["github"], "--source", "-s", help="Ingestion sources to use"),
+):
     """Delete and recreate a mini."""
     delete_mini(username)
-    create_mini(username)
+    create_mini(username, sources=sources)
 
 
 @app.command("chat")
