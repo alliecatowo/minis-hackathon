@@ -50,6 +50,7 @@ class MiniDetail(BaseModel):
     avatar_url: str | None
     bio: str | None
     spirit_content: str | None
+    memory_content: str | None = None
     system_prompt: str | None
     values_json: str | None = None
     metadata_json: str | None = None

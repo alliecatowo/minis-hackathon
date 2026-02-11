@@ -60,14 +60,8 @@ async def create_mini(
     )
     existing = result.scalar_one_or_none()
 
-    if existing and existing.status == "processing":
-        return MiniSummary.model_validate(existing)
-
-    if existing and existing.status == "ready":
-        return MiniSummary.model_validate(existing)
-
-    if existing and existing.status in ("pending", "failed"):
-        # Re-run pipeline
+    if existing:
+        # Re-run pipeline (allows regeneration and recovery from stuck state)
         existing.status = "processing"
         if owner_id and not existing.owner_id:
             existing.owner_id = owner_id
