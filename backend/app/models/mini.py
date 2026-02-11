@@ -19,6 +19,7 @@ class Mini(Base):
     bio: Mapped[str | None] = mapped_column(Text)
 
     spirit_content: Mapped[str | None] = mapped_column(Text)
+    memory_content: Mapped[str | None] = mapped_column(Text)  # Factual knowledge bank
     system_prompt: Mapped[str | None] = mapped_column(Text)
     values_json: Mapped[str | None] = mapped_column(Text)
     metadata_json: Mapped[str | None] = mapped_column(Text)

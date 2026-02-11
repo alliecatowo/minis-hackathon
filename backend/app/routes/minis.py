@@ -27,6 +27,10 @@ async def list_sources():
     source_info = {
         "github": {"name": "GitHub", "description": "Commits, PRs, and reviews"},
         "claude_code": {"name": "Claude Code", "description": "Conversation history"},
+        "blog": {"name": "Blog / RSS", "description": "Blog posts and articles via RSS feed"},
+        "hackernews": {"name": "Hacker News", "description": "Comments, posts, and tech opinions"},
+        "stackoverflow": {"name": "Stack Overflow", "description": "Top answers and expertise"},
+        "devblog": {"name": "Dev.to", "description": "Dev.to articles, tutorials, and discussions"},
     }
     return [
         {

@@ -1,4 +1,11 @@
-"""Pipeline orchestration: runs the full ingestion-to-spirit flow with progress events."""
+"""Pipeline orchestration: runs the full ingestion-to-spirit flow with progress events.
+
+The pipeline produces two documents:
+1. Spirit Document — personality engram (style, soul, behavioral patterns)
+2. Memory Document — factual knowledge + opinions + values + tradeoffs
+
+Both are stored on the Mini and used together at chat time.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +22,9 @@ from app.models.mini import Mini
 from app.models.schemas import PipelineEvent
 from app.plugins.base import IngestionResult
 from app.plugins.registry import registry
+from app.synthesis.memory import build_memory
 from app.synthesis.spirit import build_system_prompt, synthesize_spirit
+from app.synthesis.style import analyze_writing_style
 from app.synthesis.values import extract_values
 
 logger = logging.getLogger(__name__)
@@ -71,7 +80,7 @@ async def run_pipeline(
             results.append(result)
             all_stats[source_name] = result.stats
 
-            progress = 0.05 + (0.2 * (i + 1) / len(source_names))
+            progress = 0.05 + (0.15 * (i + 1) / len(source_names))
             await emit(PipelineEvent(
                 stage="fetch", status="completed",
                 message=f"Fetched data from {source_name}",
@@ -84,7 +93,7 @@ async def run_pipeline(
         # Stage 2: Combine evidence from all sources
         await emit(PipelineEvent(
             stage="format", status="started",
-            message="Combining evidence from all sources...", progress=0.25,
+            message="Combining evidence from all sources...", progress=0.2,
         ))
 
         evidence_parts = [r.evidence for r in results if r.evidence]
@@ -94,27 +103,46 @@ async def run_pipeline(
             stage="format", status="completed",
             message=f"Combined {len(evidence)} characters of evidence "
                     f"from {len(results)} source(s)",
+            progress=0.25,
+        ))
+
+        # Stage 3: Parallel analysis — extract values, analyze style, build memory
+        # These three LLM calls are independent and can run concurrently
+        await emit(PipelineEvent(
+            stage="analyze", status="started",
+            message="Analyzing personality, style, and knowledge (3 parallel flows)...",
             progress=0.3,
         ))
 
-        # Stage 3: Extract values
+        values_task = asyncio.create_task(extract_values(username, evidence))
+        style_task = asyncio.create_task(analyze_writing_style(username, evidence))
+        memory_task = asyncio.create_task(build_memory(username, evidence))
+
+        values = await values_task
         await emit(PipelineEvent(
-            stage="extract", status="started",
-            message="Analyzing personality and values...", progress=0.35,
+            stage="analyze", status="completed",
+            message=f"Extracted {len(values.engineering_values)} engineering values",
+            progress=0.45,
         ))
 
-        values = await extract_values(username, evidence)
-
+        style_data = await style_task
         await emit(PipelineEvent(
-            stage="extract", status="completed",
-            message=f"Extracted {len(values.engineering_values)} engineering values",
+            stage="analyze", status="completed",
+            message="Writing style analysis complete",
             progress=0.55,
         ))
 
-        # Stage 4: Synthesize spirit
+        memory_content = await memory_task
+        await emit(PipelineEvent(
+            stage="analyze", status="completed",
+            message=f"Built knowledge bank ({len(memory_content)} chars)",
+            progress=0.65,
+        ))
+
+        # Stage 4: Synthesize spirit document (uses values + style data)
         await emit(PipelineEvent(
             stage="synthesize", status="started",
-            message="Synthesizing personality document...", progress=0.6,
+            message="Synthesizing personality document...", progress=0.7,
         ))
 
         # Extract profile info from the first source that has it (prefer github)
@@ -130,8 +158,12 @@ async def run_pipeline(
                 break
 
         technical_profile = getattr(values, 'technical_profile', None)
-        spirit_content = await synthesize_spirit(username, display_name, bio, values, technical_profile=technical_profile)
-        system_prompt = build_system_prompt(username, spirit_content)
+        spirit_content = await synthesize_spirit(
+            username, display_name, bio, values,
+            technical_profile=technical_profile,
+            style_data=style_data,
+        )
+        system_prompt = build_system_prompt(username, spirit_content, memory_content)
 
         await emit(PipelineEvent(
             stage="synthesize", status="completed",
@@ -160,6 +192,7 @@ async def run_pipeline(
                 mini.avatar_url = avatar_url
                 mini.bio = bio
                 mini.spirit_content = spirit_content
+                mini.memory_content = memory_content
                 mini.system_prompt = system_prompt
                 mini.values_json = values.model_dump_json()
                 mini.metadata_json = json.dumps(all_stats)

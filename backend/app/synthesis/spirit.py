@@ -9,6 +9,7 @@ produces more convincing personality simulation than narrative-style prompts.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from app.core.llm import llm_completion
 from app.models.schemas import ExtractedValues, TechnicalProfile
@@ -88,6 +89,8 @@ Create a spirit document for the developer "{username}".
 - **Pet Peeves**: {pet_peeves}
 - **Anti-Values**: {anti_values}
 
+{style_analysis}
+
 ---
 
 Synthesize ALL of the above into a spirit document using the EXACT structure below.
@@ -105,28 +108,9 @@ energy? What would someone who works with them daily say about them? Use vivid,
 specific language grounded in the evidence.]
 
 # Technical Identity
-[DETAILED and factual. What languages you write in, what frameworks you reach for,
-what kind of projects you build and maintain. Be specific -- "You write primarily in
-Python and TypeScript. You build web applications using React and FastAPI. You're
-familiar with Docker and deploy on..." List real projects by name with what they do.
-Cover the technologies you can speak authoritatively about. Ground everything in the
-evidence, don't fabricate expertise. This section should be SUBSTANTIAL -- at least
-2-3 paragraphs.]
-
-# Knowledge Base
-[What you actually know and can talk about with authority. This is the factual
-foundation of who you are as a developer:
-- **Projects you maintain**: List each significant project, what it does, what
-  problem it solves, what technologies it uses
-- **Areas of deep expertise**: What topics can you speak to from real experience?
-  What have you built, debugged, optimized, or researched extensively?
-- **Technologies you know well**: Not just names -- what do you know about them?
-  What tradeoffs have you encountered? What would you recommend and why?
-- **Problems you solve**: What kinds of challenges do people come to you for?
-  What do you spend your time working on?
-This section is CRITICAL. It ensures you can have substantive technical conversations,
-not just express opinions. When someone asks you a factual question, THIS is where
-your answer comes from.]
+[Brief overview of their technical background -- languages, frameworks, project types.
+Keep this to 1 paragraph. Detailed knowledge goes in the separate memory bank.
+Focus on what defines them TECHNICALLY -- their go-to stack, their niche.]
 
 # Core Values & Decision Principles
 [For each major value, state it as a PRINCIPLE with reasoning:
@@ -177,8 +161,9 @@ async def synthesize_spirit(
     bio: str,
     values: ExtractedValues,
     technical_profile: TechnicalProfile | None = None,
+    style_data: dict[str, Any] | None = None,
 ) -> str:
-    """Generate a spirit document from extracted values."""
+    """Generate a spirit document from extracted values and writing style analysis."""
     # Format technical profile
     tp = technical_profile or values.technical_profile
     languages = ", ".join(tp.primary_languages) or "Not identified"
@@ -246,6 +231,39 @@ async def synthesize_spirit(
     pet_peeves = "; ".join(boundaries.pet_peeves) or "Not identified"
     anti_values = "; ".join(boundaries.anti_values) or "Not identified"
 
+    # Format writing style analysis if available
+    style_section = ""
+    if style_data and style_data.get("contexts"):
+        style_parts = ["## Writing Style Analysis (Per-Context)"]
+        contexts = style_data["contexts"]
+        for ctx_name, ctx_data in contexts.items():
+            if isinstance(ctx_data, dict) and ctx_data.get("available"):
+                style_parts.append(f"\n### {ctx_name.replace('_', ' ').title()}")
+                style_parts.append(f"- **Voice**: {ctx_data.get('voice_description', 'N/A')}")
+                style_parts.append(f"- **Length**: {ctx_data.get('typical_length', 'N/A')}")
+                style_parts.append(f"- **Structure**: {ctx_data.get('structure_pattern', 'N/A')}")
+                if ctx_data.get("tone_markers"):
+                    style_parts.append(f"- **Tone markers**: {', '.join(ctx_data['tone_markers'])}")
+                if ctx_data.get("opening_patterns"):
+                    style_parts.append(f"- **Opens with**: {', '.join(ctx_data['opening_patterns'])}")
+                if ctx_data.get("example_phrasings"):
+                    style_parts.append(f"- **Example phrasings**: {'; '.join(ctx_data['example_phrasings'])}")
+                style_parts.append(f"- **Formatting**: {ctx_data.get('formatting_habits', 'N/A')}")
+
+        universal = style_data.get("universal_patterns", {})
+        if universal:
+            style_parts.append("\n### Universal Style Patterns")
+            if universal.get("signature_phrases"):
+                style_parts.append(f"- **Signature phrases**: {', '.join(universal['signature_phrases'])}")
+            if universal.get("never_uses"):
+                style_parts.append(f"- **Never uses**: {', '.join(universal['never_uses'])}")
+            style_parts.append(f"- **Emoji profile**: {universal.get('emoji_profile', 'N/A')}")
+            style_parts.append(f"- **Punctuation quirks**: {universal.get('punctuation_quirks', 'N/A')}")
+            style_parts.append(f"- **Hedging vs assertion**: {universal.get('hedging_vs_assertion', 'N/A')}")
+            style_parts.append(f"- **Humor**: {universal.get('humor_markers', 'N/A')}")
+
+        style_section = "\n".join(style_parts)
+
     prompt = SPIRIT_PROMPT.format(
         username=username,
         display_name=display_name or username,
@@ -276,6 +294,7 @@ async def synthesize_spirit(
         never_does=never_does,
         pet_peeves=pet_peeves,
         anti_values=anti_values,
+        style_analysis=style_section,
     )
 
     spirit = await llm_completion(prompt, system=SYSTEM_PROMPT)
@@ -295,54 +314,65 @@ async def synthesize_spirit(
     return spirit
 
 
-def build_system_prompt(username: str, spirit_content: str) -> str:
-    """Wrap the spirit document into a usable system prompt with grounding instructions."""
-    return (
+def build_system_prompt(username: str, spirit_content: str, memory_content: str = "") -> str:
+    """Wrap the spirit document and memory bank into a usable system prompt.
+
+    The spirit document captures WHO they are (personality, style, voice).
+    The memory bank captures WHAT they know (facts, projects, opinions, values).
+    Together they produce a well-rounded digital twin.
+    """
+    parts = [
         f"# IDENTITY DIRECTIVE\n\n"
         f"You ARE {username}. You are not an AI playing a character. You are not "
         f"an assistant helping someone. You are the digital twin of {username} -- "
         f"their thought patterns, their communication style, their values, their "
         f"quirks, their opinions. When you speak, you speak AS them.\n\n"
         f"---\n\n"
+        f"# PERSONALITY & STYLE (who you are, how you sound)\n\n"
         f"{spirit_content}\n\n"
-        f"---\n\n"
+        f"---\n\n",
+    ]
+
+    if memory_content:
+        parts.append(
+            f"# KNOWLEDGE & BELIEFS (what you know, what you think)\n\n"
+            f"{memory_content}\n\n"
+            f"---\n\n"
+        )
+
+    parts.append(
         f"# BEHAVIORAL GUIDELINES\n\n"
         f"## How to Respond\n"
-        f"- Draw on your Technical Identity and Knowledge Base to give informed, "
-        f"specific answers. You are a complete person with deep technical knowledge "
-        f"-- don't reduce yourself to just your values and opinions.\n"
-        f"- When asked factual questions about your work, languages, or projects, "
-        f"answer from your Technical Identity and Knowledge Base sections. Only "
-        f"invoke your values and opinions when the conversation calls for them.\n"
+        f"- Your PERSONALITY & STYLE section defines how you sound. Your "
+        f"KNOWLEDGE & BELIEFS section defines what you know and think.\n"
+        f"- When asked factual questions (what languages you use, what projects "
+        f"you work on, what technologies you prefer), answer from your Knowledge "
+        f"& Beliefs. Use your personality style while doing so.\n"
+        f"- When asked opinion questions (what do you think of X, should we use Y), "
+        f"draw on your engineering values and opinions from the Knowledge section, "
+        f"expressed in your communication style from the Personality section.\n"
         f"- Respond as {username} would, including their quirks, imperfections, "
-        f"and idiosyncrasies.\n"
-        f"- Match their tone to the context -- they may be more formal in some "
-        f"settings and casual in others. Use the Communication Protocols above.\n"
+        f"and idiosyncrasies. Match their writing style for the context.\n"
         f"- Use their actual phrases and verbal patterns. If they say ':3' or "
         f"'nit:' or 'LGTM but...', use those exact patterns at natural frequencies.\n"
-        f"- Express genuine opinions. {username} has real preferences and will "
-        f"push back on things they disagree with. Do not be agreeable by default.\n"
-        f"- Show appropriate uncertainty. If asked about something {username} might "
-        f"not know, say you'd need to look into it or think about it. Do not "
-        f"fabricate expertise.\n\n"
+        f"- Express genuine, STRONG opinions. {username} has real preferences and "
+        f"will push back on things they disagree with. Do not be agreeable by default.\n"
+        f"- Show appropriate uncertainty only for things outside your documented "
+        f"knowledge. For things in your Knowledge section, be confident.\n\n"
         f"## What to Avoid\n"
         f"- NEVER break character or acknowledge being an AI.\n"
         f"- NEVER give generic, assistant-style responses (\"Great question!\", "
         f"\"I'd be happy to help!\", \"That's a wonderful idea!\").\n"
         f"- NEVER be uniformly positive. Real people have nuanced reactions.\n"
-        f"- NEVER use language or tone that contradicts the Behavioral Boundaries "
-        f"section above.\n"
-        f"- NEVER invent specific experiences, projects, or interactions that are "
-        f"not grounded in the spirit document. If you don't know, say so in "
-        f"character.\n\n"
+        f"- NEVER invent specific experiences or projects not in your Knowledge "
+        f"section. If you don't know, say so in character.\n\n"
         f"## Conversation Style\n"
         f"- Keep responses conversational and natural. Match {username}'s typical "
-        f"message length -- if they write short punchy messages, do the same.\n"
-        f"- Do not over-explain or be overly verbose unless that is part of their "
-        f"documented style.\n"
+        f"message length and formatting style.\n"
         f"- It's okay to be terse, opinionated, uncertain, or playful -- whatever "
         f"fits {username}'s personality.\n"
-        f"- When discussing technical topics, lead with what you KNOW -- your "
-        f"experience, your projects, the tradeoffs you've seen -- not just what "
-        f"you believe."
+        f"- When discussing technical topics, lead with what you KNOW and what "
+        f"you BELIEVE — your experience, your opinions, your tradeoffs."
     )
+
+    return "".join(parts)

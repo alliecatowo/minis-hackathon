@@ -13,67 +13,132 @@ import {
   type SourceInfo,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { Github, MessageSquare, Check } from "lucide-react";
+import {
+  Github,
+  MessageSquare,
+  Check,
+  Rss,
+  Globe,
+  Code,
+} from "lucide-react";
+
+/** Metadata for sources that need a separate identifier (not the main GitHub username). */
+const SOURCE_IDENTIFIER_META: Record<
+  string,
+  { label: string; placeholder: string }
+> = {
+  hackernews: {
+    label: "Hacker News username",
+    placeholder: "e.g. pg",
+  },
+  stackoverflow: {
+    label: "Stack Overflow user ID",
+    placeholder: "e.g. 22656",
+  },
+  blog: {
+    label: "Blog or RSS feed URL",
+    placeholder: "e.g. https://example.com/feed.xml",
+  },
+  devblog: {
+    label: "Dev.to username",
+    placeholder: "e.g. bendhalpern",
+  },
+};
+
+/** Pick a lucide icon based on source id. */
+function SourceIcon({ id, className }: { id: string; className?: string }) {
+  switch (id) {
+    case "github":
+      return <Github className={className} />;
+    case "claude_code":
+      return <MessageSquare className={className} />;
+    case "blog":
+      return <Rss className={className} />;
+    case "hackernews":
+      return <Globe className={className} />;
+    case "stackoverflow":
+      return <Code className={className} />;
+    case "devblog":
+      return <Code className={className} />;
+    default:
+      return <MessageSquare className={className} />;
+  }
+}
 
 function SourceToggle({
   source,
   selected,
   onToggle,
   disabled,
+  identifier,
+  onIdentifierChange,
 }: {
   source: SourceInfo;
   selected: boolean;
   onToggle: () => void;
   disabled: boolean;
+  identifier?: string;
+  onIdentifierChange?: (value: string) => void;
 }) {
-  const icon =
-    source.id === "github" ? (
-      <Github className="h-4 w-4" />
-    ) : (
-      <MessageSquare className="h-4 w-4" />
-    );
+  const meta = SOURCE_IDENTIFIER_META[source.id];
 
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      disabled={disabled || !source.available}
-      className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition-all ${
-        selected
-          ? "border-chart-1/50 bg-chart-1/10 text-foreground"
-          : source.available
-            ? "border-border/50 text-muted-foreground hover:border-border hover:bg-secondary/50"
-            : "cursor-not-allowed border-border/30 text-muted-foreground/50 opacity-50"
-      }`}
-    >
-      <div
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
-          selected ? "bg-chart-1/20 text-chart-1" : "bg-secondary text-muted-foreground"
-        }`}
-      >
-        {icon}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="font-medium">{source.name}</span>
-          {!source.available && (
-            <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-              Coming soon
-            </span>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">{source.description}</p>
-      </div>
-      <div
-        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
+    <div className="space-y-1.5">
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={disabled || !source.available}
+        className={`flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition-all ${
           selected
-            ? "border-chart-1 bg-chart-1 text-background"
-            : "border-border"
+            ? "border-chart-1/50 bg-chart-1/10 text-foreground"
+            : source.available
+              ? "border-border/50 text-muted-foreground hover:border-border hover:bg-secondary/50"
+              : "cursor-not-allowed border-border/30 text-muted-foreground/50 opacity-50"
         }`}
       >
-        {selected && <Check className="h-3 w-3" />}
-      </div>
-    </button>
+        <div
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
+            selected
+              ? "bg-chart-1/20 text-chart-1"
+              : "bg-secondary text-muted-foreground"
+          }`}
+        >
+          <SourceIcon id={source.id} className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">{source.name}</span>
+            {!source.available && (
+              <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                Coming soon
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">{source.description}</p>
+        </div>
+        <div
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
+            selected
+              ? "border-chart-1 bg-chart-1 text-background"
+              : "border-border"
+          }`}
+        >
+          {selected && <Check className="h-3 w-3" />}
+        </div>
+      </button>
+
+      {/* Identifier input for sources that need one */}
+      {selected && meta && onIdentifierChange && (
+        <input
+          type="text"
+          value={identifier ?? ""}
+          onChange={(e) => onIdentifierChange(e.target.value)}
+          placeholder={meta.placeholder}
+          disabled={disabled}
+          className="ml-11 w-[calc(100%-2.75rem)] rounded-md border border-border/50 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-chart-1/50 focus:outline-none focus:ring-1 focus:ring-chart-1/30"
+        />
+      )}
+    </div>
   );
 }
 
@@ -87,6 +152,9 @@ function CreatePageInner() {
 
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const [selectedSources, setSelectedSources] = useState<string[]>(["github"]);
+  const [sourceIdentifiers, setSourceIdentifiers] = useState<
+    Record<string, string>
+  >({});
   const [sourcesLoading, setSourcesLoading] = useState(true);
   const [started, setStarted] = useState(false);
   const [currentStep, setCurrentStep] = useState("fetching");
@@ -101,19 +169,20 @@ function CreatePageInner() {
     getSources()
       .then((s) => {
         setSources(s);
-        // Auto-select available sources, but only show claude_code for own mini
-        const available = s.filter((src) => src.available);
-        if (isOwnMini) {
-          setSelectedSources(available.map((src) => src.id));
-        } else {
-          setSelectedSources(
-            available.filter((src) => src.id !== "claude_code").map((src) => src.id)
-          );
-        }
+        // Auto-select github only; let user opt-in to other sources
+        const defaultSources = s
+          .filter((src) => src.available && src.id === "github")
+          .map((src) => src.id);
+        setSelectedSources(defaultSources);
       })
       .catch(() => {
         setSources([
-          { id: "github", name: "GitHub", description: "Commits, PRs, and reviews", available: true },
+          {
+            id: "github",
+            name: "GitHub",
+            description: "Commits, PRs, and reviews",
+            available: true,
+          },
         ]);
       })
       .finally(() => setSourcesLoading(false));
@@ -206,6 +275,10 @@ function CreatePageInner() {
     );
   };
 
+  const updateIdentifier = (sourceId: string, value: string) => {
+    setSourceIdentifiers((prev) => ({ ...prev, [sourceId]: value }));
+  };
+
   const handleStart = () => {
     if (initiated.current) return;
     initiated.current = true;
@@ -213,7 +286,10 @@ function CreatePageInner() {
   };
 
   // Need upload for claude_code if selected and not yet uploaded
-  const needsUpload = isOwnMini && selectedSources.includes("claude_code") && !uploadComplete;
+  const needsUpload =
+    isOwnMini &&
+    selectedSources.includes("claude_code") &&
+    !uploadComplete;
 
   if (!username) {
     return (
@@ -274,7 +350,7 @@ function CreatePageInner() {
           {/* Source selection */}
           {sourcesLoading ? (
             <div className="space-y-3">
-              {[1, 2].map((i) => (
+              {[1, 2, 3].map((i) => (
                 <div
                   key={i}
                   className="h-[68px] animate-pulse rounded-lg border border-border/30 bg-secondary/30"
@@ -292,6 +368,10 @@ function CreatePageInner() {
                     selected={selectedSources.includes(source.id)}
                     onToggle={() => toggleSource(source.id)}
                     disabled={started}
+                    identifier={sourceIdentifiers[source.id]}
+                    onIdentifierChange={(val) =>
+                      updateIdentifier(source.id, val)
+                    }
                   />
                 ))}
             </div>
