@@ -25,7 +25,7 @@ class TeamUpdateRequest(BaseModel):
 
 
 class AddMemberRequest(BaseModel):
-    username: str
+    mini_id: int
     role: str = "member"
 
 
@@ -42,6 +42,7 @@ class TeamSummaryResponse(BaseModel):
 
 
 class TeamMemberResponse(BaseModel):
+    mini_id: int
     username: str
     role: str
     display_name: str | None
@@ -143,20 +144,22 @@ async def get_team(
     # Fetch members with mini details
     members_stmt = (
         select(
-            TeamMember.mini_username,
+            TeamMember.mini_id,
             TeamMember.role,
             TeamMember.added_at,
+            Mini.username,
             Mini.display_name,
             Mini.avatar_url,
         )
-        .outerjoin(Mini, TeamMember.mini_username == Mini.username)
+        .outerjoin(Mini, TeamMember.mini_id == Mini.id)
         .where(TeamMember.team_id == team_id)
         .order_by(TeamMember.added_at)
     )
     members_result = await session.execute(members_stmt)
     members = [
         TeamMemberResponse(
-            username=m.mini_username,
+            mini_id=m.mini_id,
+            username=m.username,
             role=m.role,
             display_name=m.display_name,
             avatar_url=m.avatar_url,
@@ -240,7 +243,7 @@ async def add_member(
 
     # Check mini exists
     mini_result = await session.execute(
-        select(Mini).where(Mini.username == body.username.lower())
+        select(Mini).where(Mini.id == body.mini_id)
     )
     mini = mini_result.scalar_one_or_none()
     if not mini:
@@ -250,7 +253,7 @@ async def add_member(
     existing = await session.execute(
         select(TeamMember).where(
             TeamMember.team_id == team_id,
-            TeamMember.mini_username == body.username.lower(),
+            TeamMember.mini_id == body.mini_id,
         )
     )
     if existing.scalar_one_or_none():
@@ -258,7 +261,7 @@ async def add_member(
 
     member = TeamMember(
         team_id=team_id,
-        mini_username=body.username.lower(),
+        mini_id=body.mini_id,
         role=body.role,
     )
     session.add(member)
@@ -266,7 +269,8 @@ async def add_member(
     await session.refresh(member)
 
     return TeamMemberResponse(
-        username=member.mini_username,
+        mini_id=member.mini_id,
+        username=mini.username,
         role=member.role,
         display_name=mini.display_name,
         avatar_url=mini.avatar_url,
@@ -274,10 +278,10 @@ async def add_member(
     )
 
 
-@router.delete("/{team_id}/members/{username}", status_code=204)
+@router.delete("/{team_id}/members/{mini_id}", status_code=204)
 async def remove_member(
     team_id: int,
-    username: str,
+    mini_id: int,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -292,7 +296,7 @@ async def remove_member(
     member_result = await session.execute(
         select(TeamMember).where(
             TeamMember.team_id == team_id,
-            TeamMember.mini_username == username.lower(),
+            TeamMember.mini_id == mini_id,
         )
     )
     member = member_result.scalar_one_or_none()
