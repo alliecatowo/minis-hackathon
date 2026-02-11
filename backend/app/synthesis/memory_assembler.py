@@ -244,151 +244,101 @@ def assemble_memory(reports: list[ExplorerReport], username: str = "") -> str:
 
 # ── Standardized developer traits for radar chart ──────────────────────
 
-# Fixed trait definitions: every mini is scored on the same axes.
-# Each trait has a key, display name, category, description, and keywords
-# used to match against explorer memory entries.
+# Fixed trait definitions: every mini is scored on the same 8 axes.
+# Uses a POINT BUDGET system — total across all axes sums to ~50,
+# forcing real trade-offs between traits.
 
 TRAIT_DEFINITIONS: list[dict[str, str | list[str]]] = [
-    # Personality traits
     {
         "key": "collaboration",
         "name": "Collaboration",
-        "category": "Personality",
         "description": "Team player who actively involves others",
         "keywords": ["collaborat", "team", "pair program", "co-author",
-                      "together", "we ", "group", "collective"],
-    },
-    {
-        "key": "mentoring",
-        "name": "Mentoring",
-        "category": "Personality",
-        "description": "Teaches, guides, and uplifts other developers",
-        "keywords": ["mentor", "teach", "guide", "explain", "onboard",
-                      "newcomer", "beginner", "junior", "help others",
-                      "education", "tutorial", "documentation"],
+                      "together", "we ", "group", "collective", "mentor",
+                      "teach", "guide", "onboard", "help others"],
     },
     {
         "key": "directness",
         "name": "Directness",
-        "category": "Personality",
         "description": "Blunt and straightforward communicator",
         "keywords": ["direct", "blunt", "honest", "straightforward",
                       "frank", "no-nonsense", "opinionat", "strong opinion",
                       "disagree", "pushback", "nack", "reject"],
     },
     {
-        "key": "humor",
-        "name": "Humor",
-        "category": "Personality",
-        "description": "Uses humor and wit in technical contexts",
-        "keywords": ["humor", "funny", "joke", "wit", "sarcas", "lol",
-                      "haha", "emoji", "playful", "lightheart"],
-    },
-    # Coding traits
-    {
-        "key": "systems",
-        "name": "Systems",
-        "category": "Coding",
-        "description": "Low-level systems programming (C, Rust, OS, firmware)",
-        "keywords": ["systems", "kernel", "driver", "firmware", "embedded",
-                      "low-level", "assembly", "memory manage", "c lang",
-                      " c ", "rust", "os ", "operating system", "linux kernel",
-                      "bare metal", "real-time"],
-    },
-    {
-        "key": "web",
-        "name": "Web",
-        "category": "Coding",
-        "description": "Web development, frontend and backend",
-        "keywords": ["web", "frontend", "backend", "react", "vue", "angular",
-                      "next.js", "node", "django", "flask", "fastapi", "html",
-                      "css", "javascript", "typescript", "api", "rest",
-                      "graphql", "http", "browser"],
-    },
-    {
-        "key": "devops",
-        "name": "DevOps",
-        "category": "Coding",
-        "description": "Infrastructure, CI/CD, and deployment",
-        "keywords": ["devops", "ci/cd", "deploy", "docker", "kubernetes",
-                      "terraform", "aws", "cloud", "infrastructure",
-                      "pipeline", "github actions", "jenkins", "monitoring",
-                      "sre", "reliability", "scaling"],
-    },
-    {
-        "key": "ai_ml",
-        "name": "AI/ML",
-        "category": "Coding",
-        "description": "AI, machine learning, LLMs, and data science",
-        "keywords": ["machine learning", "ml ", "ai ", "deep learning",
-                      "neural", "llm", "gpt", "transformer", "model",
-                      "training", "inference", "pytorch", "tensorflow",
-                      "data science", "nlp", "computer vision"],
-    },
-    # Engineering traits
-    {
-        "key": "code_quality",
-        "name": "Code Quality",
-        "category": "Engineering",
-        "description": "Cares deeply about testing, reviews, and clean code",
-        "keywords": ["test", "review", "clean code", "quality", "lint",
-                      "refactor", "readab", "maintainab", "solid",
-                      "coverage", "ci", "type safe", "static analysis"],
-    },
-    {
         "key": "pragmatism",
         "name": "Pragmatism",
-        "category": "Engineering",
         "description": "Ships fast, favors practical solutions over perfection",
         "keywords": ["pragmat", "ship", "practical", "mvp", "good enough",
                       "trade-off", "tradeoff", "iterate", "prototype",
                       "hack", "workaround", "quick", "velocity", "done"],
     },
     {
-        "key": "open_source",
-        "name": "Open Source",
-        "category": "Engineering",
-        "description": "Active contributor to open source community",
-        "keywords": ["open source", "oss", "contributor", "maintain",
-                      "community", "foss", "upstream", "patch",
-                      "pull request", "public repo", "license"],
+        "key": "code_quality",
+        "name": "Code Quality",
+        "description": "Cares deeply about testing, reviews, and clean code",
+        "keywords": ["test", "review", "clean code", "quality", "lint",
+                      "refactor", "readab", "maintainab", "solid",
+                      "coverage", "ci", "type safe", "static analysis"],
     },
     {
         "key": "breadth",
         "name": "Breadth",
-        "category": "Engineering",
         "description": "Works across many domains and technologies",
         "keywords": ["breadth", "polyglot", "full-stack", "fullstack",
                       "generalist", "versatil", "diverse", "multiple lang",
                       "cross-functional", "many project", "wide range"],
     },
+    {
+        "key": "creativity",
+        "name": "Creativity",
+        "description": "Innovative thinker, experiments with novel approaches",
+        "keywords": ["creativ", "innovat", "experiment", "novel", "unconventional",
+                      "unique approach", "hack", "prototype", "side project",
+                      "fun", "playful", "humor", "joke", "wit"],
+    },
+    {
+        "key": "communication",
+        "name": "Communication",
+        "description": "Clear, thorough communicator in docs, PRs, and issues",
+        "keywords": ["document", "explain", "comment", "readme", "tutorial",
+                      "write-up", "blog", "article", "rfc", "proposal",
+                      "description", "thorough", "detailed", "clear"],
+    },
+    {
+        "key": "open_source",
+        "name": "Open Source",
+        "description": "Active contributor to open source community",
+        "keywords": ["open source", "oss", "contributor", "maintain",
+                      "community", "foss", "upstream", "patch",
+                      "pull request", "public repo", "license"],
+    },
 ]
 
-# Default score for traits with zero evidence (avoids empty-looking charts)
-_DEFAULT_SCORE = 2.0
+TRAIT_ORDER = [t["key"] for t in TRAIT_DEFINITIONS]
+
+# Point budget: total across all 8 axes should sum to this
+_POINT_BUDGET = 50.0
+# Min score per trait (avoids empty-looking charts)
+_MIN_SCORE = 2.0
 # Maximum possible score
 _MAX_SCORE = 10.0
 
 
-def _score_trait(
+def _raw_score_trait(
     trait: dict[str, str | list[str]],
     all_text: str,
     entry_texts: list[str],
-) -> tuple[float, str]:
-    """Score a single trait on 0-10 by counting keyword matches in evidence.
-
-    Returns (score, description) where description summarizes the evidence found.
-    """
+) -> float:
+    """Compute a raw (unnormalized) score for a single trait."""
     keywords: list[str] = trait["keywords"]  # type: ignore[assignment]
     all_text_lower = all_text.lower()
 
-    # Count how many unique keywords match anywhere in the corpus
     matched_keywords: list[str] = []
     for kw in keywords:
         if kw.lower() in all_text_lower:
             matched_keywords.append(kw)
 
-    # Count how many individual entries mention at least one keyword
     entry_hits = 0
     for text in entry_texts:
         text_lower = text.lower()
@@ -396,29 +346,21 @@ def _score_trait(
             entry_hits += 1
 
     if not matched_keywords:
-        return _DEFAULT_SCORE, str(trait["description"])
+        return 0.0
 
-    # Score formula: base + keyword breadth + entry depth (capped at 10)
-    # - Base: 3 (we found something)
-    # - Keyword breadth: up to 4 points (more distinct keywords = broader evidence)
-    # - Entry depth: up to 3 points (more entries mentioning this = stronger signal)
+    # keyword breadth (0-4) + entry depth (0-3) + base (3)
     keyword_score = min(len(matched_keywords) / max(len(keywords) * 0.3, 1), 1.0) * 4.0
     depth_score = min(entry_hits / 5.0, 1.0) * 3.0
-    score = 3.0 + keyword_score + depth_score
-    score = round(min(score, _MAX_SCORE), 1)
-
-    return score, str(trait["description"])
+    return 3.0 + keyword_score + depth_score
 
 
 def extract_values_json(reports: list[ExplorerReport]) -> str:
-    """Score standardized developer traits from explorer reports for the radar chart.
+    """Score standardized developer traits with a point-budget constraint.
 
-    Scores every developer on the same 12 fixed traits (personality, coding,
-    engineering) on a 0-10 scale based on keyword evidence in memory entries
-    and findings. Traits without evidence get a low default score (2), not 0.
-    Returns JSON matching the MiniDetail.parse_values() schema.
+    Scores every developer on 8 fixed traits on a 0-10 scale. Total points
+    across all axes are normalized to sum to ~50 (avg 6.25), forcing real
+    trade-offs. Traits without evidence get the minimum score (2).
     """
-    # Build a corpus of searchable text from all reports
     all_entries: list[MemoryEntry] = []
     all_findings: list[str] = []
     for report in reports:
@@ -430,36 +372,251 @@ def extract_values_json(reports: list[ExplorerReport]) -> str:
             if quote_text:
                 all_findings.append(quote_text)
 
-    # Individual text chunks for depth scoring
     entry_texts = [
         f"{e.category} {e.topic} {e.content} {e.evidence_quote}"
         for e in all_entries
     ]
     entry_texts.extend(all_findings)
-
-    # Combined corpus for keyword presence checks
     all_text = " ".join(entry_texts)
 
     if not all_text.strip():
-        # No evidence at all — return defaults
         values = [
             {
                 "name": t["name"],
                 "description": str(t["description"]),
-                "intensity": _DEFAULT_SCORE,
+                "intensity": _POINT_BUDGET / len(TRAIT_DEFINITIONS),
             }
             for t in TRAIT_DEFINITIONS
         ]
         return json.dumps({"engineering_values": values})
 
-    # Score each trait
+    # Raw scores
+    raw_scores = [_raw_score_trait(t, all_text, entry_texts) for t in TRAIT_DEFINITIONS]
+
+    # Normalize: distribute _POINT_BUDGET across traits proportionally,
+    # but ensure each trait gets at least _MIN_SCORE
+    total_raw = sum(raw_scores)
+    if total_raw == 0:
+        normalized = [_POINT_BUDGET / len(TRAIT_DEFINITIONS)] * len(TRAIT_DEFINITIONS)
+    else:
+        # First pass: scale proportionally
+        budget_after_mins = _POINT_BUDGET - (_MIN_SCORE * len(TRAIT_DEFINITIONS))
+        normalized = []
+        for raw in raw_scores:
+            scaled = _MIN_SCORE + (raw / total_raw) * budget_after_mins
+            normalized.append(round(min(scaled, _MAX_SCORE), 1))
+
     values = []
-    for trait in TRAIT_DEFINITIONS:
-        score, description = _score_trait(trait, all_text, entry_texts)
+    for i, trait in enumerate(TRAIT_DEFINITIONS):
         values.append({
             "name": str(trait["name"]),
-            "description": description,
-            "intensity": score,
+            "description": str(trait["description"]),
+            "intensity": normalized[i],
         })
 
     return json.dumps({"engineering_values": values})
+
+
+# ── Metadata extraction: roles, skills, traits ─────────────────────────
+
+# Role keywords mapping
+_ROLE_KEYWORDS: dict[str, list[str]] = {
+    "AI Engineer": ["ai", "machine learning", "ml ", "llm", "deep learning",
+                    "neural", "gpt", "transformer", "pytorch", "tensorflow",
+                    "model", "nlp", "computer vision", "inference"],
+    "Frontend Developer": ["frontend", "react", "vue", "angular", "css",
+                           "html", "ui", "ux", "tailwind", "next.js",
+                           "svelte", "component", "browser"],
+    "Backend Developer": ["backend", "api", "rest", "graphql", "fastapi",
+                          "django", "flask", "express", "server", "database",
+                          "sql", "microservice"],
+    "Full-Stack Developer": ["full-stack", "fullstack", "full stack",
+                             "frontend and backend", "end-to-end"],
+    "Systems Programmer": ["systems", "kernel", "driver", "firmware",
+                           "embedded", "low-level", "assembly", "os ",
+                           "operating system", "rust", "c lang", "bare metal"],
+    "DevOps Engineer": ["devops", "ci/cd", "deploy", "docker", "kubernetes",
+                        "terraform", "aws", "cloud", "infrastructure",
+                        "pipeline", "sre", "reliability"],
+    "Data Scientist": ["data science", "analytics", "pandas", "jupyter",
+                       "statistics", "visualization", "data pipeline",
+                       "etl", "sql", "r lang"],
+    "Mobile Developer": ["mobile", "ios", "android", "swift", "kotlin",
+                         "react native", "flutter", "app store"],
+    "Security Engineer": ["security", "vulnerability", "penetration",
+                          "cryptograph", "auth", "oauth", "encryption"],
+    "Open Source Maintainer": ["maintainer", "open source", "oss", "foss",
+                               "upstream", "community", "contributor"],
+    "Hardware Hacker": ["hardware", "arduino", "raspberry pi", "iot",
+                        "sensor", "circuit", "pcb", "fpga", "3d print"],
+    "Game Developer": ["game", "unity", "unreal", "godot", "opengl",
+                       "vulkan", "shader", "gamedev"],
+}
+
+
+def extract_roles(reports: list[ExplorerReport]) -> str:
+    """Determine primary and secondary developer roles from explorer reports.
+
+    Analyzes expertise and project memory entries to identify roles.
+    Returns JSON: {"primary": "...", "secondary": ["...", "..."]}
+    """
+    relevant_sections = {"expertise", "projects", "workflow", "experiences"}
+    text_chunks: list[str] = []
+
+    for report in reports:
+        for entry in report.memory_entries:
+            cat = _normalize_category(entry.category)
+            if cat in relevant_sections:
+                text_chunks.append(f"{entry.topic} {entry.content} {entry.evidence_quote}")
+        if report.personality_findings:
+            text_chunks.append(report.personality_findings)
+
+    all_text = " ".join(text_chunks).lower()
+
+    if not all_text.strip():
+        return json.dumps({"primary": "Developer", "secondary": []})
+
+    # Score each role by keyword hits
+    role_scores: dict[str, int] = {}
+    for role, keywords in _ROLE_KEYWORDS.items():
+        hits = sum(1 for kw in keywords if kw.lower() in all_text)
+        if hits > 0:
+            role_scores[role] = hits
+
+    if not role_scores:
+        return json.dumps({"primary": "Developer", "secondary": []})
+
+    ranked = sorted(role_scores.items(), key=lambda x: x[1], reverse=True)
+    primary = ranked[0][0]
+    secondary = [r[0] for r in ranked[1:4] if r[1] >= 2]  # Top 2-3 with min 2 hits
+
+    return json.dumps({"primary": primary, "secondary": secondary})
+
+
+# Common technology names to look for in evidence
+_KNOWN_TECHNOLOGIES = [
+    # Languages
+    "Python", "TypeScript", "JavaScript", "Rust", "Go", "Java", "C++", "C#",
+    "Ruby", "PHP", "Swift", "Kotlin", "Scala", "Elixir", "Haskell", "Lua",
+    "Zig", "Nim", "OCaml", "Clojure", "R",
+    # Frontend
+    "React", "Vue", "Angular", "Svelte", "Next.js", "Nuxt", "Tailwind",
+    "HTMX", "Astro",
+    # Backend
+    "FastAPI", "Django", "Flask", "Express", "Spring", "Rails", "Laravel",
+    "Actix", "Axum", "Gin", "Echo", "Phoenix",
+    # Data / ML
+    "PyTorch", "TensorFlow", "Pandas", "NumPy", "scikit-learn", "Jupyter",
+    "Hugging Face", "LangChain",
+    # Databases
+    "PostgreSQL", "MySQL", "SQLite", "MongoDB", "Redis", "DynamoDB",
+    "Elasticsearch", "Neo4j", "Cassandra",
+    # DevOps / Infra
+    "Docker", "Kubernetes", "Terraform", "AWS", "GCP", "Azure", "Vercel",
+    "Cloudflare", "Nginx", "GitHub Actions", "Jenkins",
+    # Tools
+    "Git", "Vim", "Neovim", "VS Code", "Emacs", "tmux", "Nix", "mise",
+    "GraphQL", "gRPC", "Kafka", "RabbitMQ",
+]
+
+
+def extract_skills(reports: list[ExplorerReport]) -> str:
+    """Extract specific technology skills from explorer reports.
+
+    Returns JSON array of up to 15 technology names found in evidence.
+    """
+    text_chunks: list[str] = []
+    for report in reports:
+        for entry in report.memory_entries:
+            text_chunks.append(f"{entry.topic} {entry.content} {entry.evidence_quote}")
+        if report.personality_findings:
+            text_chunks.append(report.personality_findings)
+
+    all_text = " ".join(text_chunks)
+    all_text_lower = all_text.lower()
+
+    # Match technologies (case-insensitive)
+    found: list[tuple[str, int]] = []
+    for tech in _KNOWN_TECHNOLOGIES:
+        count = all_text_lower.count(tech.lower())
+        if count > 0:
+            found.append((tech, count))
+
+    # Sort by frequency, take top 15
+    found.sort(key=lambda x: x[1], reverse=True)
+    skills = [tech for tech, _ in found[:15]]
+
+    return json.dumps(skills)
+
+
+# Trait patterns to match against personality/communication evidence
+_TRAIT_PATTERNS: dict[str, list[str]] = {
+    "Casual communicator": ["casual", "informal", "lol", "haha", "emoji",
+                            "conversational", "relaxed"],
+    "Blunt reviewer": ["blunt", "direct", "harsh", "critical", "nack",
+                       "reject", "no-nonsense", "straightforward"],
+    "AI-forward": ["ai", "llm", "gpt", "copilot", "machine learning",
+                   "automat", "claude", "chatgpt"],
+    "Humor in reviews": ["humor", "funny", "joke", "wit", "sarcas",
+                         "playful", "lightheart", "lol"],
+    "Prefers simplicity": ["simple", "minimal", "kiss", "less is more",
+                           "straightforward", "clean", "elegant"],
+    "Thorough documenter": ["document", "readme", "tutorial", "explain",
+                            "write-up", "blog", "rfc", "thorough"],
+    "Strong opinions": ["opinionat", "strong opinion", "disagree",
+                        "pushback", "prefer", "always use", "never use"],
+    "Mentor figure": ["mentor", "teach", "guide", "onboard", "help",
+                      "newcomer", "beginner", "patient"],
+    "Performance-focused": ["performance", "optimi", "fast", "benchmark",
+                            "latency", "throughput", "efficient", "speed"],
+    "Detail-oriented": ["detail", "careful", "thorough", "meticulous",
+                        "precise", "correct", "edge case", "corner case"],
+    "Open source advocate": ["open source", "oss", "community", "foss",
+                             "upstream", "contributor", "public"],
+    "Perfectionist": ["perfect", "polish", "refactor", "clean code",
+                      "best practice", "standard", "proper"],
+    "Rapid prototyper": ["prototype", "hack", "mvp", "quick", "ship",
+                         "iterate", "experiment", "try"],
+    "Team player": ["team", "collaborat", "pair", "together", "we ",
+                    "group", "collective"],
+}
+
+
+def extract_traits(reports: list[ExplorerReport]) -> str:
+    """Extract personality/behavioral traits from explorer reports.
+
+    Focuses on voice_patterns, communication_style, and personality entries.
+    Returns JSON array of up to 8 trait labels.
+    """
+    relevant_sections = {"voice_patterns", "communication_style", "values",
+                         "opinions", "decision_patterns"}
+    text_chunks: list[str] = []
+
+    for report in reports:
+        for entry in report.memory_entries:
+            cat = _normalize_category(entry.category)
+            if cat in relevant_sections:
+                text_chunks.append(f"{entry.topic} {entry.content} {entry.evidence_quote}")
+        if report.personality_findings:
+            text_chunks.append(report.personality_findings)
+        for q in report.behavioral_quotes:
+            quote_text = q.get("quote", "")
+            if quote_text:
+                text_chunks.append(quote_text)
+
+    all_text = " ".join(text_chunks).lower()
+
+    if not all_text.strip():
+        return json.dumps([])
+
+    # Score each trait pattern
+    trait_scores: dict[str, int] = {}
+    for trait_label, keywords in _TRAIT_PATTERNS.items():
+        hits = sum(1 for kw in keywords if kw.lower() in all_text)
+        if hits >= 2:  # Require at least 2 keyword matches
+            trait_scores[trait_label] = hits
+
+    ranked = sorted(trait_scores.items(), key=lambda x: x[1], reverse=True)
+    traits = [label for label, _ in ranked[:8]]
+
+    return json.dumps(traits)

@@ -19,11 +19,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { ChatMessageBubble } from "@/components/chat-message";
-import {
-  PersonalityRadar,
-  PersonalityBars,
-  TraitGroups,
-} from "@/components/personality-radar";
+import { PersonalityRadar } from "@/components/personality-radar";
 import {
   getMini,
   deleteMini,
@@ -418,11 +414,28 @@ export default function MiniProfilePage() {
               <h1 className="truncate text-lg font-semibold">
                 {mini.display_name || mini.username}
               </h1>
-              <p className="font-mono text-sm text-muted-foreground">
-                @{mini.username}
-              </p>
+              {mini.roles?.primary ? (
+                <p className="text-sm text-muted-foreground">
+                  {mini.roles.primary}
+                </p>
+              ) : (
+                <p className="font-mono text-sm text-muted-foreground">
+                  @{mini.username}
+                </p>
+              )}
             </div>
           </div>
+
+          {/* Secondary roles */}
+          {mini.roles?.secondary && mini.roles.secondary.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {mini.roles.secondary.map((role) => (
+                <Badge key={role} variant="secondary" className="text-[11px]">
+                  {role}
+                </Badge>
+              ))}
+            </div>
+          )}
 
           {/* Bio */}
           {mini.bio && (
@@ -433,22 +446,63 @@ export default function MiniProfilePage() {
 
           {/* Source badges */}
           {parseSourcesUsed(mini.sources_used).length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {parseSourcesUsed(mini.sources_used).map((source) => (
+                <Badge key={source} variant="outline" className="gap-1 text-xs">
+                  {source === "github" ? (
+                    <Github className="h-3 w-3" />
+                  ) : source === "claude_code" ? (
+                    <MessageSquare className="h-3 w-3" />
+                  ) : null}
+                  {source === "github" ? "GitHub" : source === "claude_code" ? "Claude Code" : source}
+                </Badge>
+              ))}
+            </div>
+          )}
+
+          <Separator />
+
+          {/* Skills */}
+          {mini.skills && mini.skills.length > 0 && (
             <div className="space-y-2">
               <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Sources
+                Skills
               </h2>
               <div className="flex flex-wrap gap-1.5">
-                {parseSourcesUsed(mini.sources_used).map((source) => (
-                  <Badge key={source} variant="outline" className="gap-1 text-xs">
-                    {source === "github" ? (
-                      <Github className="h-3 w-3" />
-                    ) : source === "claude_code" ? (
-                      <MessageSquare className="h-3 w-3" />
-                    ) : null}
-                    {source === "github" ? "GitHub" : source === "claude_code" ? "Claude Code" : source}
+                {mini.skills.map((skill) => (
+                  <Badge key={skill} variant="default" className="text-[11px]">
+                    {skill}
                   </Badge>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Traits */}
+          {mini.traits && mini.traits.length > 0 && (
+            <div className="space-y-2">
+              <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Traits
+              </h2>
+              <div className="flex flex-wrap gap-1.5">
+                {mini.traits.map((trait) => (
+                  <Badge key={trait} variant="outline" className="text-[11px]">
+                    {trait}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Separator />
+
+          {/* Radar chart */}
+          {mini.values && mini.values.length >= 3 && (
+            <div>
+              <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Developer Profile
+              </h2>
+              <PersonalityRadar values={mini.values} />
             </div>
           )}
 
@@ -468,33 +522,8 @@ export default function MiniProfilePage() {
             </Link>
           )}
 
-          <Separator />
-
-          {/* Personality */}
-          {mini.values && mini.values.length > 0 && (
-            <>
-              <div>
-                <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Developer Profile
-                </h2>
-                {mini.values.length >= 3 ? (
-                  <PersonalityRadar values={mini.values} />
-                ) : (
-                  <PersonalityBars values={mini.values} />
-                )}
-              </div>
-
-              <div>
-                <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Traits
-                </h2>
-                <TraitGroups values={mini.values} />
-              </div>
-            </>
-          )}
-
           {mini.spirit_content && (
-            <div className="mt-4">
+            <div>
               <button
                 type="button"
                 onClick={() => setSpiritOpen(!spiritOpen)}

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-secret-change-in-production"
 
     # Production settings
-    cors_origins: str = "http://localhost:3000"  # comma-separated origins
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"  # comma-separated origins
     debug: bool = True
     log_level: str = "INFO"
     port: int = 8000

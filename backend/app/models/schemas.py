@@ -53,9 +53,15 @@ class MiniDetail(BaseModel):
     memory_content: str | None = None
     system_prompt: str | None
     values_json: str | None = None
+    roles_json: str | None = None
+    skills_json: str | None = None
+    traits_json: str | None = None
     metadata_json: str | None = None
     sources_used: str | None = None
     values: list[MiniDetailValue] = []
+    roles: dict = {}
+    skills: list[str] = []
+    traits: list[str] = []
     status: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -77,6 +83,21 @@ class MiniDetail(BaseModel):
                     for v in eng_values
                 ]
             except (json.JSONDecodeError, KeyError, TypeError):
+                pass
+        if self.roles_json:
+            try:
+                self.roles = json.loads(self.roles_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if self.skills_json:
+            try:
+                self.skills = json.loads(self.skills_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if self.traits_json:
+            try:
+                self.traits = json.loads(self.traits_json)
+            except (json.JSONDecodeError, TypeError):
                 pass
         return self
 

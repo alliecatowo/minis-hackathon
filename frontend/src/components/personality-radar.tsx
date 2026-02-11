@@ -3,35 +3,31 @@
 import { useState } from "react";
 import type { Value } from "@/lib/api";
 
-// Standardized trait order matching backend TRAIT_DEFINITIONS.
+// Standardized trait order matching backend point-budget radar axes.
 // The radar chart draws traits in this order around the circle.
 const TRAIT_ORDER = [
   "Collaboration",
-  "Mentoring",
   "Directness",
-  "Humor",
-  "Systems",
-  "Web",
-  "DevOps",
-  "AI/ML",
-  "Code Quality",
   "Pragmatism",
-  "Open Source",
+  "Code Quality",
   "Breadth",
+  "Creativity",
+  "Communication",
+  "Open Source",
 ];
 
 // Category grouping for trait display
 const TRAIT_CATEGORIES: Record<string, string[]> = {
-  Personality: ["Collaboration", "Mentoring", "Directness", "Humor"],
-  Coding: ["Systems", "Web", "DevOps", "AI/ML"],
-  Engineering: ["Code Quality", "Pragmatism", "Open Source", "Breadth"],
+  Personality: ["Collaboration", "Directness", "Communication"],
+  Engineering: ["Code Quality", "Pragmatism", "Breadth"],
+  Culture: ["Creativity", "Open Source"],
 };
 
 // Category colors (oklch values for consistency with design system)
 const CATEGORY_COLORS: Record<string, string> = {
   Personality: "oklch(0.696 0.17 162.48)",  // teal/green
-  Coding: "oklch(0.646 0.222 264.376)",     // blue/purple
-  Engineering: "oklch(0.705 0.213 47.604)", // orange/amber
+  Engineering: "oklch(0.646 0.222 264.376)", // blue/purple
+  Culture: "oklch(0.705 0.213 47.604)",      // orange/amber
 };
 
 function sortByTraitOrder(values: Value[]): Value[] {
@@ -64,11 +60,11 @@ export function PersonalityRadar({ values }: { values: Value[] }) {
   const n = sorted.length;
   // Fixed max of 10 for standardized traits (0-10 scale)
   const maxIntensity = 10;
-  const size = 260;
+  const size = 230;
   const cx = size / 2;
   const cy = size / 2;
-  const radius = 85;
-  const labelRadius = radius + 30;
+  const radius = 75;
+  const labelRadius = radius + 28;
 
   // Generate points for the polygon
   const points = sorted.map((v, i) => {
@@ -107,7 +103,7 @@ export function PersonalityRadar({ values }: { values: Value[] }) {
 
   return (
     <div className="flex flex-col items-center">
-      <svg viewBox={`0 0 ${size} ${size}`} className="w-full max-w-[260px]">
+      <svg viewBox={`0 0 ${size} ${size}`} className="w-full max-w-[230px]">
         {/* Grid rings */}
         {rings.map((scale) => {
           const ringPoints = sorted

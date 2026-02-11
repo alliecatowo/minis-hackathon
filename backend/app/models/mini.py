@@ -22,6 +22,9 @@ class Mini(Base):
     memory_content: Mapped[str | None] = mapped_column(Text)  # Factual knowledge bank
     system_prompt: Mapped[str | None] = mapped_column(Text)
     values_json: Mapped[str | None] = mapped_column(Text)
+    roles_json: Mapped[str | None] = mapped_column(Text)
+    skills_json: Mapped[str | None] = mapped_column(Text)
+    traits_json: Mapped[str | None] = mapped_column(Text)
     metadata_json: Mapped[str | None] = mapped_column(Text)
     sources_used: Mapped[str | None] = mapped_column(Text)  # JSON list of source names
     evidence_cache: Mapped[str | None] = mapped_column(Text)  # Concatenated evidence for chat tools

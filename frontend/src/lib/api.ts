@@ -19,6 +19,9 @@ export interface Mini {
   values: Value[];
   status: "pending" | "processing" | "ready" | "failed";
   sources_used?: string;
+  roles?: { primary: string; secondary: string[] };
+  skills?: string[];
+  traits?: string[];
 }
 
 export interface ChatMessage {

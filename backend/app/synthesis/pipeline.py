@@ -24,7 +24,13 @@ from app.plugins.registry import registry
 from app.synthesis.chief import run_chief_synthesis
 from app.synthesis.explorers import get_explorer
 from app.synthesis.explorers.base import ExplorerReport
-from app.synthesis.memory_assembler import assemble_memory, extract_values_json
+from app.synthesis.memory_assembler import (
+    assemble_memory,
+    extract_roles,
+    extract_skills,
+    extract_traits,
+    extract_values_json,
+)
 from app.synthesis.spirit import build_system_prompt
 
 # Import explorer modules to trigger registration
@@ -172,6 +178,9 @@ async def run_pipeline(
 
         memory_content = assemble_memory(explorer_reports, username)
         values_json = extract_values_json(explorer_reports)
+        roles_json = extract_roles(explorer_reports)
+        skills_json = extract_skills(explorer_reports)
+        traits_json = extract_traits(explorer_reports)
 
         await emit(PipelineEvent(
             stage="assemble", status="completed",
@@ -232,6 +241,9 @@ async def run_pipeline(
                 mini.memory_content = memory_content
                 mini.system_prompt = system_prompt
                 mini.values_json = values_json
+                mini.roles_json = roles_json
+                mini.skills_json = skills_json
+                mini.traits_json = traits_json
                 mini.metadata_json = json.dumps(all_stats)
                 mini.sources_used = json.dumps(
                     [r.source_name for r in results]
