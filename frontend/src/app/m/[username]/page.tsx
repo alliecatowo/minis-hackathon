@@ -22,6 +22,7 @@ import { ChatMessageBubble } from "@/components/chat-message";
 import {
   PersonalityRadar,
   PersonalityBars,
+  TraitGroups,
 } from "@/components/personality-radar";
 import {
   getMini,
@@ -67,6 +68,9 @@ export default function MiniProfilePage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [pendingToolCalls, setPendingToolCalls] = useState<Array<{ tool: string; args: Record<string, string>; result?: string }>>([]);
+  const pendingToolCallsRef = useRef<Array<{ tool: string; args: Record<string, string>; result?: string }>>([]);
+  const [toolActivity, setToolActivity] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [spiritOpen, setSpiritOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -93,7 +97,7 @@ export default function MiniProfilePage() {
       setInput("");
       setIsStreaming(true);
 
-      const history = [...messages, userMsg];
+      const history = [...messages];
 
       try {
         const res = await fetchChatStream(username, text, history);
@@ -111,7 +115,6 @@ export default function MiniProfilePage() {
         ]);
 
         let buffer = "";
-        let currentEvent = "";
 
         while (true) {
           const { done, value } = await reader.read();
@@ -119,46 +122,114 @@ export default function MiniProfilePage() {
 
           buffer += decoder.decode(value, { stream: true });
 
-          // Parse SSE events from buffer
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
+          // Normalize \r\n to \n (sse_starlette uses \r\n line endings)
+          buffer = buffer.replace(/\r\n/g, "\n");
 
-          for (const rawLine of lines) {
-            const line = rawLine.replace(/\r$/, "");
+          // SSE spec: events are separated by \n\n (blank line)
+          const events = buffer.split("\n\n");
+          buffer = events.pop() || ""; // Last element may be incomplete
 
-            if (line.startsWith("event:")) {
-              currentEvent = line.slice(6).trim();
-              continue;
-            }
+          for (const eventStr of events) {
+            if (!eventStr.trim()) continue;
 
-            if (line === "") {
-              // Empty line resets event type per SSE spec
-              currentEvent = "";
-              continue;
-            }
+            let eventType = "";
+            const dataLines: string[] = [];
 
-            if (line.startsWith("data:")) {
-              const data = line.slice(5);
-              // Trim leading space per SSE spec (single space after "data:")
-              const token = data.startsWith(" ") ? data.slice(1) : data;
-
-              if (currentEvent === "done" || token === "[DONE]") {
-                break;
+            for (const rawLine of eventStr.split("\n")) {
+              const line = rawLine.replace(/\r$/, "");
+              if (line.startsWith("event:")) {
+                eventType = line.slice(6).trim();
+              } else if (line.startsWith("data:")) {
+                const val = line.slice(5);
+                dataLines.push(val.startsWith(" ") ? val.slice(1) : val);
               }
+            }
 
-              if (currentEvent === "chunk" || currentEvent === "") {
-                assistantContent += token;
+            const data = dataLines.join("\n");
+
+            if (eventType === "done" || data === "[DONE]") {
+              break;
+            }
+
+            if (eventType === "tool_call") {
+              try {
+                const toolData = JSON.parse(data);
+                const tc = { tool: toolData.tool, args: toolData.args || {} };
+                pendingToolCallsRef.current = [...pendingToolCallsRef.current, tc];
+                setPendingToolCalls([...pendingToolCallsRef.current]);
+
+                // Set tool activity label directly
+                const labels: Record<string, string> = {
+                  search_memories: "Searching memories...",
+                  search_evidence: "Searching evidence...",
+                  think: "Thinking...",
+                };
+                setToolActivity(labels[tc.tool] || `Using ${tc.tool}...`);
+              } catch { /* ignore parse errors */ }
+              continue;
+            }
+
+            if (eventType === "tool_result") {
+              try {
+                const resultData = JSON.parse(data);
+                const updated = [...pendingToolCallsRef.current];
+                const last = updated.findLast(tc => tc.tool === resultData.tool && !tc.result);
+                if (last) last.result = resultData.summary || resultData.result;
+                pendingToolCallsRef.current = updated;
+                setPendingToolCalls(updated);
+              } catch { /* ignore parse errors */ }
+              continue;
+            }
+
+            if (eventType === "error") {
+              throw new Error(data || "Chat failed");
+            }
+
+            if (eventType === "chunk" || eventType === "") {
+              // Clear tool activity when first chunk arrives
+              setToolActivity(null);
+
+              // On first chunk, attach accumulated tool calls to the message
+              if (assistantContent === "" && pendingToolCallsRef.current.length > 0) {
+                const captured = [...pendingToolCallsRef.current];
                 setMessages((prev) => {
                   const updated = [...prev];
-                  updated[updated.length - 1] = {
-                    role: "assistant",
-                    content: assistantContent,
-                  };
+                  const last = updated[updated.length - 1];
+                  if (last && last.role === "assistant") {
+                    updated[updated.length - 1] = { ...last, toolCalls: captured };
+                  }
                   return updated;
                 });
+                pendingToolCallsRef.current = [];
+                setPendingToolCalls([]);
               }
+
+              assistantContent += data;
+              setMessages((prev) => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                updated[updated.length - 1] = {
+                  ...last,
+                  role: "assistant",
+                  content: assistantContent,
+                };
+                return updated;
+              });
             }
           }
+        }
+
+        // If we have pending tool calls but no content, attach them to the message
+        if (pendingToolCallsRef.current.length > 0) {
+          const captured = [...pendingToolCallsRef.current];
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last && last.role === "assistant") {
+              updated[updated.length - 1] = { ...last, toolCalls: captured };
+            }
+            return updated;
+          });
         }
       } catch {
         setMessages((prev) => [
@@ -171,6 +242,9 @@ export default function MiniProfilePage() {
         ]);
       } finally {
         setIsStreaming(false);
+        setToolActivity(null);
+        pendingToolCallsRef.current = [];
+        setPendingToolCalls([]);
         textareaRef.current?.focus();
       }
     },
@@ -401,7 +475,7 @@ export default function MiniProfilePage() {
             <>
               <div>
                 <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Personality
+                  Developer Profile
                 </h2>
                 {mini.values.length >= 3 ? (
                   <PersonalityRadar values={mini.values} />
@@ -414,18 +488,7 @@ export default function MiniProfilePage() {
                 <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Traits
                 </h2>
-                <div className="flex flex-wrap gap-1.5">
-                  {mini.values.map((v) => (
-                    <Badge
-                      key={v.name}
-                      variant="outline"
-                      className="text-xs"
-                      title={v.description}
-                    >
-                      {v.name}
-                    </Badge>
-                  ))}
-                </div>
+                <TraitGroups values={mini.values} />
               </div>
             </>
           )}
@@ -471,7 +534,7 @@ export default function MiniProfilePage() {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="mx-auto max-w-2xl space-y-4">
+          <div className="mx-auto max-w-3xl space-y-6">
             {messages.length === 0 && (
               <div className="flex min-h-[50vh] flex-col items-center justify-center space-y-6">
                 <div className="text-center">
@@ -517,6 +580,13 @@ export default function MiniProfilePage() {
                   i === messages.length - 1 &&
                   msg.role === "assistant"
                 }
+                toolActivity={
+                  isStreaming &&
+                  i === messages.length - 1 &&
+                  msg.role === "assistant"
+                    ? toolActivity
+                    : undefined
+                }
               />
             ))}
             {isStreaming && messages.length > 0 && messages[messages.length - 1].role === "user" && (
@@ -539,7 +609,7 @@ export default function MiniProfilePage() {
 
         {/* Input */}
         <div className="border-t p-4">
-          <div className="mx-auto flex max-w-2xl items-end gap-2">
+          <div className="mx-auto flex max-w-3xl items-end gap-2">
             <Textarea
               ref={textareaRef}
               value={input}

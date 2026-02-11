@@ -24,6 +24,7 @@ export interface Mini {
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  toolCalls?: Array<{ tool: string; args: Record<string, string>; result?: string }>;
 }
 
 export interface PipelineEvent {

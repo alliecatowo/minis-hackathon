@@ -1,8 +1,8 @@
 """Pipeline orchestration: runs the full ingestion-to-spirit flow with progress events.
 
 The pipeline produces two documents:
-1. Spirit Document — personality engram (style, soul, behavioral patterns)
-2. Memory Document — factual knowledge + opinions + values + tradeoffs
+1. Spirit Document — personality engram (soul document from chief synthesizer)
+2. Memory Document — factual knowledge assembled from explorer reports
 
 Both are stored on the Mini and used together at chat time.
 """
@@ -16,16 +16,24 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.mini import Mini
 from app.models.schemas import PipelineEvent
 from app.plugins.base import IngestionResult
 from app.plugins.registry import registry
-from app.synthesis.memory import build_memory
-from app.synthesis.spirit import build_system_prompt, synthesize_spirit
-from app.synthesis.style import analyze_writing_style
-from app.synthesis.values import extract_values
+from app.synthesis.chief import run_chief_synthesis
+from app.synthesis.explorers import get_explorer
+from app.synthesis.explorers.base import ExplorerReport
+from app.synthesis.memory_assembler import assemble_memory, extract_values_json
+from app.synthesis.spirit import build_system_prompt
+
+# Import explorer modules to trigger registration
+import app.synthesis.explorers.github_explorer  # noqa: F401
+import app.synthesis.explorers.claude_code_explorer  # noqa: F401
+import app.synthesis.explorers.blog_explorer  # noqa: F401
+import app.synthesis.explorers.hackernews_explorer  # noqa: F401
+import app.synthesis.explorers.stackoverflow_explorer  # noqa: F401
+import app.synthesis.explorers.devto_explorer  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -46,17 +54,25 @@ async def run_pipeline(
 ) -> None:
     """Run the full mini creation pipeline.
 
+    Stages:
+    1. FETCH — get data from ingestion sources
+    2. EXPLORE — launch explorer agents per source in parallel
+    3. ASSEMBLE MEMORY — pure-Python memory assembly from reports
+    4. SYNTHESIZE — chief synthesizer crafts soul document
+    5. SAVE — persist to database
+
     Args:
         username: Primary identifier (GitHub username, etc.) to create a mini for.
         session_factory: Async session factory for database access.
         on_progress: Optional async callback for pipeline progress events.
         sources: List of ingestion source names to use. Defaults to ["github"].
+        owner_id: Optional owner ID for user-specific data directories.
     """
     emit = on_progress or _noop_callback
     source_names = sources or ["github"]
 
     try:
-        # Stage 1: Fetch data from all requested sources
+        # ── Stage 1: FETCH ───────────────────────────────────────────────
         await emit(PipelineEvent(
             stage="fetch", status="started",
             message=f"Fetching data from {', '.join(source_names)}...",
@@ -90,60 +106,87 @@ async def run_pipeline(
         if not results:
             raise ValueError(f"No data fetched from any source: {source_names}")
 
-        # Stage 2: Combine evidence from all sources
+        # Cache evidence for chat tools
+        evidence_cache = "\n\n---\n\n".join(r.evidence for r in results if r.evidence)
+
+        # ── Stage 2: EXPLORE ─────────────────────────────────────────────
         await emit(PipelineEvent(
-            stage="format", status="started",
-            message="Combining evidence from all sources...", progress=0.2,
+            stage="explore", status="started",
+            message=f"Launching {len(results)} explorer agent(s)...",
+            progress=0.2,
         ))
 
-        evidence_parts = [r.evidence for r in results if r.evidence]
-        evidence = "\n\n---\n\n".join(evidence_parts)
+        explorer_tasks = []
+        explorer_source_names = []
+
+        for ingestion_result in results:
+            source_name = ingestion_result.source_name
+            try:
+                explorer = get_explorer(source_name)
+            except KeyError:
+                logger.warning(
+                    "No explorer registered for source '%s', skipping exploration",
+                    source_name,
+                )
+                continue
+
+            explorer_tasks.append(
+                explorer.explore(
+                    username,
+                    ingestion_result.evidence,
+                    ingestion_result.raw_data,
+                )
+            )
+            explorer_source_names.append(source_name)
+
+        # Run all explorers in parallel
+        explorer_reports: list[ExplorerReport] = []
+        if explorer_tasks:
+            completed = await asyncio.gather(*explorer_tasks, return_exceptions=True)
+            for i, result_or_exc in enumerate(completed):
+                if isinstance(result_or_exc, Exception):
+                    logger.error(
+                        "Explorer '%s' failed: %s",
+                        explorer_source_names[i],
+                        result_or_exc,
+                    )
+                else:
+                    explorer_reports.append(result_or_exc)
 
         await emit(PipelineEvent(
-            stage="format", status="completed",
-            message=f"Combined {len(evidence)} characters of evidence "
-                    f"from {len(results)} source(s)",
-            progress=0.25,
+            stage="explore", status="completed",
+            message=f"Exploration complete: {len(explorer_reports)} report(s) from "
+                    f"{', '.join(r.source_name for r in explorer_reports)}",
+            progress=0.5,
         ))
 
-        # Stage 3: Parallel analysis — extract values, analyze style, build memory
-        # These three LLM calls are independent and can run concurrently
+        if not explorer_reports:
+            raise ValueError("No explorer reports produced — cannot synthesize")
+
+        # ── Stage 3: ASSEMBLE MEMORY ─────────────────────────────────────
         await emit(PipelineEvent(
-            stage="analyze", status="started",
-            message="Analyzing personality, style, and knowledge (3 parallel flows)...",
-            progress=0.3,
+            stage="assemble", status="started",
+            message="Assembling memory from explorer reports...",
+            progress=0.5,
         ))
 
-        values_task = asyncio.create_task(extract_values(username, evidence))
-        style_task = asyncio.create_task(analyze_writing_style(username, evidence))
-        memory_task = asyncio.create_task(build_memory(username, evidence))
+        memory_content = assemble_memory(explorer_reports, username)
+        values_json = extract_values_json(explorer_reports)
 
-        values = await values_task
         await emit(PipelineEvent(
-            stage="analyze", status="completed",
-            message=f"Extracted {len(values.engineering_values)} engineering values",
-            progress=0.45,
+            stage="assemble", status="completed",
+            message=f"Memory assembled ({len(memory_content)} chars)",
+            progress=0.6,
         ))
 
-        style_data = await style_task
-        await emit(PipelineEvent(
-            stage="analyze", status="completed",
-            message="Writing style analysis complete",
-            progress=0.55,
-        ))
-
-        memory_content = await memory_task
-        await emit(PipelineEvent(
-            stage="analyze", status="completed",
-            message=f"Built knowledge bank ({len(memory_content)} chars)",
-            progress=0.65,
-        ))
-
-        # Stage 4: Synthesize spirit document (uses values + style data)
+        # ── Stage 4: SYNTHESIZE ──────────────────────────────────────────
         await emit(PipelineEvent(
             stage="synthesize", status="started",
-            message="Synthesizing personality document...", progress=0.7,
+            message="Chief synthesizer crafting soul document...",
+            progress=0.6,
         ))
+
+        spirit_content = await run_chief_synthesis(username, explorer_reports)
 
         # Extract profile info from the first source that has it (prefer github)
         display_name = username
@@ -157,21 +200,15 @@ async def run_pipeline(
                 avatar_url = profile.get("avatar_url") or avatar_url
                 break
 
-        technical_profile = getattr(values, 'technical_profile', None)
-        spirit_content = await synthesize_spirit(
-            username, display_name, bio, values,
-            technical_profile=technical_profile,
-            style_data=style_data,
-        )
         system_prompt = build_system_prompt(username, spirit_content, memory_content)
 
         await emit(PipelineEvent(
             stage="synthesize", status="completed",
-            message="Spirit document generated",
-            progress=0.85,
+            message="Soul document generated",
+            progress=0.9,
         ))
 
-        # Stage 5: Save to database
+        # ── Stage 5: SAVE ────────────────────────────────────────────────
         await emit(PipelineEvent(
             stage="save", status="started",
             message="Saving mini...", progress=0.9,
@@ -194,11 +231,12 @@ async def run_pipeline(
                 mini.spirit_content = spirit_content
                 mini.memory_content = memory_content
                 mini.system_prompt = system_prompt
-                mini.values_json = values.model_dump_json()
+                mini.values_json = values_json
                 mini.metadata_json = json.dumps(all_stats)
                 mini.sources_used = json.dumps(
                     [r.source_name for r in results]
                 )
+                mini.evidence_cache = evidence_cache
                 mini.status = "ready"
 
         await emit(PipelineEvent(

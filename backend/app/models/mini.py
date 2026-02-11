@@ -24,6 +24,7 @@ class Mini(Base):
     values_json: Mapped[str | None] = mapped_column(Text)
     metadata_json: Mapped[str | None] = mapped_column(Text)
     sources_used: Mapped[str | None] = mapped_column(Text)  # JSON list of source names
+    evidence_cache: Mapped[str | None] = mapped_column(Text)  # Concatenated evidence for chat tools
 
     status: Mapped[str] = mapped_column(String(20), default="pending")
     created_at: Mapped[datetime.datetime] = mapped_column(

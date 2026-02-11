@@ -31,14 +31,18 @@ class GitHubSource(IngestionSource):
                 "profile": github_data.profile,
                 "repos_summary": {
                     "languages": _aggregate_languages(github_data),
+                    "primary_languages": _aggregate_primary_languages(github_data),
                     "repo_count": len(github_data.repos),
                     "top_repos": [
                         {
                             "name": r.get("name"),
+                            "full_name": r.get("full_name"),
                             "description": r.get("description"),
                             "language": r.get("language"),
+                            "stargazers_count": r.get("stargazers_count", 0),
+                            "topics": r.get("topics", []),
                         }
-                        for r in github_data.repos[:10]
+                        for r in github_data.repos
                     ],
                 },
             },
@@ -61,3 +65,13 @@ def _aggregate_languages(github_data: GitHubData) -> dict[str, int]:
             totals[lang] = totals.get(lang, 0) + byte_count
     # Sort by bytes descending
     return dict(sorted(totals.items(), key=lambda x: x[1], reverse=True))
+
+
+def _aggregate_primary_languages(github_data: GitHubData) -> dict[str, int]:
+    """Count repos by their primary language across ALL repos."""
+    counts: dict[str, int] = {}
+    for repo in github_data.repos:
+        lang = repo.get("language")
+        if lang:
+            counts[lang] = counts.get(lang, 0) + 1
+    return dict(sorted(counts.items(), key=lambda x: x[1], reverse=True))

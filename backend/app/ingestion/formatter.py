@@ -134,7 +134,7 @@ def _format_profile(profile: dict) -> str:
 
 def _format_repos(repos: list[dict]) -> str:
     lines = ["## Top Repositories"]
-    for repo in repos[:30]:
+    for repo in repos[:15]:
         name = repo.get("full_name", repo.get("name", "unknown"))
         desc = repo.get("description") or "No description"
         lang = repo.get("language") or "Unknown"
@@ -142,6 +142,20 @@ def _format_repos(repos: list[dict]) -> str:
         topics = repo.get("topics") or []
         topic_str = f" [{', '.join(topics)}]" if topics else ""
         lines.append(f"- **{name}** ({lang}, {stars} stars): {desc}{topic_str}")
+
+    # Complete catalog of remaining repos
+    remaining = repos[15:]
+    if remaining:
+        lines.append("")
+        lines.append(f"## Complete Repository Catalog ({len(repos)} total)")
+        for repo in remaining:
+            name = repo.get("name", "unknown")
+            lang = repo.get("language") or "?"
+            stars = repo.get("stargazers_count", 0)
+            desc = repo.get("description") or ""
+            desc_str = f": {desc[:80]}" if desc else ""
+            lines.append(f"- {name} ({lang}, {stars}★){desc_str}")
+
     return "\n".join(lines)
 
 
@@ -151,12 +165,13 @@ def _format_language_profile(
     """Build a technical profile from language usage and repository topics."""
     lines = ["## Technical Profile"]
 
-    # Aggregate languages by repo count and identify primary language per repo
-    lang_repo_count: dict[str, int] = {}
+    # Aggregate languages by repo count and track which repos use each language
+    lang_repos: dict[str, list[str]] = {}
     lang_primary_count: dict[str, int] = {}
 
     for repo in repos:
         repo_name = repo.get("full_name") or repo.get("name", "")
+        short_name = repo.get("name") or repo_name
         primary_lang = repo.get("language")
         if primary_lang:
             lang_primary_count[primary_lang] = lang_primary_count.get(primary_lang, 0) + 1
@@ -164,19 +179,22 @@ def _format_language_profile(
         # Use per-repo language data if available, else fall back to primary language
         if repo_name in repo_languages:
             for lang in repo_languages[repo_name]:
-                lang_repo_count[lang] = lang_repo_count.get(lang, 0) + 1
+                lang_repos.setdefault(lang, []).append(short_name)
         elif primary_lang:
-            lang_repo_count[primary_lang] = lang_repo_count.get(primary_lang, 0) + 1
+            lang_repos.setdefault(primary_lang, []).append(short_name)
 
-    if lang_repo_count:
+    if lang_repos:
         lines.append("\n### Languages (by repository count)")
-        sorted_langs = sorted(lang_repo_count.items(), key=lambda x: x[1], reverse=True)
-        for lang, count in sorted_langs:
+        sorted_langs = sorted(lang_repos.items(), key=lambda x: len(x[1]), reverse=True)
+        for lang, repo_names in sorted_langs:
+            count = len(repo_names)
             primary = lang_primary_count.get(lang, 0)
-            if primary > 0:
-                lines.append(f"- {lang}: {count} repos (primary in {primary})")
-            else:
-                lines.append(f"- {lang}: {count} repos")
+            # Show which repos use this language
+            repo_list = ", ".join(repo_names[:8])
+            if len(repo_names) > 8:
+                repo_list += f", +{len(repo_names) - 8} more"
+            suffix = f" (primary in {primary})" if primary > 0 else ""
+            lines.append(f"- {lang}: {count} repos{suffix} — {repo_list}")
 
     # Aggregate topics across all repos
     all_topics: dict[str, int] = {}

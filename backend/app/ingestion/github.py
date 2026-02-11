@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -50,6 +51,43 @@ async def _get(client: httpx.AsyncClient, url: str, params: dict | None = None) 
     return resp.json()
 
 
+async def _get_paginated(
+    client: httpx.AsyncClient, url: str, params: dict | None = None, max_pages: int = 3
+) -> list[dict]:
+    """Fetch paginated results, following Link headers up to max_pages."""
+    all_items: list[dict] = []
+    params = dict(params or {})
+    params.setdefault("per_page", "100")
+
+    for _ in range(max_pages):
+        resp = await client.get(url, params=params)
+        if resp.status_code == 403 and "rate limit" in resp.text.lower():
+            logger.warning("GitHub rate limit hit for %s", url)
+            break
+        if resp.status_code == 422:
+            logger.warning("GitHub 422 for %s: %s", url, resp.text[:200])
+            break
+        resp.raise_for_status()
+
+        items = resp.json()
+        if not isinstance(items, list):
+            break
+        all_items.extend(items)
+
+        # Check for next page via Link header
+        link_header = resp.headers.get("Link", "")
+        if 'rel="next"' not in link_header:
+            break
+        # Extract next URL
+        next_match = re.search(r'<([^>]+)>;\s*rel="next"', link_header)
+        if not next_match:
+            break
+        url = next_match.group(1)
+        params = {}  # URL already contains params
+
+    return all_items
+
+
 async def fetch_github_data(username: str) -> GitHubData:
     """Fetch all available GitHub activity for a user."""
     data = GitHubData()
@@ -62,17 +100,18 @@ async def fetch_github_data(username: str) -> GitHubData:
         if profile:
             data.profile = profile
 
-        # 2. Repos (top 30 by recent push, with topics)
-        repos = await _get(
+        # 2. Repos — fetch ALL (paginated, up to 300)
+        repos = await _get_paginated(
             client,
             f"/users/{username}/repos",
-            params={"sort": "pushed", "per_page": "30", "type": "owner"},
+            params={"sort": "pushed", "per_page": "100", "type": "owner"},
+            max_pages=3,
         )
         if repos:
             data.repos = repos
 
-            # 2b. Per-repo language breakdown for top 10 repos
-            for repo in repos[:10]:
+            # 2b. Per-repo language breakdown for top 15 repos
+            for repo in repos[:15]:
                 repo_name = repo.get("full_name") or repo.get("name", "")
                 if not repo_name:
                     continue
