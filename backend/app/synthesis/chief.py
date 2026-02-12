@@ -93,6 +93,29 @@ def _format_reports_for_prompt(reports: list[ExplorerReport]) -> str:
         parts.append(f"## Explorer Report: {report.source_name}")
         parts.append(f"**Confidence**: {report.confidence_summary}")
         parts.append("")
+
+        # Knowledge Graph
+        if report.knowledge_graph and (
+            report.knowledge_graph.nodes or report.knowledge_graph.edges
+        ):
+            parts.append("### The Brain (Knowledge Graph)")
+            for node in report.knowledge_graph.nodes:
+                parts.append(f"- NODE: {node.name} ({node.type}) [Depth: {node.depth}]")
+            for edge in report.knowledge_graph.edges:
+                parts.append(
+                    f"- EDGE: {edge.source} --{edge.relation}--> {edge.target}"
+                )
+            parts.append("")
+
+        # Principles
+        if report.principles and report.principles.principles:
+            parts.append("### The Soul (Principles)")
+            for p in report.principles.principles:
+                parts.append(
+                    f"- RULE: When '{p.trigger}' -> Action '{p.action}' (Value: {p.value})"
+                )
+            parts.append("")
+
         if report.personality_findings:
             parts.append("### Personality Findings")
             parts.append(report.personality_findings)

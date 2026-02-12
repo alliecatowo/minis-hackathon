@@ -10,6 +10,15 @@ from pydantic import BaseModel, Field
 
 from app.core.agent import AgentTool, run_agent
 from app.core.llm import llm_completion
+from app.models.knowledge import (
+    KnowledgeEdge,
+    KnowledgeGraph,
+    KnowledgeNode,
+    NodeType,
+    Principle,
+    PrinciplesMatrix,
+    RelationType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +47,8 @@ class ExplorerReport(BaseModel):
     # Each dict has keys: context, quote, signal_type
     context_evidence: dict[str, list[str]] = Field(default_factory=dict)
     confidence_summary: str = ""
+    knowledge_graph: KnowledgeGraph = Field(default_factory=KnowledgeGraph)
+    principles: PrinciplesMatrix = Field(default_factory=PrinciplesMatrix)
 
 
 # --- Explorer ABC ---
@@ -72,6 +83,8 @@ class Explorer(ABC):
         findings: list[str] = []
         quotes: list[dict] = []
         context_evidence: dict[str, list[str]] = {}
+        knowledge_graph = KnowledgeGraph()
+        principles_matrix = PrinciplesMatrix()
         finished = False
 
         # --- Tool handlers ---
@@ -98,9 +111,7 @@ class Explorer(ABC):
             findings.append(finding)
             return "Finding saved."
 
-        async def save_quote(
-            context: str, quote: str, signal_type: str
-        ) -> str:
+        async def save_quote(context: str, quote: str, signal_type: str) -> str:
             quotes.append(
                 {"context": context, "quote": quote, "signal_type": signal_type}
             )
@@ -120,6 +131,68 @@ class Explorer(ABC):
         async def save_context_evidence(context_key: str, quote: str) -> str:
             context_evidence.setdefault(context_key, []).append(quote)
             return f"Evidence saved for context: {context_key}"
+
+        async def save_knowledge_node(
+            name: str,
+            type: str,
+            depth: float,
+            confidence: float,
+            evidence: str = "",
+        ) -> str:
+            node_id = name.lower().replace(" ", "-")
+            node = KnowledgeNode(
+                id=node_id,
+                name=name,
+                type=NodeType(type),
+                depth=depth,
+                confidence=confidence,
+                evidence=[evidence] if evidence else [],
+            )
+            # Upsert logic (simple append for now, can be sophisticated later)
+            existing = next((n for n in knowledge_graph.nodes if n.id == node_id), None)
+            if existing:
+                existing.depth = max(existing.depth, depth)
+                existing.confidence = max(existing.confidence, confidence)
+                if evidence:
+                    existing.evidence.append(evidence)
+                return f"Updated knowledge node: {name}"
+            else:
+                knowledge_graph.nodes.append(node)
+                return f"Created knowledge node: {name}"
+
+        async def save_knowledge_edge(
+            source: str,
+            target: str,
+            relation: str,
+            weight: float = 1.0,
+            evidence: str = "",
+        ) -> str:
+            edge = KnowledgeEdge(
+                source=source.lower().replace(" ", "-"),
+                target=target.lower().replace(" ", "-"),
+                relation=RelationType(relation),
+                weight=weight,
+                evidence=[evidence] if evidence else [],
+            )
+            knowledge_graph.edges.append(edge)
+            return f"Created edge: {source} -> {target}"
+
+        async def save_principle(
+            trigger: str,
+            action: str,
+            value: str,
+            intensity: float,
+            evidence: str = "",
+        ) -> str:
+            principle = Principle(
+                trigger=trigger,
+                action=action,
+                value=value,
+                intensity=intensity,
+                evidence=[evidence] if evidence else [],
+            )
+            principles_matrix.principles.append(principle)
+            return f"Saved principle: {trigger} -> {action}"
 
         async def finish(summary: str = "") -> str:
             nonlocal finished
@@ -237,6 +310,101 @@ class Explorer(ABC):
                 handler=save_context_evidence,
             ),
             AgentTool(
+                name="save_knowledge_node",
+                description="Save a node in the Knowledge Graph (e.g., a skill, project, or pattern).",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Name of the entity (e.g. 'React', 'Clean Code')",
+                        },
+                        "type": {
+                            "type": "string",
+                            "enum": [t.value for t in NodeType],
+                            "description": "Type of node",
+                        },
+                        "depth": {
+                            "type": "number",
+                            "description": "Expertise depth (0.0-1.0)",
+                        },
+                        "confidence": {
+                            "type": "number",
+                            "description": "Confidence level (0.0-1.0)",
+                        },
+                        "evidence": {
+                            "type": "string",
+                            "description": "Supporting evidence (file path, diff, etc.)",
+                        },
+                    },
+                    "required": ["name", "type", "depth", "confidence"],
+                },
+                handler=save_knowledge_node,
+            ),
+            AgentTool(
+                name="save_knowledge_edge",
+                description="Save a relationship between two Knowledge Nodes.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "source": {
+                            "type": "string",
+                            "description": "Name of the source node",
+                        },
+                        "target": {
+                            "type": "string",
+                            "description": "Name of the target node",
+                        },
+                        "relation": {
+                            "type": "string",
+                            "enum": [r.value for r in RelationType],
+                            "description": "Type of relationship",
+                        },
+                        "weight": {
+                            "type": "number",
+                            "description": "Strength of relationship (0.0-1.0)",
+                        },
+                        "evidence": {
+                            "type": "string",
+                            "description": "Supporting evidence",
+                        },
+                    },
+                    "required": ["source", "target", "relation"],
+                },
+                handler=save_knowledge_edge,
+            ),
+            AgentTool(
+                name="save_principle",
+                description="Save a guiding principle or decision rule (The Soul).",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "trigger": {
+                            "type": "string",
+                            "description": "Situation that triggers the rule",
+                        },
+                        "action": {
+                            "type": "string",
+                            "description": "Action taken in response",
+                        },
+                        "value": {
+                            "type": "string",
+                            "description": "Underlying value",
+                        },
+                        "intensity": {
+                            "type": "number",
+                            "description": "Strength of the principle (0.0-1.0)",
+                        },
+                        "evidence": {
+                            "type": "string",
+                            "description": "Supporting evidence",
+                        },
+                    },
+                    "required": ["trigger", "action", "value", "intensity"],
+                },
+                handler=save_principle,
+            ),
+            AgentTool(
                 name="finish",
                 description="Signal that exploration is complete. Call this when you have thoroughly analyzed all evidence.",
                 parameters={
@@ -272,7 +440,7 @@ class Explorer(ABC):
             system_prompt=self.system_prompt(),
             user_prompt=self.user_prompt(username, evidence, raw_data),
             tools=tools,
-            max_turns=25,
+            max_turns=40,
         )
 
         logger.info(
@@ -315,4 +483,6 @@ class Explorer(ABC):
             behavioral_quotes=quotes,
             context_evidence=context_evidence,
             confidence_summary=f"Completed in {result.turns_used} turns with {len(memories)} memories extracted.",
+            knowledge_graph=knowledge_graph,
+            principles=principles_matrix,
         )

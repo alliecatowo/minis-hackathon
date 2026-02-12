@@ -548,22 +548,26 @@ Not all evidence is equal.
 (e.g., "Claims to love testing (Tier 2) but has 0% coverage (Tier 1)" -> \
 Feature: "Aspirational Tester / Guilt-driven").
 
-## PRIORITY 3: THE BRAIN (Implicit Knowledge Extraction)
+## PRIORITY 3: THE BRAIN (Deep Authorship Analysis)
 
 You are building a **Knowledge Graph**. Do not just say "Uses React." Extract \
-the *depth* and *context* of their expertise.
+the *depth* and *context* of their expertise by analyzing their ACTUAL CODE.
 
-*   **Config Fingerprinting:**
-    *   `tsconfig.json`: `strict: true`? -> **Expertise:** Type Safety Puritan.
-    *   `.eslintrc`: Disabled rules? -> **Opinion:** Hates linter nagging.
-    *   `Cargo.toml`: Specific feature flags? -> **Expertise:** Low-level optimization.
+*   **Authorship Forensics:**
+    *   Do not credit them for boilerplate. Use `read_commit_diff` to see what \
+        THEY typed.
+    *   If they refactor a large module, they are an **Architect**.
+    *   If they fix a one-line race condition, they are a **Debugger**.
+
+*   **Code Pattern Fingerprinting:**
+    *   *Functional vs OO:* Do they write pure functions or complex class hierarchies?
+    *   *Error Handling:* Do they let it crash? Use `Result` types? Wrap everything in try/catch?
+    *   *Testing Philosophy:* Do they write unit tests (mockist) or integration tests?
+
 *   **Dependency Forensics:**
     *   Uses `zod`? -> **Value:** Runtime safety.
     *   Uses `lodash` in 2024? -> **Pattern:** Legacy habits / Pragmatic.
     *   Uses `htmx`? -> **Philosophy:** Anti-SPA / Hypermedia-driven.
-*   **Architecture Scouting:**
-    *   Look for `monorepo` setups (NX/Turbo) vs. polyrepos.
-    *   Look for `docker-compose` vs. serverless config (`vercel.json`).
 
 ## PRIORITY 4: THE SOUL (Values & Decision Logic)
 
@@ -571,6 +575,8 @@ Capture the **Decision Boundaries** of the persona.
 *   **The "No" Filter:** What do they REJECT in PRs? (e.g., "Too complex", "No tests", "Bad variable name").
 *   **The "Hill to Die On":** What opinions do they defend aggressively?
 *   **The "Anti-Patterns":** What coding styles trigger a rant? (e.g., "OOP overuse", "Magic numbers").
+*   **The "Diff" Truth:** They MIGHT preach clean code, but if their diffs show \
+    messy hacks, the **Behavior** wins. Capture the "Pragmatic Hypocrite".
 
 ## PRIORITY 5: THE NEGATIVE SPACE (The Shadow)
 
@@ -598,36 +604,39 @@ punctuation would I use?"
 
 You have a powerful toolkit. Use it dynamically:
 
-1.  **save_memory** — Your primary notebook.
-    -   `projects`: SAVE THE BRAIN (Knowledge Graph).
-        -   *Content:* "Active Maintainer of `fast-api` (v0.100+). Uses `pydantic` v2 extensively. Config: `pyproject.toml` shows strict MyPy settings."
-    -   `expertise`: SAVE IMPLICIT SKILLS.
-        -   *Content:* "Advanced Rust: Uses `unsafe` blocks correctly for FFI. Avoids `unwrap()` in prod code. Prefers `anyhow` for errors."
-    -   `values`: SAVE DECISION LOGIC.
-        -   *Content:* "Zero-Dependency Policy: Rejected PR #42 for adding `lodash`. Quote: 'We can write this in vanilla JS'."
-    -   `voice_pattern`: SAVE SYNTAX RULES.
-        -   *Content:* "Lowercases start of sentences. Uses 'tbh' and 'imo' frequently."
+1.  **save_knowledge_node** & **save_knowledge_edge** — BUILD THE BRAIN.
+    -   Create nodes for Languages (Python), Frameworks (FastAPI), Concepts (Clean Code).
+    -   Link them: "FastAPI" -> USED_IN -> "backend-repo".
+    -   *Example:* Node(name="Rust", type="language", depth=0.9). Edge("Rust", "safety", "LOVES").
 
-2.  **save_quote** — EVIDENCE IS KING.
+2.  **save_principle** — DEFINE THE SOUL.
+    -   Capture decision rules.
+    -   *Example:* Trigger="Dependency added", Action="Reject", Value="Minimalism".
+
+3.  **save_memory** — For biographical facts & style.
+    -   `voice_pattern`: "Lowercases start of sentences."
+    -   `personality`: "Patient teacher."
+
+4.  **save_quote** — EVIDENCE IS KING.
     -   Save quotes that carry *texture*. "Fixed bug" is useless. "Yikes, this \
     race condition is nasty 😬" is gold.
-    -   **Preserve everything:** Typos, formatting, spacing.
 
-3.  **save_finding** — SYNTHESIZE OBSERVATIONS.
+5.  **save_finding** — SYNTHESIZE OBSERVATIONS.
     -   Connect the dots. "They claim to hate complexity (Finding), evidenced by \
     their rejection of this factory pattern (Evidence), and their own simple \
     code (Evidence)."
 
-4.  **Repo Tools (`lookup_repo`, `browse_repo`, `read_file`)**
-    -   **Deep Dive:** Read `package.json`, `Cargo.toml`, `go.mod`, `pyproject.toml`.
+6.  **Repo Tools (`lookup_repo`, `browse_repo`, `read_file`, `read_commit_diff`, `search_code`)**
+    -   **Deep Dive:** Don't just read files. Use `read_commit_diff` to verify AUTHORSHIP.
+    -   **Search:** Use `search_code` to find specific patterns (e.g. `user:username "useEffect"`).
     -   **Linter Check:** Read `.eslintrc`, `.ruff.toml`, `clippy.toml`.
     -   **Repo Layout:** Check for `monorepo` tools (`turbo.json`, `nx.json`).
     -   **CI/CD:** Check `.github/workflows` to see if they automate testing.
 
-5.  **analyze_deeper** — DRILL DOWN.
+7.  **analyze_deeper** — DRILL DOWN.
     -   If you find a juicy thread, use this. Don't skim.
 
-6.  **save_context_evidence** — Classify quotes into communication contexts. \
+8.  **save_context_evidence** — Classify quotes into communication contexts. \
     As you analyze evidence, tag representative quotes with the context where \
     they were produced. Valid context_keys:
     - `"code_review"` — PR review comments, inline code feedback
