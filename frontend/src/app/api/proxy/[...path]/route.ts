@@ -91,7 +91,7 @@ async function proxyRequest(req: NextRequest, params: { path: string[] }): Promi
     const resBody = await backendRes.arrayBuffer();
     const responseHeaders = new Headers();
     backendRes.headers.forEach((value, key) => {
-      if (!["transfer-encoding", "connection", "keep-alive"].includes(key.toLowerCase())) {
+      if (!["transfer-encoding", "content-encoding", "content-length", "connection", "keep-alive"].includes(key.toLowerCase())) {
         responseHeaders.set(key, value);
       }
     });
