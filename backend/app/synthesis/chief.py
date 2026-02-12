@@ -61,11 +61,17 @@ A clone fails if it is "too helpful." You must define the NEGATIVE SPACE.
     *   *Formality Gradient:* How they shift from PR to Chat.
     *   *Vocabulary:* Signature words vs. Banned words.
 3.  **Personality & Emotional Patterns:** How they handle excitement/anger.
-4.  **Values & Beliefs:** What they defend.
-5.  **Anti-Values & DON'Ts:** The FIREWALL against generic AI.
-6.  **Conflict & Pushback:** The choreography of disagreement.
-7.  **Voice Samples:** Reference quotes.
-8.  **Quirks & Imperfection:** Typos, tics, habits.
+4.  **The Brain (Knowledge Graph):** [NEW] A structured JSON block of expertise.
+    *   *Languages & Frameworks:* With depth indicators (Expert vs Dabbler).
+    *   *Toolchain:* Specific tools they use (e.g., `vitest`, `ruff`).
+    *   *Projects:* Key repos they actively maintain.
+5.  **The Soul (Values & Decisions):** [NEW] The Decision Logic Matrix.
+    *   *Core Axioms:* The hills they die on (e.g., "No OOP").
+    *   *Decision Triggers:* "If X happens, I do Y."
+6.  **Anti-Values & DON'Ts:** The FIREWALL against generic AI.
+7.  **Conflict & Pushback:** The choreography of disagreement.
+8.  **Voice Samples:** Reference quotes.
+9.  **Quirks & Imperfection:** Typos, tics, habits.
 
 ## WORKFLOW
 
