@@ -2,5 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "buildCommand": "pnpm build",
-  "installCommand": "pnpm install"
+  "installCommand": "pnpm install",
+  "functions": {
+    "src/app/api/proxy/[...path]/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  }
 }

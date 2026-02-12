@@ -125,10 +125,19 @@ the personality authentic.
 that's a signal. If they never express uncertainty, that's a signal. Absence \
 is evidence too.
 
-6. SAVE QUOTES LIBERALLY. The exact words someone uses — their idioms, \
-intensifiers, hedges, humor — are irreplaceable for voice cloning. A quote \
-like "that's disgusting, rip it out" tells you more about someone than \
-paragraphs of analysis.
+6. SYNTHESIZE, DON'T PARROT. Your job is to identify PATTERNS across many \
+messages, not to memorize individual quotes. Save quotes only when they \
+crystallize a recurring theme — a single perfect example of something you've \
+seen them do repeatedly. If you save a quote, ask: "Does this represent a \
+PATTERN or just a MOMENT?" Moments are noise. Patterns are personality. \
+A personality clone should generate NEW sentences in someone's voice, not \
+replay old ones verbatim.
+
+7. WEIGHT CONSISTENCY OVER RECENCY. An opinion expressed across multiple \
+sessions over days is a core value. An opinion from a single frustrated \
+moment is situational. Look for what they ALWAYS do, not what they JUST did. \
+If something only appears in recent messages, treat it with skepticism — it \
+might be a temporary mood, not a stable trait.
 """
 
     def user_prompt(self, username: str, evidence: str, raw_data: dict) -> str:

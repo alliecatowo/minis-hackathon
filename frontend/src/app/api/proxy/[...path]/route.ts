@@ -2,6 +2,10 @@ import { type NextRequest, NextResponse } from "next/server";
 import { SignJWT } from "jose";
 import { getToken } from "next-auth/jwt";
 
+// Allow large file uploads (100MB) and longer execution time through the proxy
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 const SERVICE_JWT_SECRET = process.env.SERVICE_JWT_SECRET || "dev-service-secret-change-in-production";
 
@@ -88,7 +92,6 @@ async function proxyRequest(req: NextRequest, params: { path: string[] }): Promi
       });
     }
 
-    const resBody = await backendRes.arrayBuffer();
     const responseHeaders = new Headers();
     backendRes.headers.forEach((value, key) => {
       if (!["transfer-encoding", "content-encoding", "content-length", "connection", "keep-alive"].includes(key.toLowerCase())) {
@@ -96,6 +99,12 @@ async function proxyRequest(req: NextRequest, params: { path: string[] }): Promi
       }
     });
 
+    // 204 No Content has no body — don't try to read one
+    if (backendRes.status === 204) {
+      return new NextResponse(null, { status: 204, headers: responseHeaders });
+    }
+
+    const resBody = await backendRes.arrayBuffer();
     return new NextResponse(resBody, {
       status: backendRes.status,
       headers: responseHeaders,

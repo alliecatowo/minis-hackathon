@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     port: int = 8000
 
     # Admin
-    admin_usernames: str = "allie"  # comma-separated
+    admin_usernames: str = "alliecatowo"  # comma-separated
 
     # WebAuthn (passkey support -- future use)
     webauthn_rp_id: str = "localhost"
