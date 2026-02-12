@@ -578,7 +578,7 @@ export default function MiniProfilePage() {
           {/* Enhance with Claude Code CTA */}
           {isOwner && !sources.includes("claude_code") && (
             <Link
-              href={`/create?username=${username}`}
+              href={`/create?username=${username}&regenerate=true`}
               className="flex items-center gap-3 rounded-lg border border-dashed border-border/50 px-4 py-3 text-sm transition-colors hover:border-border hover:bg-secondary/30"
             >
               <MessageSquare className="h-4 w-4 text-muted-foreground" />

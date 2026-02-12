@@ -11,6 +11,7 @@ import { FileUpload } from "@/components/file-upload";
 import {
   createMini,
   createMiniWithExclusions,
+  deleteMini,
   getMiniByUsername,
   getSources,
   subscribePipelineStatus,
@@ -408,12 +409,15 @@ function CreatePageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const username = searchParams.get("username") || "";
+  const regenerate = searchParams.get("regenerate") === "true";
   const { user } = useAuth();
 
   const isOwnMini = user?.github_username === username;
 
   const [sources, setSources] = useState<SourceInfo[]>([]);
-  const [selectedSources, setSelectedSources] = useState<string[]>(["github"]);
+  const [selectedSources, setSelectedSources] = useState<string[]>(
+    regenerate ? ["github", "claude_code"] : ["github"]
+  );
   const [sourceIdentifiers, setSourceIdentifiers] = useState<
     Record<string, string>
   >({});
@@ -457,20 +461,24 @@ function CreatePageInner() {
     try {
       // Check if mini already exists and is ready
       const existing = await getMiniByUsername(username).catch(() => null);
-      if (existing?.status === "ready") {
+      if (existing?.status === "ready" && !regenerate) {
         router.replace(`/m/${username}`);
         return;
       }
 
-      // If not already processing, kick off creation
+      // If regenerating, delete the existing mini first
+      if (existing && regenerate) {
+        await deleteMini(existing.id).catch(() => {});
+      }
+
       // Filter out empty source identifiers
       const filteredIdentifiers = Object.fromEntries(
         Object.entries(sourceIdentifiers).filter(([, v]) => v.trim() !== "")
       );
       const hasIdentifiers = Object.keys(filteredIdentifiers).length > 0;
 
-      let mini = existing;
-      if (!existing || existing.status === "failed") {
+      let mini = regenerate ? null : existing;
+      if (!mini || mini.status === "failed") {
         if (excludedRepos.size > 0) {
           mini = await createMiniWithExclusions(
             username,
@@ -537,6 +545,7 @@ function CreatePageInner() {
   // Auto-start if mini is already processing
   useEffect(() => {
     if (!username) return;
+    if (regenerate) return; // Don't auto-redirect when regenerating
     getMiniByUsername(username)
       .then((existing) => {
         if (existing?.status === "processing") {
@@ -552,7 +561,7 @@ function CreatePageInner() {
       .catch(() => {
         // Mini doesn't exist yet, that's fine
       });
-  }, [username, router, startPipeline]);
+  }, [username, router, startPipeline, regenerate]);
 
   const toggleSource = (id: string) => {
     setSelectedSources((prev) =>
