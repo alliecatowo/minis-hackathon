@@ -9,7 +9,8 @@ const nextConfig: NextConfig = {
     const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
     return [
       {
-        source: "/api/:path*",
+        // Proxy only /api/proxy/* to backend, NOT /api/auth/*
+        source: "/api/proxy/:path*",
         destination: `${backendUrl}/api/:path*`,
       },
     ];
