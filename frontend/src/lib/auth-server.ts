@@ -1,4 +1,6 @@
-import NextAuth from "next-auth";
-import authConfig from "@/lib/auth-config";
+import { createNeonAuth } from '@neondatabase/auth/next/server';
 
-export const { auth, handlers, signIn, signOut } = NextAuth(authConfig);
+export const auth = createNeonAuth({
+  baseUrl: process.env.NEON_AUTH_BASE_URL!,
+  cookies: { secret: process.env.NEON_AUTH_COOKIE_SECRET! },
+});

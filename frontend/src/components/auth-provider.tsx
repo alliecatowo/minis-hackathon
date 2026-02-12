@@ -1,8 +1,13 @@
-"use client";
+'use client';
 
-import { SessionProvider } from "next-auth/react";
-import type { ReactNode } from "react";
+import { authClient } from '@/lib/auth';
+import { NeonAuthUIProvider } from '@neondatabase/auth/react';
+import type { ReactNode } from 'react';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  return <SessionProvider>{children}</SessionProvider>;
+  return (
+    <NeonAuthUIProvider authClient={authClient} social={{ providers: ['github'] }}>
+      {children}
+    </NeonAuthUIProvider>
+  );
 }

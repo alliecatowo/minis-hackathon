@@ -12,8 +12,6 @@ class Settings(BaseSettings):
     Required env vars for production (set as Fly.io secrets):
         GEMINI_API_KEY      - Google Gemini API key (read directly by litellm)
         GITHUB_TOKEN        - GitHub PAT for profile ingestion
-        GITHUB_CLIENT_ID    - GitHub OAuth app client ID
-        GITHUB_CLIENT_SECRET - GitHub OAuth app client secret
         JWT_SECRET          - Secret key for JWT signing (must change from default)
         CORS_ORIGINS        - Comma-separated allowed origins (include Vercel URL)
         DATABASE_URL        - PostgreSQL connection string
@@ -37,9 +35,8 @@ class Settings(BaseSettings):
     # LLM provider (litellm format). GEMINI_API_KEY env var is read by litellm directly.
     default_llm_model: str = "gemini/gemini-2.5-flash"
 
-    # OAuth / Auth
-    github_client_id: str = ""
-    github_client_secret: str = ""
+    # Auth
+    neon_auth_jwks_url: str = ""
     jwt_secret: str = "dev-secret-change-in-production"
     jwt_secret_previous: str = ""  # Previous JWT secret for zero-downtime rotation
     service_jwt_secret: str = "dev-service-secret-change-in-production"  # Shared secret between BFF and backend

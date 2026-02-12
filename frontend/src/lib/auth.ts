@@ -1,7 +1,9 @@
-"use client";
+'use client';
 
-import { useSession, signIn, signOut } from "next-auth/react";
-import { useMemo } from "react";
+import { createAuthClient } from '@neondatabase/auth/next';
+import { useMemo } from 'react';
+
+export const authClient = createAuthClient();
 
 export interface AuthUser {
   id: string;
@@ -19,13 +21,13 @@ export interface AuthContextType {
 }
 
 export function useAuth(): AuthContextType {
-  const { data: session, status } = useSession();
+  const { data: session, isPending } = authClient.useSession();
 
   const user = useMemo<AuthUser | null>(() => {
     if (!session?.user) return null;
     return {
-      id: session.backendUserId ?? "",
-      github_username: session.user.githubUsername ?? session.user.name ?? "",
+      id: session.user.id ?? '',
+      github_username: session.user.name ?? '',
       display_name: session.user.name ?? null,
       avatar_url: session.user.image ?? null,
     };
@@ -33,9 +35,9 @@ export function useAuth(): AuthContextType {
 
   return {
     user,
-    token: null, // Tokens are now server-side only (BFF pattern)
-    loading: status === "loading",
-    login: () => signIn("github"),
-    logout: () => signOut({ callbackUrl: "/" }),
+    token: null,
+    loading: isPending,
+    login: () => authClient.signIn.social({ provider: 'github', callbackURL: '/' }),
+    logout: () => authClient.signOut(),
   };
 }

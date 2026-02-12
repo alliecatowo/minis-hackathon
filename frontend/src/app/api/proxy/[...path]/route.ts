@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { SignJWT } from "jose";
-import { getToken } from "next-auth/jwt";
+import { auth } from "@/lib/auth-server";
 
 // Allow large file uploads (100MB) and longer execution time through the proxy
 export const maxDuration = 60;
@@ -22,18 +22,15 @@ async function createServiceJwt(backendUserId: string): Promise<string> {
 async function proxyRequest(req: NextRequest, params: { path: string[] }): Promise<Response> {
   const path = params.path.join("/");
 
-  // Log to confirm the BFF route is handling requests (not a Vercel edge rewrite)
-  const isSecure = req.url.startsWith("https");
-  const token = await getToken({ req, secret: process.env.AUTH_SECRET!, secureCookie: isSecure }).catch(() => null);
-  console.log(`[proxy] ${req.method} /api/${path} hasAuth=${!!token?.backendUserId}`);
+  const { data: session } = await auth.getSession();
+  const backendUserId = session?.user?.id;
+  console.log(`[proxy] ${req.method} /api/${path} hasAuth=${!!backendUserId}`);
 
   // Debug endpoint
   if (path === "_debug/auth") {
     return NextResponse.json({
-      hasToken: !!token,
-      backendUserId: token?.backendUserId ?? null,
-      hasAuthSecret: !!process.env.AUTH_SECRET,
-      authSecretLen: process.env.AUTH_SECRET?.length ?? 0,
+      hasSession: !!session,
+      backendUserId: backendUserId ?? null,
       hasBackendUrl: !!process.env.BACKEND_URL,
       backendUrl: process.env.BACKEND_URL?.substring(0, 20),
       cookies: req.cookies.getAll().map(c => c.name),
@@ -54,9 +51,9 @@ async function proxyRequest(req: NextRequest, params: { path: string[] }): Promi
     headers.set("content-type", contentType);
   }
 
-  // Add service JWT from the already-fetched Auth.js session token (BFF pattern)
-  if (token?.backendUserId) {
-    const serviceJwt = await createServiceJwt(token.backendUserId as string);
+  // Add service JWT from Neon Auth session (BFF pattern)
+  if (backendUserId) {
+    const serviceJwt = await createServiceJwt(backendUserId);
     headers.set("authorization", `Bearer ${serviceJwt}`);
   }
 
