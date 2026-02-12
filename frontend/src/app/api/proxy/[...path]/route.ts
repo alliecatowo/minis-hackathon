@@ -19,6 +19,49 @@ async function createServiceJwt(backendUserId: string): Promise<string> {
     .sign(secret);
 }
 
+/**
+ * Sync the authenticated user to the backend (idempotent upsert).
+ * Returns true if sync succeeded or was already done, false on failure.
+ */
+async function syncUserToBackend(
+  session: { user: { id: string; name?: string | null; email?: string | null; image?: string | null } },
+): Promise<boolean> {
+  const userId = session.user.id;
+
+  try {
+    const syncRes = await fetch(new URL("/api/auth/sync", BACKEND_URL), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        neon_auth_id: userId,
+        github_username: session.user.name ?? null,
+        display_name: session.user.name ?? null,
+        avatar_url: session.user.image ?? null,
+        email: session.user.email ?? null,
+      }),
+    });
+
+    if (syncRes.ok) {
+      console.log(`[proxy] User synced to backend: ${userId}`);
+      return true;
+    }
+
+    console.error(`[proxy] User sync returned ${syncRes.status}: ${await syncRes.text()}`);
+    return false;
+  } catch (e) {
+    console.error("[proxy] User sync failed:", e);
+    return false;
+  }
+}
+
+/** Append the __minis_synced cookie to a Response so we skip sync on subsequent requests. */
+function setSyncCookie(res: Response, userId: string): void {
+  res.headers.append(
+    "Set-Cookie",
+    `__minis_synced=${userId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`,
+  );
+}
+
 async function proxyRequest(req: NextRequest, params: { path: string[] }): Promise<Response> {
   const path = params.path.join("/");
 
@@ -35,6 +78,18 @@ async function proxyRequest(req: NextRequest, params: { path: string[] }): Promi
       backendUrl: process.env.BACKEND_URL?.substring(0, 20),
       cookies: req.cookies.getAll().map(c => c.name),
     });
+  }
+
+  // Sync authenticated user to backend (idempotent upsert, cookie-cached)
+  let needsSyncCookie = false;
+  if (backendUserId && session?.user) {
+    const wasSyncedBefore = req.cookies.get("__minis_synced")?.value === backendUserId;
+    if (!wasSyncedBefore) {
+      const synced = await syncUserToBackend(session as { user: { id: string; name?: string | null; email?: string | null; image?: string | null } });
+      if (synced) {
+        needsSyncCookie = true;
+      }
+    }
   }
 
   const url = new URL(`/api/${path}`, BACKEND_URL);
@@ -79,7 +134,7 @@ async function proxyRequest(req: NextRequest, params: { path: string[] }): Promi
     // For SSE responses, stream them through
     const resContentType = backendRes.headers.get("content-type") || "";
     if (resContentType.includes("text/event-stream")) {
-      return new Response(backendRes.body, {
+      const sseRes = new Response(backendRes.body, {
         status: backendRes.status,
         headers: {
           "content-type": "text/event-stream",
@@ -87,6 +142,8 @@ async function proxyRequest(req: NextRequest, params: { path: string[] }): Promi
           connection: "keep-alive",
         },
       });
+      if (needsSyncCookie) setSyncCookie(sseRes, backendUserId!);
+      return sseRes;
     }
 
     const responseHeaders = new Headers();
@@ -98,14 +155,18 @@ async function proxyRequest(req: NextRequest, params: { path: string[] }): Promi
 
     // 204 No Content has no body — don't try to read one
     if (backendRes.status === 204) {
-      return new NextResponse(null, { status: 204, headers: responseHeaders });
+      const noContentRes = new NextResponse(null, { status: 204, headers: responseHeaders });
+      if (needsSyncCookie) setSyncCookie(noContentRes, backendUserId!);
+      return noContentRes;
     }
 
     const resBody = await backendRes.arrayBuffer();
-    return new NextResponse(resBody, {
+    const res = new NextResponse(resBody, {
       status: backendRes.status,
       headers: responseHeaders,
     });
+    if (needsSyncCookie) setSyncCookie(res, backendUserId!);
+    return res;
   } catch (err) {
     console.error("Proxy error:", err);
     return NextResponse.json(

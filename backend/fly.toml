@@ -7,7 +7,6 @@ primary_region = "iad"
 [env]
   DEBUG = "false"
   LOG_LEVEL = "INFO"
-  DATABASE_URL = "sqlite+aiosqlite:////data/minis.db"
 
 [[vm]]
   memory = "512mb"
@@ -27,7 +26,3 @@ primary_region = "iad"
     grace_period = "10s"
     method = "GET"
     path = "/api/health"
-
-[mounts]
-  source = "minis_data"
-  destination = "/data"
