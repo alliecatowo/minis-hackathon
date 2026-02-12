@@ -1,12 +1,13 @@
 import datetime
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_current_user
 from app.core.config import settings
+from app.core.encryption import encrypt_value
 from app.core.rate_limit import RATE_LIMITS
 from app.db import get_session
 from app.models.rate_limit import RateLimitEvent
@@ -39,9 +40,9 @@ class SettingsResponse(BaseModel):
 
 
 class UpdateSettingsRequest(BaseModel):
-    llm_api_key: str | None = None
-    llm_provider: str | None = None
-    preferred_model: str | None = None
+    llm_api_key: str | None = Field(default=None, max_length=500)
+    llm_provider: str | None = Field(default=None, max_length=50)
+    preferred_model: str | None = Field(default=None, max_length=255)
 
 
 class UsageResponse(BaseModel):
@@ -92,7 +93,7 @@ async def update_settings(
         session.add(user_settings)
 
     if body.llm_api_key is not None:
-        user_settings.llm_api_key = body.llm_api_key or None
+        user_settings.llm_api_key = encrypt_value(body.llm_api_key) if body.llm_api_key else None
     if body.llm_provider is not None:
         user_settings.llm_provider = body.llm_provider
     if body.preferred_model is not None:

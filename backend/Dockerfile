@@ -14,6 +14,11 @@ RUN uv sync --no-dev --no-install-project
 # Copy application code
 COPY . .
 
+# Create non-root user
+RUN useradd --create-home appuser && \
+    mkdir -p /data && chown appuser:appuser /data
+USER appuser
+
 # Default DATABASE_URL points to the Fly.io persistent volume mount
 ENV DATABASE_URL="sqlite+aiosqlite:////data/minis.db"
 

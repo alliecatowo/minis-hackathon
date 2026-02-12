@@ -5,6 +5,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.core.agent import AgentTool, run_agent_streaming
 from app.core.auth import get_optional_user
+from app.core.encryption import decrypt_value
 from app.core.rate_limit import check_rate_limit
 from app.db import get_session
 from app.models.mini import Mini
@@ -161,7 +162,11 @@ async def chat_with_mini(
         user_settings = result.scalar_one_or_none()
         if user_settings:
             resolved_model = user_settings.preferred_model
-            resolved_api_key = user_settings.llm_api_key
+            if user_settings.llm_api_key:
+                try:
+                    resolved_api_key = decrypt_value(user_settings.llm_api_key)
+                except Exception:
+                    resolved_api_key = None
 
     system_prompt = mini.system_prompt
 

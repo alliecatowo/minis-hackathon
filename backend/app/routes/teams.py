@@ -1,7 +1,7 @@
 import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,18 +15,18 @@ from app.models.user import User
 
 
 class TeamCreateRequest(BaseModel):
-    name: str
-    description: str | None = None
+    name: str = Field(max_length=100)
+    description: str | None = Field(default=None, max_length=500)
 
 
 class TeamUpdateRequest(BaseModel):
-    name: str | None = None
-    description: str | None = None
+    name: str | None = Field(default=None, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
 
 
 class AddMemberRequest(BaseModel):
     mini_id: int
-    role: str = "member"
+    role: str = Field(default="member", max_length=20)
 
 
 # -- Response schemas --

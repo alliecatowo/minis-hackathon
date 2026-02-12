@@ -4,26 +4,35 @@ import datetime
 import json
 from typing import Any
 
-from pydantic import BaseModel, model_validator
+import re
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # -- Request schemas --
 
 class CreateMiniRequest(BaseModel):
-    username: str
+    username: str = Field(max_length=39)
     sources: list[str] = ["github"]  # Ingestion sources to use
     excluded_repos: list[str] = []  # Repo full names to exclude
 
-
-class ChatRequest(BaseModel):
-    message: str
-    history: list[ChatMessage] = []
-    context: str | None = None  # Communication context key (e.g. "code_review")
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        if not re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$', v):
+            raise ValueError("Invalid GitHub username format")
+        return v.strip()
 
 
 class ChatMessage(BaseModel):
-    role: str  # "user" or "assistant"
-    content: str
+    role: str = Field(max_length=20)
+    content: str = Field(max_length=50000)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(max_length=10000)
+    history: list[ChatMessage] = []
+    context: str | None = Field(default=None, max_length=50)
 
 
 # -- Response schemas --

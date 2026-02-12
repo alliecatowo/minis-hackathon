@@ -2,7 +2,7 @@ import datetime
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,26 +17,26 @@ from app.models.user import User
 
 
 class OrgCreateRequest(BaseModel):
-    name: str
-    display_name: str
-    description: str | None = None
-    avatar_url: str | None = None
+    name: str = Field(max_length=50)
+    display_name: str = Field(max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    avatar_url: str | None = Field(default=None, max_length=500)
 
 
 class OrgUpdateRequest(BaseModel):
-    display_name: str | None = None
-    description: str | None = None
-    avatar_url: str | None = None
+    display_name: str | None = Field(default=None, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    avatar_url: str | None = Field(default=None, max_length=500)
 
 
 class InviteCreateRequest(BaseModel):
-    max_uses: int = 0
-    expires_in_hours: int | None = None
+    max_uses: int = Field(default=0, ge=0, le=1000)
+    expires_in_hours: int | None = Field(default=None, ge=1, le=720)
 
 
 class OrgTeamCreateRequest(BaseModel):
-    name: str
-    description: str | None = None
+    name: str = Field(max_length=100)
+    description: str | None = Field(default=None, max_length=500)
 
 
 # -- Response schemas --
