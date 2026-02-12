@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Plus, Github, LogOut, Menu, X } from "lucide-react";
+import { Plus, Github, LogOut, Menu, X, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 
@@ -30,12 +30,28 @@ export function Nav() {
             minis
           </Link>
           <nav className="hidden items-center gap-4 sm:flex">
+            <Link href="/features" className={linkClass("/features")}>
+              Features
+            </Link>
+            <Link href="/pricing" className={linkClass("/pricing")}>
+              Pricing
+            </Link>
             <Link href="/gallery" className={linkClass("/gallery")}>
               Gallery
             </Link>
             {user && (
               <Link href="/teams" className={linkClass("/teams")}>
                 Teams
+              </Link>
+            )}
+            {user && (
+              <Link href="/orgs" className={linkClass("/orgs")}>
+                Orgs
+              </Link>
+            )}
+            {user && (
+              <Link href="/settings" className={linkClass("/settings")}>
+                <Settings className="h-3.5 w-3.5" />
               </Link>
             )}
           </nav>
@@ -79,12 +95,28 @@ export function Nav() {
       {menuOpen && (
         <div className="border-t border-border bg-background p-4 sm:hidden">
           <div className="flex flex-col gap-3">
+            <Link href="/features" className={linkClass("/features")} onClick={() => setMenuOpen(false)}>
+              Features
+            </Link>
+            <Link href="/pricing" className={linkClass("/pricing")} onClick={() => setMenuOpen(false)}>
+              Pricing
+            </Link>
             <Link href="/gallery" className={linkClass("/gallery")} onClick={() => setMenuOpen(false)}>
               Gallery
             </Link>
             {user && (
               <Link href="/teams" className={linkClass("/teams")} onClick={() => setMenuOpen(false)}>
                 Teams
+              </Link>
+            )}
+            {user && (
+              <Link href="/orgs" className={linkClass("/orgs")} onClick={() => setMenuOpen(false)}>
+                Orgs
+              </Link>
+            )}
+            {user && (
+              <Link href="/settings" className={linkClass("/settings")} onClick={() => setMenuOpen(false)}>
+                Settings
               </Link>
             )}
             {loading ? null : user ? (

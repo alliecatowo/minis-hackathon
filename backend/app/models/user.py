@@ -14,6 +14,7 @@ class User(Base):
     github_username: Mapped[str] = mapped_column(String(255), unique=True)
     display_name: Mapped[str | None] = mapped_column(String(255))
     avatar_url: Mapped[str | None] = mapped_column(String(1024))
+    github_access_token: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

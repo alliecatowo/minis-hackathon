@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -10,10 +10,13 @@ class Base(DeclarativeBase):
 
 class Mini(Base):
     __tablename__ = "minis"
+    __table_args__ = (UniqueConstraint("owner_id", "username", name="uq_mini_owner_username"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    username: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    username: Mapped[str] = mapped_column(String(255), index=True)
     owner_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    visibility: Mapped[str] = mapped_column(String(20), default="public")
+    org_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(255))
     avatar_url: Mapped[str | None] = mapped_column(String(1024))
     bio: Mapped[str | None] = mapped_column(Text)

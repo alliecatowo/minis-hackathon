@@ -4,9 +4,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.agent import AgentTool, run_agent_streaming
+from app.core.auth import get_optional_user
+from app.core.rate_limit import check_rate_limit
 from app.db import get_session
 from app.models.mini import Mini
 from app.models.schemas import ChatRequest
+from app.models.user import User
+from app.models.user_settings import UserSettings
 
 router = APIRouter(prefix="/minis", tags=["chat"])
 
@@ -63,7 +67,7 @@ def _build_chat_tools(mini: Mini) -> list[AgentTool]:
         return "\n\n---\n\n".join(unique[:10])
 
     async def think(reasoning: str) -> str:
-        """Internal reasoning step — work through a problem before responding."""
+        """Internal reasoning step -- work through a problem before responding."""
         return "OK"
 
     tools = [
@@ -75,7 +79,7 @@ def _build_chat_tools(mini: Mini) -> list[AgentTool]:
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query — a keyword or topic to search for in memories",
+                        "description": "Search query -- a keyword or topic to search for in memories",
                     },
                 },
                 "required": ["query"],
@@ -90,7 +94,7 @@ def _build_chat_tools(mini: Mini) -> list[AgentTool]:
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query — a keyword or topic to search for in raw evidence",
+                        "description": "Search query -- a keyword or topic to search for in raw evidence",
                     },
                 },
                 "required": ["query"],
@@ -117,24 +121,69 @@ def _build_chat_tools(mini: Mini) -> list[AgentTool]:
     return tools
 
 
-@router.post("/{username}/chat")
+@router.post("/{mini_id}/chat")
 async def chat_with_mini(
-    username: str,
+    mini_id: int,
     body: ChatRequest,
     session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(get_optional_user),
 ):
     """Send a message and get a streaming SSE response from the mini using agentic chat."""
     result = await session.execute(
-        select(Mini).where(Mini.username == username.lower())
+        select(Mini).where(Mini.id == mini_id)
     )
     mini = result.scalar_one_or_none()
 
     if not mini:
         raise HTTPException(status_code=404, detail="Mini not found")
+
+    # Visibility check: private minis are owner-only
+    if mini.visibility == "private":
+        if user is None or user.id != mini.owner_id:
+            raise HTTPException(status_code=404, detail="Mini not found")
+
     if mini.status != "ready":
         raise HTTPException(status_code=409, detail=f"Mini is not ready (status: {mini.status})")
     if not mini.system_prompt:
         raise HTTPException(status_code=500, detail="Mini has no system prompt")
+
+    # Rate limit check (only for authenticated users)
+    if user is not None:
+        await check_rate_limit(user.id, "chat_message", session)
+
+    # Resolve model and API key from user settings
+    resolved_model: str | None = None
+    resolved_api_key: str | None = None
+    if user is not None:
+        result = await session.execute(
+            select(UserSettings).where(UserSettings.user_id == user.id)
+        )
+        user_settings = result.scalar_one_or_none()
+        if user_settings:
+            resolved_model = user_settings.preferred_model
+            resolved_api_key = user_settings.llm_api_key
+
+    system_prompt = mini.system_prompt
+
+    # Apply context-specific voice modulation if requested
+    if body.context:
+        from app.models.context import CommunicationContext
+        from app.synthesis.spirit import build_contextual_system_prompt
+
+        ctx_result = await session.execute(
+            select(CommunicationContext).where(
+                CommunicationContext.mini_id == mini_id,
+                CommunicationContext.context_key == body.context,
+            )
+        )
+        ctx = ctx_result.scalar_one_or_none()
+        if ctx:
+            system_prompt = build_contextual_system_prompt(
+                mini.username,
+                mini.spirit_content or "",
+                mini.memory_content or "",
+                ctx.voice_modulation,
+            )
 
     tools = _build_chat_tools(mini)
 
@@ -145,11 +194,13 @@ async def chat_with_mini(
 
     async def event_generator():
         async for event in run_agent_streaming(
-            system_prompt=mini.system_prompt,
+            system_prompt=system_prompt,
             user_prompt=body.message,
             tools=tools,
             history=history,
             max_turns=15,
+            model=resolved_model,
+            api_key=resolved_api_key,
         ):
             yield {"event": event.type, "data": event.data}
 

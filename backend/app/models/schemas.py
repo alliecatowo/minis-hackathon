@@ -12,11 +12,13 @@ from pydantic import BaseModel, model_validator
 class CreateMiniRequest(BaseModel):
     username: str
     sources: list[str] = ["github"]  # Ingestion sources to use
+    excluded_repos: list[str] = []  # Repo full names to exclude
 
 
 class ChatRequest(BaseModel):
     message: str
     history: list[ChatMessage] = []
+    context: str | None = None  # Communication context key (e.g. "code_review")
 
 
 class ChatMessage(BaseModel):
@@ -31,6 +33,8 @@ class MiniSummary(BaseModel):
     username: str
     display_name: str | None
     avatar_url: str | None
+    owner_id: int | None = None
+    visibility: str = "public"
     status: str
     created_at: datetime.datetime
 
@@ -48,6 +52,9 @@ class MiniDetail(BaseModel):
     username: str
     display_name: str | None
     avatar_url: str | None
+    owner_id: int | None = None
+    visibility: str = "public"
+    org_id: int | None = None
     bio: str | None
     spirit_content: str | None
     memory_content: str | None = None

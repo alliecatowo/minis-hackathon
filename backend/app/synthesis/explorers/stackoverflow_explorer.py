@@ -49,6 +49,11 @@ personality signals. You have access to the following tools:
 - analyze_deeper: Make a secondary LLM call to analyze a subset of answers
   in more depth. Use this when you notice a pattern worth investigating.
 
+- save_context_evidence: Classify quotes into communication contexts. \
+  Stack Overflow answers are the "technical_discussion" context — save \
+  representative quotes using context_key "technical_discussion" to capture \
+  how they sound when explaining technical concepts. Save at least 3-5 quotes.
+
 - finish: Call when you have thoroughly analyzed all evidence.
 
 IMPORTANT ANALYSIS GUIDELINES:

@@ -102,6 +102,10 @@ as if describing a person to someone who will roleplay as them.
 argumentative style. The context should be the blog post title or topic.
 - **analyze_deeper**: If you spot recurring themes or an interesting \
 tension across posts, use this to dig deeper.
+- **save_context_evidence**: Classify quotes into communication contexts. \
+Blog posts are the "public_writing" context — save representative quotes \
+using context_key "public_writing" to capture how they sound in published \
+long-form writing. Save at least 3-5 quotes this way.
 - **finish**: Call when you've thoroughly analyzed all evidence.
 
 ## Critical Instructions

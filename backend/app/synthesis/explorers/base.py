@@ -36,6 +36,7 @@ class ExplorerReport(BaseModel):
     memory_entries: list[MemoryEntry] = Field(default_factory=list)
     behavioral_quotes: list[dict] = Field(default_factory=list)
     # Each dict has keys: context, quote, signal_type
+    context_evidence: dict[str, list[str]] = Field(default_factory=dict)
     confidence_summary: str = ""
 
 
@@ -70,6 +71,7 @@ class Explorer(ABC):
         memories: list[MemoryEntry] = []
         findings: list[str] = []
         quotes: list[dict] = []
+        context_evidence: dict[str, list[str]] = {}
         finished = False
 
         # --- Tool handlers ---
@@ -114,6 +116,10 @@ class Explorer(ABC):
                 system="You are an expert at analyzing developer behavior from code artifacts.",
             )
             return result
+
+        async def save_context_evidence(context_key: str, quote: str) -> str:
+            context_evidence.setdefault(context_key, []).append(quote)
+            return f"Evidence saved for context: {context_key}"
 
         async def finish(summary: str = "") -> str:
             nonlocal finished
@@ -212,6 +218,25 @@ class Explorer(ABC):
                 handler=analyze_deeper,
             ),
             AgentTool(
+                name="save_context_evidence",
+                description="Classify a quote into a communication context. Valid context_keys: code_review, documentation, casual_chat, technical_discussion, agent_chat, public_writing",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "context_key": {
+                            "type": "string",
+                            "description": "The communication context: code_review, documentation, casual_chat, technical_discussion, agent_chat, public_writing",
+                        },
+                        "quote": {
+                            "type": "string",
+                            "description": "The exact quote from this communication context",
+                        },
+                    },
+                    "required": ["context_key", "quote"],
+                },
+                handler=save_context_evidence,
+            ),
+            AgentTool(
                 name="finish",
                 description="Signal that exploration is complete. Call this when you have thoroughly analyzed all evidence.",
                 parameters={
@@ -288,5 +313,6 @@ class Explorer(ABC):
             personality_findings="\n\n".join(findings),
             memory_entries=memories,
             behavioral_quotes=quotes,
+            context_evidence=context_evidence,
             confidence_summary=f"Completed in {result.turns_used} turns with {len(memories)} memories extracted.",
         )

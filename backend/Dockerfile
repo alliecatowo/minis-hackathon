@@ -14,7 +14,10 @@ RUN uv sync --no-dev --no-install-project
 # Copy application code
 COPY . .
 
+# Default DATABASE_URL points to the Fly.io persistent volume mount
+ENV DATABASE_URL="sqlite+aiosqlite:////data/minis.db"
+
 # Expose port (overridden by $PORT at runtime)
 EXPOSE 8000
 
-CMD uv run uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

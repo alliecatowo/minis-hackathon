@@ -22,6 +22,14 @@ app.add_typer(db_app, name="db")
 console = Console()
 
 
+def _auth_headers() -> dict[str, str]:
+    """Get auth headers from MINIS_TOKEN env var."""
+    token = os.environ.get("MINIS_TOKEN", "")
+    if not token:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
+
+
 @app.command("list")
 def list_minis():
     """List all minis in a table."""
@@ -74,7 +82,7 @@ def list_minis():
 def get_mini(username: str):
     """Show mini details as pretty JSON."""
     try:
-        resp = httpx.get(f"{API_BASE}/minis/{username}", timeout=10)
+        resp = httpx.get(f"{API_BASE}/minis/by-username/{username}", timeout=10)
         resp.raise_for_status()
     except httpx.ConnectError:
         console.print("[red]Cannot connect to API. Is the backend running?[/red]")
@@ -100,6 +108,7 @@ def create_mini(
         resp = httpx.post(
             f"{API_BASE}/minis",
             json={"username": username, "sources": sources},
+            headers=_auth_headers(),
             timeout=30,
         )
         resp.raise_for_status()
@@ -116,7 +125,7 @@ def create_mini(
     while True:
         time.sleep(3)
         try:
-            poll = httpx.get(f"{API_BASE}/minis/{username}", timeout=10)
+            poll = httpx.get(f"{API_BASE}/minis/by-username/{username}", timeout=10)
             poll.raise_for_status()
         except httpx.HTTPError:
             console.print(".", end="")
@@ -173,7 +182,7 @@ def chat_with_mini(username: str):
     """Interactive terminal chat with a mini via SSE streaming."""
     # Verify mini exists and is ready
     try:
-        resp = httpx.get(f"{API_BASE}/minis/{username}", timeout=10)
+        resp = httpx.get(f"{API_BASE}/minis/by-username/{username}", timeout=10)
         resp.raise_for_status()
     except httpx.ConnectError:
         console.print("[red]Cannot connect to API. Is the backend running?[/red]")
@@ -190,6 +199,7 @@ def chat_with_mini(username: str):
         console.print(f"[red]Mini '{username}' is not ready (status: {data.get('status')}).[/red]")
         raise typer.Exit(1)
 
+    mini_id = data["id"]
     display = data.get("display_name") or username
     console.print(f"[bold cyan]Chatting with {display}[/bold cyan]")
     console.print("[dim]Type 'quit' or 'exit' to end the conversation.[/dim]\n")
@@ -216,7 +226,7 @@ def chat_with_mini(username: str):
         try:
             with httpx.stream(
                 "POST",
-                f"{API_BASE}/minis/{username}/chat",
+                f"{API_BASE}/minis/{mini_id}/chat",
                 json={"message": message, "history": history},
                 timeout=httpx.Timeout(connect=10, read=120, write=10, pool=10),
             ) as stream:

@@ -90,6 +90,10 @@ become part of the personality profile.
 the context of what was happening when they said it.
 - **analyze_deeper**: If you spot an interesting pattern, use this to dig \
 deeper into a subset of the evidence.
+- **save_context_evidence**: Classify quotes into communication contexts. \
+Claude Code conversations are the "agent_chat" context — save representative \
+quotes using context_key "agent_chat" to capture how they talk to AI coding \
+assistants. Save at least 3-5 quotes this way.
 - **finish**: Call when you've thoroughly analyzed all evidence.
 
 ## Critical Instructions

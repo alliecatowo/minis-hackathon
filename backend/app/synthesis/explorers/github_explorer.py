@@ -622,7 +622,16 @@ code files. Use after lookup_repo to dig deeper.
 7. **read_file** — Read actual source code files to understand coding style, \
 technical choices, and project architecture.
 
-8. **finish** — Call this when you've thoroughly analyzed all evidence.
+8. **save_context_evidence** — Classify quotes into communication contexts. \
+As you analyze evidence, tag representative quotes with the context where \
+they were produced. Valid context_keys:
+   - `"code_review"` — PR review comments, inline code feedback
+   - `"documentation"` — PR descriptions, README content, doc comments
+   - `"casual_chat"` — issue discussions, informal exchanges
+   - `"technical_discussion"` — issue threads with code blocks, design debates
+Save at least 2-3 quotes per context that you encounter.
+
+9. **finish** — Call this when you've thoroughly analyzed all evidence.
 
 ## Exploration strategy
 

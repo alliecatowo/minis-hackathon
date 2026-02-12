@@ -51,8 +51,8 @@ export function AddMiniDialog({
       (m.display_name || "").toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleAdd = async (username: string) => {
-    setAdding(username);
+  const handleAdd = async (mini: Mini) => {
+    setAdding(mini.username);
     setError(null);
     const token = localStorage.getItem("minis_token");
     try {
@@ -62,7 +62,7 @@ export function AddMiniDialog({
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ username, role }),
+        body: JSON.stringify({ mini_id: mini.id, role }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: "Failed to add member" }));
@@ -136,7 +136,7 @@ export function AddMiniDialog({
                   key={mini.id}
                   type="button"
                   disabled={adding !== null}
-                  onClick={() => handleAdd(mini.username)}
+                  onClick={() => handleAdd(mini)}
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-secondary/80 disabled:opacity-50"
                 >
                   <Avatar className="h-8 w-8">

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Nav } from "@/components/nav";
+import { Footer } from "@/components/footer";
 import { AuthProvider } from "@/components/auth-provider";
 import "./globals.css";
 
@@ -33,6 +34,7 @@ export default function RootLayout({
         <AuthProvider>
           <Nav />
           <main className="min-h-[calc(100vh-3.5rem)]">{children}</main>
+          <Footer />
         </AuthProvider>
       </body>
     </html>

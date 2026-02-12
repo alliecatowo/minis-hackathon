@@ -1,15 +1,21 @@
-"""Memory assembler — pure Python, no LLM calls.
+"""Memory assembler — deduplicates explorer reports and formats structured markdown.
 
-Takes a list of ExplorerReports, deduplicates memory entries,
-annotates cross-source confirmations, and formats into structured markdown.
+Also provides LLM-based extraction for skills, traits, and roles (with keyword
+fallbacks).
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 
+import litellm
+
+from app.core.config import settings
 from app.synthesis.explorers.base import ExplorerReport, MemoryEntry
+
+logger = logging.getLogger(__name__)
 
 # Canonical section ordering
 SECTIONS = [
@@ -454,8 +460,8 @@ _ROLE_KEYWORDS: dict[str, list[str]] = {
 }
 
 
-def extract_roles(reports: list[ExplorerReport]) -> str:
-    """Determine primary and secondary developer roles from explorer reports.
+def _extract_roles_keyword(reports: list[ExplorerReport]) -> str:
+    """Keyword-based fallback for role extraction.
 
     Analyzes expertise and project memory entries to identify roles.
     Returns JSON: {"primary": "...", "secondary": ["...", "..."]}
@@ -520,8 +526,8 @@ _KNOWN_TECHNOLOGIES = [
 ]
 
 
-def extract_skills(reports: list[ExplorerReport]) -> str:
-    """Extract specific technology skills from explorer reports.
+def _extract_skills_keyword(reports: list[ExplorerReport]) -> str:
+    """Keyword-based fallback for skill extraction.
 
     Returns JSON array of up to 15 technology names found in evidence.
     """
@@ -582,8 +588,8 @@ _TRAIT_PATTERNS: dict[str, list[str]] = {
 }
 
 
-def extract_traits(reports: list[ExplorerReport]) -> str:
-    """Extract personality/behavioral traits from explorer reports.
+def _extract_traits_keyword(reports: list[ExplorerReport]) -> str:
+    """Keyword-based fallback for trait extraction.
 
     Focuses on voice_patterns, communication_style, and personality entries.
     Returns JSON array of up to 8 trait labels.
@@ -620,3 +626,127 @@ def extract_traits(reports: list[ExplorerReport]) -> str:
     traits = [label for label, _ in ranked[:8]]
 
     return json.dumps(traits)
+
+
+# ── LLM-based extraction functions ──────────────────────────────────────
+
+def _combine_report_text(reports: list[ExplorerReport], include_entries: bool = True) -> str:
+    """Build combined text from explorer reports for LLM extraction."""
+    parts: list[str] = []
+    for report in reports:
+        if report.personality_findings:
+            parts.append(report.personality_findings)
+        if include_entries:
+            for entry in report.memory_entries:
+                parts.append(f"{entry.topic}: {entry.content}")
+    return "\n".join(parts)
+
+
+def _parse_llm_json(content: str | None) -> str:
+    """Extract JSON from LLM response, handling markdown code blocks."""
+    content = content or ""
+    if "```" in content:
+        content = content.split("```")[1]
+        if content.startswith("json"):
+            content = content[4:]
+    return content.strip()
+
+
+async def extract_skills_llm(reports: list[ExplorerReport]) -> str:
+    """Use LLM to extract technical skills from explorer reports."""
+    combined_text = _combine_report_text(reports, include_entries=True)
+    if not combined_text.strip():
+        return json.dumps([])
+
+    try:
+        response = await litellm.acompletion(
+            model=settings.default_llm_model,
+            messages=[{
+                "role": "user",
+                "content": f"""Extract technical skills from this developer profile. Return ONLY a JSON array of skill strings.
+
+Rules:
+- Only include skills the developer actively uses (not just mentions)
+- "I migrated away from X" does NOT mean they use X
+- Use proper casing: "Python" not "python", "TypeScript" not "typescript"
+- No single-letter skills unless they're actual languages (e.g., "R", "C")
+- Be specific: "React" not "frontend", "PostgreSQL" not "databases"
+- Max 20 skills, ordered by proficiency/usage
+
+Developer profile:
+{combined_text[:4000]}
+
+Return ONLY a JSON array like: ["Python", "TypeScript", "React", "PostgreSQL"]"""
+            }],
+            temperature=0.1,
+        )
+        content = response.choices[0].message.content
+        return _parse_llm_json(content)
+    except Exception:
+        logger.warning("LLM skill extraction failed, falling back to keyword matching")
+        return _extract_skills_keyword(reports)
+
+
+async def extract_traits_llm(reports: list[ExplorerReport]) -> str:
+    """Use LLM to extract personality traits from explorer reports."""
+    combined_text = _combine_report_text(reports, include_entries=False)
+    if not combined_text.strip():
+        return json.dumps([])
+
+    try:
+        response = await litellm.acompletion(
+            model=settings.default_llm_model,
+            messages=[{
+                "role": "user",
+                "content": f"""Extract personality traits from this developer profile. Return ONLY a JSON array of trait strings.
+
+Rules:
+- Short descriptive phrases (2-4 words each)
+- Focus on engineering personality, not personal life
+- Examples: "detail-oriented", "pragmatic problem solver", "strong opinions loosely held"
+- Max 10 traits
+
+Developer profile:
+{combined_text[:4000]}
+
+Return ONLY a JSON array like: ["pragmatic", "detail-oriented", "collaborative"]"""
+            }],
+            temperature=0.1,
+        )
+        content = response.choices[0].message.content
+        return _parse_llm_json(content)
+    except Exception:
+        logger.warning("LLM trait extraction failed, falling back to keyword matching")
+        return _extract_traits_keyword(reports)
+
+
+async def extract_roles_llm(reports: list[ExplorerReport]) -> str:
+    """Use LLM to extract developer roles from explorer reports."""
+    combined_text = _combine_report_text(reports, include_entries=True)
+    if not combined_text.strip():
+        return json.dumps({"primary": "Software Engineer", "secondary": []})
+
+    try:
+        response = await litellm.acompletion(
+            model=settings.default_llm_model,
+            messages=[{
+                "role": "user",
+                "content": f"""Determine this developer's roles from their profile. Return ONLY a JSON object.
+
+Rules:
+- primary: Their main role (e.g., "Backend Engineer", "Full-Stack Developer", "DevOps Engineer")
+- secondary: Up to 4 secondary roles they also fill
+- Be specific about domain when possible
+
+Developer profile:
+{combined_text[:4000]}
+
+Return ONLY JSON like: {{"primary": "Backend Engineer", "secondary": ["Open Source Maintainer", "Technical Writer"]}}"""
+            }],
+            temperature=0.1,
+        )
+        content = response.choices[0].message.content
+        return _parse_llm_json(content)
+    except Exception:
+        logger.warning("LLM role extraction failed, falling back to keyword matching")
+        return _extract_roles_keyword(reports)

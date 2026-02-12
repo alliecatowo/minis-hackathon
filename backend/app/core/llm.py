@@ -9,7 +9,7 @@ litellm.suppress_debug_info = True
 
 
 async def llm_completion(
-    prompt: str, system: str = "", model: str | None = None
+    prompt: str, system: str = "", model: str | None = None, api_key: str | None = None
 ) -> str:
     """Single-shot LLM completion. Returns the assistant message content."""
     model = model or settings.default_llm_model
@@ -18,12 +18,15 @@ async def llm_completion(
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    response = await litellm.acompletion(model=model, messages=messages)
+    kwargs: dict = {"model": model, "messages": messages}
+    if api_key:
+        kwargs["api_key"] = api_key
+    response = await litellm.acompletion(**kwargs)
     return response.choices[0].message.content
 
 
 async def llm_completion_json(
-    prompt: str, system: str = "", model: str | None = None
+    prompt: str, system: str = "", model: str | None = None, api_key: str | None = None
 ) -> str:
     """LLM completion with JSON response format. Returns raw string (caller parses)."""
     model = model or settings.default_llm_model
@@ -32,23 +35,27 @@ async def llm_completion_json(
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    response = await litellm.acompletion(
-        model=model,
-        messages=messages,
-        response_format={"type": "json_object"},
-    )
+    kwargs: dict = {
+        "model": model,
+        "messages": messages,
+        "response_format": {"type": "json_object"},
+    }
+    if api_key:
+        kwargs["api_key"] = api_key
+    response = await litellm.acompletion(**kwargs)
     return response.choices[0].message.content
 
 
 async def llm_stream(
-    messages: list[dict], model: str | None = None
+    messages: list[dict], model: str | None = None, api_key: str | None = None
 ) -> AsyncGenerator[str, None]:
     """Streaming LLM completion. Yields content deltas as strings."""
     model = model or settings.default_llm_model
 
-    response = await litellm.acompletion(
-        model=model, messages=messages, stream=True
-    )
+    kwargs: dict = {"model": model, "messages": messages, "stream": True}
+    if api_key:
+        kwargs["api_key"] = api_key
+    response = await litellm.acompletion(**kwargs)
     async for chunk in response:
         delta = chunk.choices[0].delta
         if delta.content:

@@ -92,6 +92,7 @@ async def run_agent(
     tools: list[AgentTool],
     max_turns: int = 10,
     model: str | None = None,
+    api_key: str | None = None,
 ) -> AgentResult:
     """Run a ReAct agent loop.
 
@@ -123,6 +124,8 @@ async def run_agent(
                     # Force tool use on first turn, auto thereafter
                     "tool_choice": "required" if turn == 0 else "auto",
                 }
+                if api_key:
+                    kwargs["api_key"] = api_key
                 # Disable thinking for Gemini to prevent multi-turn failures
                 if gemini:
                     kwargs.update(_GEMINI_TOOL_PARAMS)
@@ -159,7 +162,7 @@ async def run_agent(
         if msg is None:
             # All retries exhausted — fall back to no-tools mode
             logger.warning("All retries exhausted on turn %d, falling back", turn)
-            return await _fallback_no_tools(messages, model, tool_outputs, turn + 1)
+            return await _fallback_no_tools(messages, model, tool_outputs, turn + 1, api_key=api_key)
 
         # If no tool calls, agent is done
         if not msg.tool_calls:
@@ -213,6 +216,7 @@ async def _fallback_no_tools(
     model: str,
     tool_outputs: dict[str, list[Any]],
     turns_used: int,
+    api_key: str | None = None,
 ) -> AgentResult:
     """Fallback: retry without tools, asking LLM to output structured JSON."""
     fallback_messages = [m for m in messages if m.get("role") != "tool"]
@@ -241,6 +245,8 @@ async def _fallback_no_tools(
                 "messages": fallback_messages,
                 "response_format": {"type": "json_object"},
             }
+            if api_key:
+                kwargs["api_key"] = api_key
             # Disable thinking for Gemini in fallback too
             if _is_gemini(model):
                 kwargs["thinking"] = {"type": "disabled", "budget_tokens": 0}
@@ -282,6 +288,7 @@ async def run_agent_streaming(
     history: list[dict] | None = None,
     max_turns: int = 5,
     model: str | None = None,
+    api_key: str | None = None,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run a ReAct agent loop with streaming output.
 
@@ -312,6 +319,8 @@ async def run_agent_streaming(
                     "tools": openai_tools,
                     "tool_choice": "auto",
                 }
+                if api_key:
+                    kwargs["api_key"] = api_key
                 if gemini:
                     kwargs.update(_GEMINI_TOOL_PARAMS)
 
@@ -345,6 +354,8 @@ async def run_agent_streaming(
                     "messages": messages,
                     "stream": True,
                 }
+                if api_key:
+                    kwargs["api_key"] = api_key
                 if gemini:
                     kwargs["thinking"] = {"type": "disabled", "budget_tokens": 0}
 
@@ -416,6 +427,8 @@ async def run_agent_streaming(
             "messages": fallback_messages,
             "stream": True,
         }
+        if api_key:
+            kwargs["api_key"] = api_key
         if gemini:
             kwargs["thinking"] = {"type": "disabled", "budget_tokens": 0}
 

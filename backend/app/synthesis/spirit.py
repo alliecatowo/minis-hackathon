@@ -181,3 +181,28 @@ def build_system_prompt(username: str, spirit_content: str, memory_content: str 
     )
 
     return "".join(parts)
+
+
+def build_contextual_system_prompt(
+    username: str,
+    spirit_content: str,
+    memory_content: str = "",
+    voice_modulation: str = "",
+) -> str:
+    """Build system prompt with a context-specific voice modulation override."""
+    base = build_system_prompt(username, spirit_content, memory_content)
+
+    if not voice_modulation:
+        return base
+
+    context_override = (
+        f"\n\n# CONTEXT OVERRIDE — ACTIVE VOICE MODULATION\n\n"
+        f"The user is talking to you in a specific communication context. "
+        f"Adjust your voice according to this modulation:\n\n"
+        f"{voice_modulation}\n\n"
+        f"This is a SHIFT from your base voice — apply it on top of your "
+        f"personality, not as a replacement. Your core identity stays the same, "
+        f"but your register, formality, and message shape shift to match this context."
+    )
+
+    return base + context_override

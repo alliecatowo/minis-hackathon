@@ -198,19 +198,30 @@ def _format_reports_for_prompt(reports: list[ExplorerReport]) -> str:
                 signal = q.get("signal_type", "")
                 parts.append(f'- [{signal}] "{quote}" ({context})')
             parts.append("")
+        if report.context_evidence:
+            parts.append("### Context Evidence")
+            for ctx_key, ctx_quotes in report.context_evidence.items():
+                parts.append(f"**{ctx_key}**:")
+                for q in ctx_quotes[:5]:
+                    parts.append(f"  - {q[:200]}")
+            parts.append("")
         parts.append("---")
         parts.append("")
     return "\n".join(parts)
 
 
 async def run_chief_synthesis(
-    username: str, reports: list[ExplorerReport]
+    username: str,
+    reports: list[ExplorerReport],
+    context_summaries: list[dict] | None = None,
 ) -> str:
     """Run the chief synthesizer agent to produce a soul document.
 
     Args:
         username: The developer's username.
         reports: Explorer reports from all evidence sources.
+        context_summaries: Optional list of context dicts with keys
+            context_key, display_name, voice_modulation.
 
     Returns:
         The complete soul document as a markdown string.
@@ -353,6 +364,13 @@ async def run_chief_synthesis(
         f"Use request_detail if you need to dig deeper into any source's "
         f"findings. Call finish when done."
     )
+
+    if context_summaries:
+        context_block = "\n\n## Communication Context Summaries\n\n"
+        for ctx in context_summaries:
+            context_block += f"### {ctx.get('display_name', ctx.get('context_key', ''))}\n"
+            context_block += f"{ctx.get('voice_modulation', '')}\n\n"
+        user_prompt += context_block
 
     # --- Run agent ---
 

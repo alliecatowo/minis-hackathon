@@ -7,6 +7,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -19,12 +24,15 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { ChatMessageBubble } from "@/components/chat-message";
+import { ContextPicker } from "@/components/context-picker";
 import { PersonalityRadar } from "@/components/personality-radar";
 import {
-  getMini,
+  getMiniByUsername,
+  getMiniContexts,
   deleteMini,
   fetchChatStream,
   type Mini,
+  type MiniContext,
   type ChatMessage,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -48,13 +56,38 @@ function parseSourcesUsed(sourcesUsed?: string): string[] {
   return [];
 }
 
+/** Reusable collapsible sidebar section with chevron trigger */
+function SidebarSection({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="flex w-full items-center gap-2 py-1 text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground">
+        <ChevronRight
+          className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+        />
+        {title}
+      </CollapsibleTrigger>
+      <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up">
+        <div className="pt-3">{children}</div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 export default function MiniProfilePage() {
   const params = useParams();
   const router = useRouter();
   const username = params.username as string;
   const { user } = useAuth();
-
-  const isOwner = user?.github_username === username;
 
   const [mini, setMini] = useState<Mini | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,16 +101,26 @@ export default function MiniProfilePage() {
   const pendingToolCallsRef = useRef<Array<{ tool: string; args: Record<string, string>; result?: string }>>([]);
   const [toolActivity, setToolActivity] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [spiritOpen, setSpiritOpen] = useState(false);
+  const [activeContext, setActiveContext] = useState<string | null>(null);
+  const [contexts, setContexts] = useState<MiniContext[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const isOwner = user?.id != null && user.id === mini?.owner_id;
+
   useEffect(() => {
-    getMini(username)
+    getMiniByUsername(username)
       .then(setMini)
       .catch(() => setError("Could not load this mini."))
       .finally(() => setLoading(false));
   }, [username]);
+
+  // Fetch contexts when mini loads
+  useEffect(() => {
+    if (mini?.id) {
+      getMiniContexts(mini.id).then(setContexts).catch(() => {});
+    }
+  }, [mini?.id]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -96,7 +139,12 @@ export default function MiniProfilePage() {
       const history = [...messages];
 
       try {
-        const res = await fetchChatStream(username, text, history);
+        const res = await fetchChatStream(
+          mini!.id,
+          text,
+          history,
+          activeContext ?? undefined,
+        );
         if (!res.ok) throw new Error("Chat request failed");
         if (!res.body) throw new Error("No response body");
 
@@ -244,7 +292,7 @@ export default function MiniProfilePage() {
         textareaRef.current?.focus();
       }
     },
-    [username, messages, isStreaming]
+    [mini, messages, isStreaming, activeContext]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -263,7 +311,7 @@ export default function MiniProfilePage() {
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      await deleteMini(username);
+      await deleteMini(mini!.id);
       router.push("/gallery");
     } catch {
       setDeleting(false);
@@ -328,6 +376,12 @@ export default function MiniProfilePage() {
     );
   }
 
+  const sources = parseSourcesUsed(mini.sources_used);
+  const hasSkillsOrTraits =
+    (mini.skills && mini.skills.length > 0) ||
+    (mini.traits && mini.traits.length > 0);
+  const hasRadar = mini.values && mini.values.length >= 3;
+
   return (
     <div className="mx-auto flex h-[calc(100vh-3.5rem)] max-w-6xl flex-col lg:flex-row">
       {/* Mobile sidebar toggle */}
@@ -347,7 +401,7 @@ export default function MiniProfilePage() {
           sidebarOpen ? "block" : "hidden"
         } w-full shrink-0 overflow-y-auto border-b p-6 lg:block lg:w-80 lg:border-b-0 lg:border-r`}
       >
-        <div className="space-y-6">
+        <div className="space-y-5">
           {/* Back to gallery */}
           <Link
             href="/gallery"
@@ -402,7 +456,7 @@ export default function MiniProfilePage() {
             </div>
           )}
 
-          {/* Identity */}
+          {/* ---- Section 1: Identity (always visible, NOT collapsible) ---- */}
           <div className="flex items-start gap-4">
             <Avatar className="h-16 w-16 shrink-0">
               <AvatarImage src={mini.avatar_url} alt={mini.username} />
@@ -444,70 +498,129 @@ export default function MiniProfilePage() {
             </p>
           )}
 
-          {/* Source badges */}
-          {parseSourcesUsed(mini.sources_used).length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {parseSourcesUsed(mini.sources_used).map((source) => (
-                <Badge key={source} variant="outline" className="gap-1 text-xs">
-                  {source === "github" ? (
-                    <Github className="h-3 w-3" />
-                  ) : source === "claude_code" ? (
-                    <MessageSquare className="h-3 w-3" />
-                  ) : null}
-                  {source === "github" ? "GitHub" : source === "claude_code" ? "Claude Code" : source}
-                </Badge>
-              ))}
-            </div>
-          )}
-
           <Separator />
 
-          {/* Skills */}
-          {mini.skills && mini.skills.length > 0 && (
-            <div className="space-y-2">
-              <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Skills
-              </h2>
-              <div className="flex flex-wrap gap-1.5">
-                {mini.skills.map((skill) => (
-                  <Badge key={skill} variant="default" className="text-[11px]">
-                    {skill}
-                  </Badge>
-                ))}
-              </div>
-            </div>
+          {/* ---- Section 2: Contexts (collapsible, open by default if contexts exist) ---- */}
+          {contexts.length > 0 && (
+            <>
+              <SidebarSection title="Contexts" defaultOpen>
+                <div className="space-y-2">
+                  {contexts.map((ctx) => (
+                    <button
+                      key={ctx.context_key}
+                      onClick={() =>
+                        setActiveContext(
+                          activeContext === ctx.context_key ? null : ctx.context_key
+                        )
+                      }
+                      className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition-all ${
+                        activeContext === ctx.context_key
+                          ? "border-chart-1/40 bg-chart-1/10 text-foreground"
+                          : "border-border/40 text-muted-foreground hover:border-border hover:text-foreground"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-[13px]">
+                          {ctx.display_name}
+                        </p>
+                        {ctx.description && (
+                          <p className="truncate text-[11px] text-muted-foreground/70">
+                            {ctx.description}
+                          </p>
+                        )}
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className="ml-2 shrink-0 text-[10px] tabular-nums"
+                        style={{
+                          opacity: Math.max(0.4, ctx.confidence),
+                        }}
+                      >
+                        {Math.round(ctx.confidence * 100)}%
+                      </Badge>
+                    </button>
+                  ))}
+                </div>
+              </SidebarSection>
+              <Separator />
+            </>
           )}
 
-          {/* Traits */}
-          {mini.traits && mini.traits.length > 0 && (
-            <div className="space-y-2">
-              <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Traits
-              </h2>
-              <div className="flex flex-wrap gap-1.5">
-                {mini.traits.map((trait) => (
-                  <Badge key={trait} variant="outline" className="text-[11px]">
-                    {trait}
-                  </Badge>
-                ))}
-              </div>
-            </div>
+          {/* ---- Section 3: Skills & Traits (collapsible, collapsed by default) ---- */}
+          {hasSkillsOrTraits && (
+            <>
+              <SidebarSection title="Skills & Traits">
+                <div className="space-y-3">
+                  {mini.skills && mini.skills.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {mini.skills.map((skill) => (
+                        <Badge key={skill} variant="default" className="text-[11px]">
+                          {skill}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  {mini.traits && mini.traits.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {mini.traits.map((trait) => (
+                        <Badge key={trait} variant="outline" className="text-[11px]">
+                          {trait}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </SidebarSection>
+              <Separator />
+            </>
           )}
 
-          <Separator />
+          {/* ---- Section 4: Personality Radar (collapsible, collapsed by default) ---- */}
+          {hasRadar && (
+            <>
+              <SidebarSection title="Personality Radar">
+                <PersonalityRadar values={mini.values} />
+              </SidebarSection>
+              <Separator />
+            </>
+          )}
 
-          {/* Radar chart */}
-          {mini.values && mini.values.length >= 3 && (
-            <div>
-              <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Developer Profile
-              </h2>
-              <PersonalityRadar values={mini.values} />
-            </div>
+          {/* ---- Section 5: Sources (collapsible, collapsed by default) ---- */}
+          {sources.length > 0 && (
+            <>
+              <SidebarSection title="Sources">
+                <div className="flex flex-wrap gap-1.5">
+                  {sources.map((source) => (
+                    <Badge key={source} variant="outline" className="gap-1 text-xs">
+                      {source === "github" ? (
+                        <Github className="h-3 w-3" />
+                      ) : source === "claude_code" ? (
+                        <MessageSquare className="h-3 w-3" />
+                      ) : null}
+                      {source === "github"
+                        ? "GitHub"
+                        : source === "claude_code"
+                          ? "Claude Code"
+                          : source}
+                    </Badge>
+                  ))}
+                </div>
+              </SidebarSection>
+              <Separator />
+            </>
+          )}
+
+          {/* ---- Section 6: Spirit Doc (collapsible, collapsed by default) ---- */}
+          {mini.spirit_content && (
+            <SidebarSection title="Spirit Doc">
+              <div className="rounded-lg bg-secondary/30 p-4 text-sm text-muted-foreground whitespace-pre-wrap max-h-96 overflow-y-auto">
+                {mini.spirit_content}
+              </div>
+            </SidebarSection>
           )}
 
           {/* Enhance with Claude Code CTA */}
-          {isOwner && !parseSourcesUsed(mini.sources_used).includes("claude_code") && (
+          {isOwner && !sources.includes("claude_code") && (
             <Link
               href={`/create?username=${username}`}
               className="flex items-center gap-3 rounded-lg border border-dashed border-border/50 px-4 py-3 text-sm transition-colors hover:border-border hover:bg-secondary/30"
@@ -520,24 +633,6 @@ export default function MiniProfilePage() {
                 </p>
               </div>
             </Link>
-          )}
-
-          {mini.spirit_content && (
-            <div>
-              <button
-                type="button"
-                onClick={() => setSpiritOpen(!spiritOpen)}
-                className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <ChevronRight className={`h-4 w-4 transition-transform ${spiritOpen ? "rotate-90" : ""}`} />
-                About this Mini
-              </button>
-              {spiritOpen && (
-                <div className="mt-3 rounded-lg bg-secondary/30 p-4 text-sm text-muted-foreground whitespace-pre-wrap max-h-96 overflow-y-auto">
-                  {mini.spirit_content}
-                </div>
-              )}
-            </div>
           )}
         </div>
       </aside>
@@ -636,27 +731,41 @@ export default function MiniProfilePage() {
           </div>
         </div>
 
-        {/* Input */}
-        <div className="border-t p-4">
-          <div className="mx-auto flex max-w-3xl items-end gap-2">
-            <Textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={`Message @${mini.username}... (Shift+Enter for newline)`}
-              className="min-h-[44px] max-h-32 resize-none font-mono text-sm"
-              rows={1}
-              disabled={isStreaming}
-            />
-            <Button
-              size="icon"
-              onClick={() => sendMessage(input)}
-              disabled={!input.trim() || isStreaming}
-              className="h-[44px] w-[44px] shrink-0"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
+        {/* Input area with context picker */}
+        <div className="border-t">
+          {/* Context picker bar */}
+          {contexts.length > 0 && (
+            <div className="border-b border-border/40 px-4">
+              <div className="mx-auto max-w-3xl">
+                <ContextPicker
+                  contexts={contexts}
+                  activeContext={activeContext}
+                  onContextChange={setActiveContext}
+                />
+              </div>
+            </div>
+          )}
+          <div className="p-4">
+            <div className="mx-auto flex max-w-3xl items-end gap-2">
+              <Textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={`Message @${mini.username}... (Shift+Enter for newline)`}
+                className="min-h-[44px] max-h-32 resize-none font-mono text-sm"
+                rows={1}
+                disabled={isStreaming}
+              />
+              <Button
+                size="icon"
+                onClick={() => sendMessage(input)}
+                disabled={!input.trim() || isStreaming}
+                className="h-[44px] w-[44px] shrink-0"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </div>

@@ -15,6 +15,10 @@ from app.routes import chat, minis
 from app.routes.auth import router as auth_router
 from app.routes.upload import router as upload_router
 from app.routes.teams import router as teams_router
+from app.routes.orgs import router as orgs_router
+from app.routes.export import router as export_router
+from app.routes.team_chat import router as team_chat_router
+from app.routes.settings import router as settings_router
 
 
 @asynccontextmanager
@@ -43,6 +47,10 @@ app.include_router(chat.router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(upload_router, prefix="/api")
 app.include_router(teams_router, prefix="/api")
+app.include_router(orgs_router, prefix="/api")
+app.include_router(export_router, prefix="/api")
+app.include_router(team_chat_router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
 
 
 @app.get("/api/health")
