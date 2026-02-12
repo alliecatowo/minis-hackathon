@@ -13,6 +13,13 @@ from collections import defaultdict
 import litellm
 
 from app.core.config import settings
+from app.models.knowledge import (
+    KnowledgeGraph,
+    KnowledgeNode,
+    KnowledgeEdge,
+    PrinciplesMatrix,
+    Principle,
+)
 from app.synthesis.explorers.base import ExplorerReport, MemoryEntry
 
 logger = logging.getLogger(__name__)
@@ -143,66 +150,220 @@ def _merge_entries(entries: list[MemoryEntry]) -> MemoryEntry:
     )
 
 
-def assemble_memory(reports: list[ExplorerReport], username: str = "") -> str:
-    """Assemble explorer reports into a structured memory markdown document.
+def _merge_knowledge_graphs(reports: list[ExplorerReport]) -> KnowledgeGraph:
+    """Merge knowledge graphs from multiple reports into a unified brain."""
+    merged = KnowledgeGraph()
 
-    Deduplicates memory entries by topic, annotates cross-source confirmations,
-    and formats into canonical sections.
+    # Track unique nodes by ID
+    nodes_by_id: dict[str, KnowledgeNode] = {}
+
+    for report in reports:
+        for node in report.knowledge_graph.nodes:
+            if node.id in nodes_by_id:
+                existing = nodes_by_id[node.id]
+                # Update confidence (max)
+                existing.confidence = max(existing.confidence, node.confidence)
+                # Update depth (max)
+                existing.depth = max(existing.depth, node.depth)
+                # Merge evidence
+                existing.evidence = list(set(existing.evidence + node.evidence))
+            else:
+                nodes_by_id[node.id] = node.model_copy()
+
+    merged.nodes = list(nodes_by_id.values())
+
+    # Merge edges
+    edges_seen: set[tuple[str, str, str]] = set()  # (source, target, relation)
+
+    for report in reports:
+        for edge in report.knowledge_graph.edges:
+            key = (edge.source, edge.target, edge.relation.value)
+            if key not in edges_seen:
+                merged.edges.append(edge.model_copy())
+                edges_seen.add(key)
+            else:
+                # Could average weights here, but simplified to first-win or max-weight
+                pass
+
+    return merged
+
+
+def _merge_principles(reports: list[ExplorerReport]) -> PrinciplesMatrix:
+    """Merge principle matrices (The Soul) from multiple reports."""
+    merged = PrinciplesMatrix()
+
+    # We collect all principles first
+    all_principles = []
+    for report in reports:
+        all_principles.extend(report.principles.principles)
+
+    # Deduplicate principles by trigger+action
+    # key -> list[Principle]
+    grouped: dict[str, list[Principle]] = defaultdict(list)
+
+    for p in all_principles:
+        key = f"{p.trigger.lower()}:{p.action.lower()}"
+        grouped[key].append(p)
+
+    final_principles = []
+    for key, group in grouped.items():
+        if not group:
+            continue
+
+        # Base it on the first one
+        base = group[0]
+
+        # Average intensity
+        avg_intensity = sum(p.intensity for p in group) / len(group)
+
+        # Merge evidence
+        all_evidence = []
+        for p in group:
+            all_evidence.extend(p.evidence)
+        # Deduplicate evidence
+        unique_evidence = list(dict.fromkeys(all_evidence))
+
+        merged_p = Principle(
+            trigger=base.trigger,
+            action=base.action,
+            value=base.value,
+            intensity=avg_intensity,
+            evidence=unique_evidence,
+        )
+        final_principles.append(merged_p)
+
+    merged.principles = final_principles
+    return merged
+
+
+def assemble_memory(reports: list[ExplorerReport], username: str = "") -> str:
+    """Assemble explorer reports into a unified Semantic-Episodic Graph Memory.
+
+    Constructs a KnowledgeGraph (Brain) and PrinciplesMatrix (Soul), merges them,
+    and produces a document that acts as both a human-readable summary AND
+    a structured graph container.
     """
     if not reports:
         return ""
 
-    # Collect all memory entries
+    # 1. Build the Unified Graph (Brain)
+    brain = _merge_knowledge_graphs(reports)
+
+    # 2. Build the Principles Matrix (Soul)
+    soul = _merge_principles(reports)
+
+    # 3. Collect episodic memories (Legacy flat entries for now, to be linked later)
     all_entries: list[MemoryEntry] = []
     for report in reports:
         all_entries.extend(report.memory_entries)
 
-    # Group by dedup key
+    # Group and merge legacy entries
     grouped: dict[str, list[MemoryEntry]] = defaultdict(list)
     for entry in all_entries:
         key = _dedup_key(entry)
         grouped[key].append(entry)
-
-    # Merge duplicates
-    merged: list[MemoryEntry] = [_merge_entries(entries) for entries in grouped.values()]
+    merged_entries = [_merge_entries(entries) for entries in grouped.values()]
 
     # Organize by section
     sections: dict[str, list[MemoryEntry]] = defaultdict(list)
-    for entry in merged:
+    for entry in merged_entries:
         section = _normalize_category(entry.category)
         sections[section].append(entry)
-
-    # Sort entries within each section by confidence descending
     for entries in sections.values():
         entries.sort(key=lambda e: e.confidence, reverse=True)
 
-    # Build markdown
-    title = f"{username}'s Knowledge & Beliefs" if username else "Knowledge & Beliefs"
+    # --- Generate Output Document ---
+
+    title = f"{username}'s Unified Memory" if username else "Unified Memory"
     lines = [f"# {title}", ""]
 
+    # Section 1: The Core (Soul)
+    if soul.principles:
+        lines.append("## The Core (Soul)")
+        lines.append("")
+        # Sort by intensity
+        sorted_principles = sorted(
+            soul.principles, key=lambda p: p.intensity, reverse=True
+        )
+        for p in sorted_principles:
+            lines.append(f"- **{p.trigger}** \u2192 **{p.action}**")
+            lines.append(f"  - *Value:* {p.value} (Intensity: {p.intensity:.2f})")
+            if p.evidence:
+                lines.append(f"  - *Evidence:* {p.evidence[0]}")
+        lines.append("")
+
+    # Section 2: The Network (Brain)
+    if brain.nodes:
+        lines.append("## The Network (Brain)")
+        lines.append("")
+        # Group nodes by type
+        by_type: dict[str, list[KnowledgeNode]] = defaultdict(list)
+        for n in brain.nodes:
+            by_type[n.type.value].append(n)
+
+        # Custom order or sorted keys?
+        # Let's try to group roughly by importance: Languages, Frameworks, Patterns...
+        type_order = [
+            "language",
+            "framework",
+            "library",
+            "pattern",
+            "architecture",
+            "skill",
+            "project",
+            "concept",
+        ]
+        # Add others at the end
+        existing_types = list(by_type.keys())
+        sorted_types = [t for t in type_order if t in existing_types] + [
+            t for t in existing_types if t not in type_order
+        ]
+
+        for type_name in sorted_types:
+            nodes = by_type[type_name]
+            lines.append(f"### {type_name.title()}s")
+            # Sort by depth/confidence
+            sorted_nodes = sorted(
+                nodes, key=lambda n: n.depth * n.confidence, reverse=True
+            )
+            for n in sorted_nodes:
+                lines.append(f"- **{n.name}** (Depth: {n.depth})")
+                # Find connected edges
+                out_edges = [e for e in brain.edges if e.source == n.id]
+                if out_edges:
+                    # e.g. "USED_IN -> backend-repo"
+                    rels = []
+                    for e in out_edges:
+                        # Find target name if possible, otherwise use ID
+                        target_node = next(
+                            (tn for tn in brain.nodes if tn.id == e.target), None
+                        )
+                        target_name = target_node.name if target_node else e.target
+                        rels.append(f"{e.relation.value} -> {target_name}")
+
+                    lines.append(f"  - *Rel:* {', '.join(rels)}")
+            lines.append("")
+
+    # Section 3: The Archives (Episodic)
+    lines.append("## The Archives (Episodic)")
+    lines.append("")
     for section_key in SECTIONS:
         entries = sections.get(section_key)
         if not entries:
             continue
-
-        section_title = SECTION_TITLES[section_key]
-        lines.append(f"## {section_title}")
-        lines.append("")
-
+        section_title = SECTION_TITLES.get(section_key, section_key.title())
+        lines.append(f"### {section_title}")
         for entry in entries:
-            # Format entry as bullet point
             line = f"- **{entry.topic}**: {entry.content}"
             if entry.evidence_quote:
-                # Truncate very long quotes
                 quote = entry.evidence_quote
                 if len(quote) > 200:
                     quote = quote[:197] + "..."
                 line += f'\n  > "{quote}"'
             lines.append(line)
-
         lines.append("")
 
-    # Add behavioral quotes section if any
+    # Behavioral Quotes (Optional but good to keep if available)
     all_quotes: list[dict] = []
     for report in reports:
         for q in report.behavioral_quotes:
@@ -210,9 +371,8 @@ def assemble_memory(reports: list[ExplorerReport], username: str = "") -> str:
             all_quotes.append(q_with_source)
 
     if all_quotes:
-        lines.append("## Behavioral Quotes")
+        lines.append("### Behavioral Quotes")
         lines.append("")
-        # Deduplicate by quote text
         seen_quotes: set[str] = set()
         for q in all_quotes:
             quote_text = q.get("quote", "")
@@ -235,17 +395,26 @@ def assemble_memory(reports: list[ExplorerReport], username: str = "") -> str:
             lines.append(line)
         lines.append("")
 
-    # Source summary
-    source_names = [r.source_name for r in reports]
+    # Source Summary
+    source_names = sorted(list(set(r.source_name for r in reports)))
     lines.append("---")
     lines.append(
-        f"*Assembled from {len(reports)} source(s): {', '.join(source_names)}. "
-        f"{len(merged)} unique memory entries.*"
+        f"*Assembled from {len(reports)} source(s): {', '.join(source_names)}.*"
     )
     lines.append("")
 
-    return "\n".join(lines)
+    # Hidden Data: Graph JSON
+    try:
+        combined_data = {
+            "graph": brain.model_dump(mode="json"),
+            "principles": soul.model_dump(mode="json"),
+        }
+        json_str = json.dumps(combined_data, separators=(",", ":"))  # Compact JSON
+        lines.append(f"<!-- GRAPH_DATA_START\n{json_str}\nGRAPH_DATA_END -->")
+    except Exception as e:
+        logger.error(f"Failed to serialize graph data: {e}")
 
+    return "\n".join(lines)
 
 
 # ── Standardized developer traits for radar chart ──────────────────────
@@ -259,65 +428,159 @@ TRAIT_DEFINITIONS: list[dict[str, str | list[str]]] = [
         "key": "collaboration",
         "name": "Collaboration",
         "description": "Team player who actively involves others",
-        "keywords": ["collaborat", "team", "pair program", "co-author",
-                      "together", "we ", "group", "collective", "mentor",
-                      "teach", "guide", "onboard", "help others"],
+        "keywords": [
+            "collaborat",
+            "team",
+            "pair program",
+            "co-author",
+            "together",
+            "we ",
+            "group",
+            "collective",
+            "mentor",
+            "teach",
+            "guide",
+            "onboard",
+            "help others",
+        ],
     },
     {
         "key": "directness",
         "name": "Directness",
         "description": "Blunt and straightforward communicator",
-        "keywords": ["direct", "blunt", "honest", "straightforward",
-                      "frank", "no-nonsense", "opinionat", "strong opinion",
-                      "disagree", "pushback", "nack", "reject"],
+        "keywords": [
+            "direct",
+            "blunt",
+            "honest",
+            "straightforward",
+            "frank",
+            "no-nonsense",
+            "opinionat",
+            "strong opinion",
+            "disagree",
+            "pushback",
+            "nack",
+            "reject",
+        ],
     },
     {
         "key": "pragmatism",
         "name": "Pragmatism",
         "description": "Ships fast, favors practical solutions over perfection",
-        "keywords": ["pragmat", "ship", "practical", "mvp", "good enough",
-                      "trade-off", "tradeoff", "iterate", "prototype",
-                      "hack", "workaround", "quick", "velocity", "done"],
+        "keywords": [
+            "pragmat",
+            "ship",
+            "practical",
+            "mvp",
+            "good enough",
+            "trade-off",
+            "tradeoff",
+            "iterate",
+            "prototype",
+            "hack",
+            "workaround",
+            "quick",
+            "velocity",
+            "done",
+        ],
     },
     {
         "key": "code_quality",
         "name": "Code Quality",
         "description": "Cares deeply about testing, reviews, and clean code",
-        "keywords": ["test", "review", "clean code", "quality", "lint",
-                      "refactor", "readab", "maintainab", "solid",
-                      "coverage", "ci", "type safe", "static analysis"],
+        "keywords": [
+            "test",
+            "review",
+            "clean code",
+            "quality",
+            "lint",
+            "refactor",
+            "readab",
+            "maintainab",
+            "solid",
+            "coverage",
+            "ci",
+            "type safe",
+            "static analysis",
+        ],
     },
     {
         "key": "breadth",
         "name": "Breadth",
         "description": "Works across many domains and technologies",
-        "keywords": ["breadth", "polyglot", "full-stack", "fullstack",
-                      "generalist", "versatil", "diverse", "multiple lang",
-                      "cross-functional", "many project", "wide range"],
+        "keywords": [
+            "breadth",
+            "polyglot",
+            "full-stack",
+            "fullstack",
+            "generalist",
+            "versatil",
+            "diverse",
+            "multiple lang",
+            "cross-functional",
+            "many project",
+            "wide range",
+        ],
     },
     {
         "key": "creativity",
         "name": "Creativity",
         "description": "Innovative thinker, experiments with novel approaches",
-        "keywords": ["creativ", "innovat", "experiment", "novel", "unconventional",
-                      "unique approach", "hack", "prototype", "side project",
-                      "fun", "playful", "humor", "joke", "wit"],
+        "keywords": [
+            "creativ",
+            "innovat",
+            "experiment",
+            "novel",
+            "unconventional",
+            "unique approach",
+            "hack",
+            "prototype",
+            "side project",
+            "fun",
+            "playful",
+            "humor",
+            "joke",
+            "wit",
+        ],
     },
     {
         "key": "communication",
         "name": "Communication",
         "description": "Clear, thorough communicator in docs, PRs, and issues",
-        "keywords": ["document", "explain", "comment", "readme", "tutorial",
-                      "write-up", "blog", "article", "rfc", "proposal",
-                      "description", "thorough", "detailed", "clear"],
+        "keywords": [
+            "document",
+            "explain",
+            "comment",
+            "readme",
+            "tutorial",
+            "write-up",
+            "blog",
+            "article",
+            "rfc",
+            "proposal",
+            "description",
+            "thorough",
+            "detailed",
+            "clear",
+        ],
     },
     {
         "key": "open_source",
         "name": "Open Source",
         "description": "Active contributor to open source community",
-        "keywords": ["open source", "oss", "contributor", "maintain",
-                      "community", "foss", "upstream", "patch",
-                      "pull request", "public repo", "license"],
+        "keywords": [
+            "open source",
+            "oss",
+            "contributor",
+            "maintain",
+            "community",
+            "foss",
+            "upstream",
+            "patch",
+            "pull request",
+            "public repo",
+            "license",
+        ],
     },
 ]
 
@@ -379,8 +642,7 @@ def extract_values_json(reports: list[ExplorerReport]) -> str:
                 all_findings.append(quote_text)
 
     entry_texts = [
-        f"{e.category} {e.topic} {e.content} {e.evidence_quote}"
-        for e in all_entries
+        f"{e.category} {e.topic} {e.content} {e.evidence_quote}" for e in all_entries
     ]
     entry_texts.extend(all_findings)
     all_text = " ".join(entry_texts)
@@ -414,11 +676,13 @@ def extract_values_json(reports: list[ExplorerReport]) -> str:
 
     values = []
     for i, trait in enumerate(TRAIT_DEFINITIONS):
-        values.append({
-            "name": str(trait["name"]),
-            "description": str(trait["description"]),
-            "intensity": normalized[i],
-        })
+        values.append(
+            {
+                "name": str(trait["name"]),
+                "description": str(trait["description"]),
+                "intensity": normalized[i],
+            }
+        )
 
     return json.dumps({"engineering_values": values})
 
@@ -427,36 +691,147 @@ def extract_values_json(reports: list[ExplorerReport]) -> str:
 
 # Role keywords mapping
 _ROLE_KEYWORDS: dict[str, list[str]] = {
-    "AI Engineer": ["ai", "machine learning", "ml ", "llm", "deep learning",
-                    "neural", "gpt", "transformer", "pytorch", "tensorflow",
-                    "model", "nlp", "computer vision", "inference"],
-    "Frontend Developer": ["frontend", "react", "vue", "angular", "css",
-                           "html", "ui", "ux", "tailwind", "next.js",
-                           "svelte", "component", "browser"],
-    "Backend Developer": ["backend", "api", "rest", "graphql", "fastapi",
-                          "django", "flask", "express", "server", "database",
-                          "sql", "microservice"],
-    "Full-Stack Developer": ["full-stack", "fullstack", "full stack",
-                             "frontend and backend", "end-to-end"],
-    "Systems Programmer": ["systems", "kernel", "driver", "firmware",
-                           "embedded", "low-level", "assembly", "os ",
-                           "operating system", "rust", "c lang", "bare metal"],
-    "DevOps Engineer": ["devops", "ci/cd", "deploy", "docker", "kubernetes",
-                        "terraform", "aws", "cloud", "infrastructure",
-                        "pipeline", "sre", "reliability"],
-    "Data Scientist": ["data science", "analytics", "pandas", "jupyter",
-                       "statistics", "visualization", "data pipeline",
-                       "etl", "sql", "r lang"],
-    "Mobile Developer": ["mobile", "ios", "android", "swift", "kotlin",
-                         "react native", "flutter", "app store"],
-    "Security Engineer": ["security", "vulnerability", "penetration",
-                          "cryptograph", "auth", "oauth", "encryption"],
-    "Open Source Maintainer": ["maintainer", "open source", "oss", "foss",
-                               "upstream", "community", "contributor"],
-    "Hardware Hacker": ["hardware", "arduino", "raspberry pi", "iot",
-                        "sensor", "circuit", "pcb", "fpga", "3d print"],
-    "Game Developer": ["game", "unity", "unreal", "godot", "opengl",
-                       "vulkan", "shader", "gamedev"],
+    "AI Engineer": [
+        "ai",
+        "machine learning",
+        "ml ",
+        "llm",
+        "deep learning",
+        "neural",
+        "gpt",
+        "transformer",
+        "pytorch",
+        "tensorflow",
+        "model",
+        "nlp",
+        "computer vision",
+        "inference",
+    ],
+    "Frontend Developer": [
+        "frontend",
+        "react",
+        "vue",
+        "angular",
+        "css",
+        "html",
+        "ui",
+        "ux",
+        "tailwind",
+        "next.js",
+        "svelte",
+        "component",
+        "browser",
+    ],
+    "Backend Developer": [
+        "backend",
+        "api",
+        "rest",
+        "graphql",
+        "fastapi",
+        "django",
+        "flask",
+        "express",
+        "server",
+        "database",
+        "sql",
+        "microservice",
+    ],
+    "Full-Stack Developer": [
+        "full-stack",
+        "fullstack",
+        "full stack",
+        "frontend and backend",
+        "end-to-end",
+    ],
+    "Systems Programmer": [
+        "systems",
+        "kernel",
+        "driver",
+        "firmware",
+        "embedded",
+        "low-level",
+        "assembly",
+        "os ",
+        "operating system",
+        "rust",
+        "c lang",
+        "bare metal",
+    ],
+    "DevOps Engineer": [
+        "devops",
+        "ci/cd",
+        "deploy",
+        "docker",
+        "kubernetes",
+        "terraform",
+        "aws",
+        "cloud",
+        "infrastructure",
+        "pipeline",
+        "sre",
+        "reliability",
+    ],
+    "Data Scientist": [
+        "data science",
+        "analytics",
+        "pandas",
+        "jupyter",
+        "statistics",
+        "visualization",
+        "data pipeline",
+        "etl",
+        "sql",
+        "r lang",
+    ],
+    "Mobile Developer": [
+        "mobile",
+        "ios",
+        "android",
+        "swift",
+        "kotlin",
+        "react native",
+        "flutter",
+        "app store",
+    ],
+    "Security Engineer": [
+        "security",
+        "vulnerability",
+        "penetration",
+        "cryptograph",
+        "auth",
+        "oauth",
+        "encryption",
+    ],
+    "Open Source Maintainer": [
+        "maintainer",
+        "open source",
+        "oss",
+        "foss",
+        "upstream",
+        "community",
+        "contributor",
+    ],
+    "Hardware Hacker": [
+        "hardware",
+        "arduino",
+        "raspberry pi",
+        "iot",
+        "sensor",
+        "circuit",
+        "pcb",
+        "fpga",
+        "3d print",
+    ],
+    "Game Developer": [
+        "game",
+        "unity",
+        "unreal",
+        "godot",
+        "opengl",
+        "vulkan",
+        "shader",
+        "gamedev",
+    ],
 }
 
 
@@ -473,7 +848,9 @@ def _extract_roles_keyword(reports: list[ExplorerReport]) -> str:
         for entry in report.memory_entries:
             cat = _normalize_category(entry.category)
             if cat in relevant_sections:
-                text_chunks.append(f"{entry.topic} {entry.content} {entry.evidence_quote}")
+                text_chunks.append(
+                    f"{entry.topic} {entry.content} {entry.evidence_quote}"
+                )
         if report.personality_findings:
             text_chunks.append(report.personality_findings)
 
@@ -502,27 +879,94 @@ def _extract_roles_keyword(reports: list[ExplorerReport]) -> str:
 # Common technology names to look for in evidence
 _KNOWN_TECHNOLOGIES = [
     # Languages
-    "Python", "TypeScript", "JavaScript", "Rust", "Go", "Java", "C++", "C#",
-    "Ruby", "PHP", "Swift", "Kotlin", "Scala", "Elixir", "Haskell", "Lua",
-    "Zig", "Nim", "OCaml", "Clojure", "R",
+    "Python",
+    "TypeScript",
+    "JavaScript",
+    "Rust",
+    "Go",
+    "Java",
+    "C++",
+    "C#",
+    "Ruby",
+    "PHP",
+    "Swift",
+    "Kotlin",
+    "Scala",
+    "Elixir",
+    "Haskell",
+    "Lua",
+    "Zig",
+    "Nim",
+    "OCaml",
+    "Clojure",
+    "R",
     # Frontend
-    "React", "Vue", "Angular", "Svelte", "Next.js", "Nuxt", "Tailwind",
-    "HTMX", "Astro",
+    "React",
+    "Vue",
+    "Angular",
+    "Svelte",
+    "Next.js",
+    "Nuxt",
+    "Tailwind",
+    "HTMX",
+    "Astro",
     # Backend
-    "FastAPI", "Django", "Flask", "Express", "Spring", "Rails", "Laravel",
-    "Actix", "Axum", "Gin", "Echo", "Phoenix",
+    "FastAPI",
+    "Django",
+    "Flask",
+    "Express",
+    "Spring",
+    "Rails",
+    "Laravel",
+    "Actix",
+    "Axum",
+    "Gin",
+    "Echo",
+    "Phoenix",
     # Data / ML
-    "PyTorch", "TensorFlow", "Pandas", "NumPy", "scikit-learn", "Jupyter",
-    "Hugging Face", "LangChain",
+    "PyTorch",
+    "TensorFlow",
+    "Pandas",
+    "NumPy",
+    "scikit-learn",
+    "Jupyter",
+    "Hugging Face",
+    "LangChain",
     # Databases
-    "PostgreSQL", "MySQL", "SQLite", "MongoDB", "Redis", "DynamoDB",
-    "Elasticsearch", "Neo4j", "Cassandra",
+    "PostgreSQL",
+    "MySQL",
+    "SQLite",
+    "MongoDB",
+    "Redis",
+    "DynamoDB",
+    "Elasticsearch",
+    "Neo4j",
+    "Cassandra",
     # DevOps / Infra
-    "Docker", "Kubernetes", "Terraform", "AWS", "GCP", "Azure", "Vercel",
-    "Cloudflare", "Nginx", "GitHub Actions", "Jenkins",
+    "Docker",
+    "Kubernetes",
+    "Terraform",
+    "AWS",
+    "GCP",
+    "Azure",
+    "Vercel",
+    "Cloudflare",
+    "Nginx",
+    "GitHub Actions",
+    "Jenkins",
     # Tools
-    "Git", "Vim", "Neovim", "VS Code", "Emacs", "tmux", "Nix", "mise",
-    "GraphQL", "gRPC", "Kafka", "RabbitMQ",
+    "Git",
+    "Vim",
+    "Neovim",
+    "VS Code",
+    "Emacs",
+    "tmux",
+    "Nix",
+    "mise",
+    "GraphQL",
+    "gRPC",
+    "Kafka",
+    "RabbitMQ",
 ]
 
 
@@ -557,34 +1001,140 @@ def _extract_skills_keyword(reports: list[ExplorerReport]) -> str:
 
 # Trait patterns to match against personality/communication evidence
 _TRAIT_PATTERNS: dict[str, list[str]] = {
-    "Casual communicator": ["casual", "informal", "lol", "haha", "emoji",
-                            "conversational", "relaxed"],
-    "Blunt reviewer": ["blunt", "direct", "harsh", "critical", "nack",
-                       "reject", "no-nonsense", "straightforward"],
-    "AI-forward": ["ai", "llm", "gpt", "copilot", "machine learning",
-                   "automat", "claude", "chatgpt"],
-    "Humor in reviews": ["humor", "funny", "joke", "wit", "sarcas",
-                         "playful", "lightheart", "lol"],
-    "Prefers simplicity": ["simple", "minimal", "kiss", "less is more",
-                           "straightforward", "clean", "elegant"],
-    "Thorough documenter": ["document", "readme", "tutorial", "explain",
-                            "write-up", "blog", "rfc", "thorough"],
-    "Strong opinions": ["opinionat", "strong opinion", "disagree",
-                        "pushback", "prefer", "always use", "never use"],
-    "Mentor figure": ["mentor", "teach", "guide", "onboard", "help",
-                      "newcomer", "beginner", "patient"],
-    "Performance-focused": ["performance", "optimi", "fast", "benchmark",
-                            "latency", "throughput", "efficient", "speed"],
-    "Detail-oriented": ["detail", "careful", "thorough", "meticulous",
-                        "precise", "correct", "edge case", "corner case"],
-    "Open source advocate": ["open source", "oss", "community", "foss",
-                             "upstream", "contributor", "public"],
-    "Perfectionist": ["perfect", "polish", "refactor", "clean code",
-                      "best practice", "standard", "proper"],
-    "Rapid prototyper": ["prototype", "hack", "mvp", "quick", "ship",
-                         "iterate", "experiment", "try"],
-    "Team player": ["team", "collaborat", "pair", "together", "we ",
-                    "group", "collective"],
+    "Casual communicator": [
+        "casual",
+        "informal",
+        "lol",
+        "haha",
+        "emoji",
+        "conversational",
+        "relaxed",
+    ],
+    "Blunt reviewer": [
+        "blunt",
+        "direct",
+        "harsh",
+        "critical",
+        "nack",
+        "reject",
+        "no-nonsense",
+        "straightforward",
+    ],
+    "AI-forward": [
+        "ai",
+        "llm",
+        "gpt",
+        "copilot",
+        "machine learning",
+        "automat",
+        "claude",
+        "chatgpt",
+    ],
+    "Humor in reviews": [
+        "humor",
+        "funny",
+        "joke",
+        "wit",
+        "sarcas",
+        "playful",
+        "lightheart",
+        "lol",
+    ],
+    "Prefers simplicity": [
+        "simple",
+        "minimal",
+        "kiss",
+        "less is more",
+        "straightforward",
+        "clean",
+        "elegant",
+    ],
+    "Thorough documenter": [
+        "document",
+        "readme",
+        "tutorial",
+        "explain",
+        "write-up",
+        "blog",
+        "rfc",
+        "thorough",
+    ],
+    "Strong opinions": [
+        "opinionat",
+        "strong opinion",
+        "disagree",
+        "pushback",
+        "prefer",
+        "always use",
+        "never use",
+    ],
+    "Mentor figure": [
+        "mentor",
+        "teach",
+        "guide",
+        "onboard",
+        "help",
+        "newcomer",
+        "beginner",
+        "patient",
+    ],
+    "Performance-focused": [
+        "performance",
+        "optimi",
+        "fast",
+        "benchmark",
+        "latency",
+        "throughput",
+        "efficient",
+        "speed",
+    ],
+    "Detail-oriented": [
+        "detail",
+        "careful",
+        "thorough",
+        "meticulous",
+        "precise",
+        "correct",
+        "edge case",
+        "corner case",
+    ],
+    "Open source advocate": [
+        "open source",
+        "oss",
+        "community",
+        "foss",
+        "upstream",
+        "contributor",
+        "public",
+    ],
+    "Perfectionist": [
+        "perfect",
+        "polish",
+        "refactor",
+        "clean code",
+        "best practice",
+        "standard",
+        "proper",
+    ],
+    "Rapid prototyper": [
+        "prototype",
+        "hack",
+        "mvp",
+        "quick",
+        "ship",
+        "iterate",
+        "experiment",
+        "try",
+    ],
+    "Team player": [
+        "team",
+        "collaborat",
+        "pair",
+        "together",
+        "we ",
+        "group",
+        "collective",
+    ],
 }
 
 
@@ -594,15 +1144,22 @@ def _extract_traits_keyword(reports: list[ExplorerReport]) -> str:
     Focuses on voice_patterns, communication_style, and personality entries.
     Returns JSON array of up to 8 trait labels.
     """
-    relevant_sections = {"voice_patterns", "communication_style", "values",
-                         "opinions", "decision_patterns"}
+    relevant_sections = {
+        "voice_patterns",
+        "communication_style",
+        "values",
+        "opinions",
+        "decision_patterns",
+    }
     text_chunks: list[str] = []
 
     for report in reports:
         for entry in report.memory_entries:
             cat = _normalize_category(entry.category)
             if cat in relevant_sections:
-                text_chunks.append(f"{entry.topic} {entry.content} {entry.evidence_quote}")
+                text_chunks.append(
+                    f"{entry.topic} {entry.content} {entry.evidence_quote}"
+                )
         if report.personality_findings:
             text_chunks.append(report.personality_findings)
         for q in report.behavioral_quotes:
@@ -630,7 +1187,10 @@ def _extract_traits_keyword(reports: list[ExplorerReport]) -> str:
 
 # ── LLM-based extraction functions ──────────────────────────────────────
 
-def _combine_report_text(reports: list[ExplorerReport], include_entries: bool = True) -> str:
+
+def _combine_report_text(
+    reports: list[ExplorerReport], include_entries: bool = True
+) -> str:
     """Build combined text from explorer reports for LLM extraction."""
     parts: list[str] = []
     for report in reports:
@@ -661,9 +1221,10 @@ async def extract_skills_llm(reports: list[ExplorerReport]) -> str:
     try:
         response = await litellm.acompletion(
             model=settings.default_llm_model,
-            messages=[{
-                "role": "user",
-                "content": f"""Extract technical skills from this developer profile. Return ONLY a JSON array of skill strings.
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""Extract technical skills from this developer profile. Return ONLY a JSON array of skill strings.
 
 Rules:
 - Only include skills the developer actively uses (not just mentions)
@@ -676,8 +1237,9 @@ Rules:
 Developer profile:
 {combined_text[:4000]}
 
-Return ONLY a JSON array like: ["Python", "TypeScript", "React", "PostgreSQL"]"""
-            }],
+Return ONLY a JSON array like: ["Python", "TypeScript", "React", "PostgreSQL"]""",
+                }
+            ],
             temperature=0.1,
         )
         content = response.choices[0].message.content
@@ -696,9 +1258,10 @@ async def extract_traits_llm(reports: list[ExplorerReport]) -> str:
     try:
         response = await litellm.acompletion(
             model=settings.default_llm_model,
-            messages=[{
-                "role": "user",
-                "content": f"""Extract personality traits from this developer profile. Return ONLY a JSON array of trait strings.
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""Extract personality traits from this developer profile. Return ONLY a JSON array of trait strings.
 
 Rules:
 - Short descriptive phrases (2-4 words each)
@@ -709,8 +1272,9 @@ Rules:
 Developer profile:
 {combined_text[:4000]}
 
-Return ONLY a JSON array like: ["pragmatic", "detail-oriented", "collaborative"]"""
-            }],
+Return ONLY a JSON array like: ["pragmatic", "detail-oriented", "collaborative"]""",
+                }
+            ],
             temperature=0.1,
         )
         content = response.choices[0].message.content
@@ -729,9 +1293,10 @@ async def extract_roles_llm(reports: list[ExplorerReport]) -> str:
     try:
         response = await litellm.acompletion(
             model=settings.default_llm_model,
-            messages=[{
-                "role": "user",
-                "content": f"""Determine this developer's roles from their profile. Return ONLY a JSON object.
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""Determine this developer's roles from their profile. Return ONLY a JSON object.
 
 Rules:
 - primary: Their main role (e.g., "Backend Engineer", "Full-Stack Developer", "DevOps Engineer")
@@ -741,8 +1306,9 @@ Rules:
 Developer profile:
 {combined_text[:4000]}
 
-Return ONLY JSON like: {{"primary": "Backend Engineer", "secondary": ["Open Source Maintainer", "Technical Writer"]}}"""
-            }],
+Return ONLY JSON like: {{"primary": "Backend Engineer", "secondary": ["Open Source Maintainer", "Technical Writer"]}}""",
+                }
+            ],
             temperature=0.1,
         )
         content = response.choices[0].message.content

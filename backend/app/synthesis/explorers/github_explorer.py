@@ -548,10 +548,15 @@ Not all evidence is equal.
 (e.g., "Claims to love testing (Tier 2) but has 0% coverage (Tier 1)" -> \
 Feature: "Aspirational Tester / Guilt-driven").
 
-## PRIORITY 3: THE BRAIN (Deep Authorship Analysis)
+## PRIORITY 3: THE BRAIN (The Knowledge Graph)
 
-You are building a **Knowledge Graph**. Do not just say "Uses React." Extract \
-the *depth* and *context* of their expertise by analyzing their ACTUAL CODE.
+You are building a **connected Knowledge Graph**, not a flat list. A Node without \
+Edges is dead data.
+
+*   **Connectivity Rule:** For every technology/concept you identify, you must link it.
+    *   *Bad:* Saving `Node("React")`.
+    *   *Good:* Saving `Node("React")` AND `Edge("React", "my-frontend-repo", "USED_IN")`.
+    *   *Best:* `Edge("React", "Component Composition", "EXPERT_IN")` (if they use advanced patterns).
 
 *   **Authorship Forensics:**
     *   Do not credit them for boilerplate. Use `read_commit_diff` to see what \
@@ -571,7 +576,13 @@ the *depth* and *context* of their expertise by analyzing their ACTUAL CODE.
 
 ## PRIORITY 4: THE SOUL (Values & Decision Logic)
 
-Capture the **Decision Boundaries** of the persona.
+Capture the **Decision Boundaries** of the persona and **Link them to Code**.
+
+*   **Value-Knowledge Linking (Polymorphic Graphing):**
+    *   If they reject `lodash`, create a Concept Node "Zero Dependencies" and \
+        link it: `Edge("Zero Dependencies", "lodash", "HATES")`.
+    *   If they love `Rust` for safety, link: `Edge("Rust", "Memory Safety", "LOVES")`.
+
 *   **The "No" Filter:** What do they REJECT in PRs? (e.g., "Too complex", "No tests", "Bad variable name").
 *   **The "Hill to Die On":** What opinions do they defend aggressively?
 *   **The "Anti-Patterns":** What coding styles trigger a rant? (e.g., "OOP overuse", "Magic numbers").
@@ -605,9 +616,13 @@ punctuation would I use?"
 You have a powerful toolkit. Use it dynamically:
 
 1.  **save_knowledge_node** & **save_knowledge_edge** — BUILD THE BRAIN.
-    -   Create nodes for Languages (Python), Frameworks (FastAPI), Concepts (Clean Code).
-    -   Link them: "FastAPI" -> USED_IN -> "backend-repo".
-    -   *Example:* Node(name="Rust", type="language", depth=0.9). Edge("Rust", "safety", "LOVES").
+    *   **Nodes:** Create nodes for Languages (Python), Frameworks (FastAPI), \
+        Concepts (Clean Code), Projects (my-backend).
+    *   **Edges:** Link them to define relationships.
+        *   `USED_IN`: "FastAPI" -> "backend-repo"
+        *   `LOVES`: "Rust" -> "Memory Safety"
+        *   `HATES`: "Clean Code" -> "Side Effects" (if they are a functional purist).
+    *   *Example:* Node(name="Rust", type="language", depth=0.9). Edge("Rust", "safety", "LOVES").
 
 2.  **save_principle** — DEFINE THE SOUL.
     -   Capture decision rules.
