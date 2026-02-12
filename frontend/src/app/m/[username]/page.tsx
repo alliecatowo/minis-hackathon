@@ -35,6 +35,9 @@ import {
 import { useAuth } from "@/lib/auth";
 import { Send, ChevronLeft, ChevronRight, Trash2, ArrowLeft, Github, MessageSquare, Sparkles, AlertCircle, Lock, LogIn } from "lucide-react";
 
+const PROMO_MINI = process.env.NEXT_PUBLIC_PROMO_MINI || "alliecatowo";
+const ANON_MESSAGE_LIMIT = 5;
+
 const STARTERS = [
   "What's your strongest engineering opinion?",
   "Tell me about a time you disagreed with a coworker's code",
@@ -99,10 +102,13 @@ export default function MiniProfilePage() {
   const pendingToolCallsRef = useRef<Array<{ tool: string; args: Record<string, string>; result?: string }>>([]);
   const [toolActivity, setToolActivity] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [anonMessageCount, setAnonMessageCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const isOwner = user?.id != null && user.id === mini?.owner_id;
+  const isPromoMini = username.toLowerCase() === PROMO_MINI.toLowerCase();
+  const anonLimitReached = !user && anonMessageCount >= ANON_MESSAGE_LIMIT;
 
   useEffect(() => {
     getMiniByUsername(username)
@@ -124,6 +130,7 @@ export default function MiniProfilePage() {
       setMessages((prev) => [...prev, userMsg]);
       setInput("");
       setIsStreaming(true);
+      if (!user) setAnonMessageCount((c) => c + 1);
 
       const history = [...messages];
 
@@ -637,7 +644,7 @@ export default function MiniProfilePage() {
                     Ask about their coding philosophy, opinions, and experiences
                   </p>
                 </div>
-                {user ? (
+                {user || isPromoMini ? (
                   <div className="grid w-full max-w-sm gap-2">
                     {STARTERS.map((s) => (
                       <button
@@ -701,7 +708,7 @@ export default function MiniProfilePage() {
 
         {/* Input area with context picker */}
         <div className="border-t">
-          {user ? (
+          {user || (isPromoMini && !anonLimitReached) ? (
             <>
               <div className="p-4">
                 <div className="mx-auto flex max-w-3xl items-end gap-2">
@@ -724,8 +731,25 @@ export default function MiniProfilePage() {
                     <Send className="h-4 w-4" />
                   </Button>
                 </div>
+                {!user && isPromoMini && (
+                  <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-muted-foreground">
+                    {ANON_MESSAGE_LIMIT - anonMessageCount} free message{ANON_MESSAGE_LIMIT - anonMessageCount !== 1 ? "s" : ""} remaining &mdash;{" "}
+                    <button onClick={login} className="underline hover:text-foreground">sign in</button> for unlimited chat
+                  </p>
+                )}
               </div>
             </>
+          ) : anonLimitReached ? (
+            <div className="flex flex-col items-center gap-2 p-4">
+              <p className="text-sm font-medium">Sign in to keep chatting!</p>
+              <p className="text-xs text-muted-foreground">
+                You&apos;ve used your {ANON_MESSAGE_LIMIT} free messages
+              </p>
+              <Button onClick={login} size="sm" className="mt-1 gap-1.5">
+                <LogIn className="h-3.5 w-3.5" />
+                Sign In with GitHub
+              </Button>
+            </div>
           ) : (
             <div className="flex items-center justify-center gap-3 p-4">
               <p className="text-sm text-muted-foreground">

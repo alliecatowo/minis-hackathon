@@ -7,6 +7,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.core.access import require_mini_access, require_mini_owner
 from app.core.auth import get_current_user, get_optional_user
+from app.core.config import settings
 from app.core.rate_limit import check_rate_limit
 from app.db import async_session, get_session
 from app.models.mini import Mini
@@ -44,6 +45,27 @@ async def list_sources():
         }
         for s in source_names
     ]
+
+
+@router.get("/promo")
+async def get_promo_mini(
+    session: AsyncSession = Depends(get_session),
+):
+    """Get the promo mini for anonymous chat. Returns 404 if not configured or not found."""
+    promo_username = settings.promo_mini_username
+    if not promo_username:
+        raise HTTPException(status_code=404, detail="No promo mini configured")
+
+    result = await session.execute(
+        select(Mini).where(
+            Mini.username == promo_username.lower(),
+            Mini.visibility == "public",
+        ).order_by(Mini.created_at)
+    )
+    mini = result.scalars().first()
+    if not mini:
+        raise HTTPException(status_code=404, detail="Promo mini not found")
+    return MiniSummary.model_validate(mini)
 
 
 @router.post("", status_code=202)

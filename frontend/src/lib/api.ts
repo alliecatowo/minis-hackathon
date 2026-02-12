@@ -97,6 +97,12 @@ export async function getMiniByUsername(username: string): Promise<Mini> {
 /** @deprecated Use getMiniByUsername instead */
 export const getMini = getMiniByUsername;
 
+export async function getPromoMini(): Promise<Mini | null> {
+  const res = await fetch(`${API_BASE}/minis/promo`);
+  if (!res.ok) return null;
+  return res.json();
+}
+
 export async function listMinis(): Promise<Mini[]> {
   const res = await fetch(`${API_BASE}/minis`);
   if (!res.ok) {

@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     # Admin
     admin_usernames: str = "alliecatowo"  # comma-separated
 
+    # Promo mini (anonymous chat allowed)
+    promo_mini_username: str = "alliecatowo"
+
     # WebAuthn (passkey support -- future use)
     webauthn_rp_id: str = "localhost"
     webauthn_rp_name: str = "Minis"

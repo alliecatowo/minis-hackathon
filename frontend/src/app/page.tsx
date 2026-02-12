@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 import { MiniCard } from "@/components/mini-card";
-import { listMinis, type Mini } from "@/lib/api";
+import { listMinis, getPromoMini, type Mini } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
   ArrowRight,
@@ -20,6 +20,7 @@ import {
   Radar,
   Wrench,
   Download,
+  MessageSquare,
 } from "lucide-react";
 
 function HeroInput() {
@@ -159,12 +160,14 @@ function LandingPage() {
   const { login } = useAuth();
   const [minis, setMinis] = useState<Mini[]>([]);
   const [minisLoading, setMinisLoading] = useState(true);
+  const [promoMini, setPromoMini] = useState<Mini | null>(null);
 
   useEffect(() => {
     listMinis()
       .then(setMinis)
       .catch(() => setMinis([]))
       .finally(() => setMinisLoading(false));
+    getPromoMini().then(setPromoMini);
   }, []);
 
   const readyMinis = minis.filter((m) => m.status === "ready").slice(0, 6);
@@ -185,6 +188,43 @@ function LandingPage() {
         </p>
         <HeroInput />
       </section>
+
+      {/* Try it — Promo Mini */}
+      {promoMini && (
+        <section className="w-full border-t border-border/50 py-16">
+          <div className="mx-auto max-w-lg px-4">
+            <Card className="overflow-hidden border-border/50">
+              <CardContent className="flex flex-col items-center gap-4 pt-8 pb-8 text-center">
+                <Avatar className="h-16 w-16">
+                  <AvatarImage src={promoMini.avatar_url} alt={promoMini.username} />
+                  <AvatarFallback className="font-mono text-lg">
+                    {promoMini.username.slice(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div>
+                  <h2 className="text-lg font-semibold">
+                    Chat with {promoMini.display_name || promoMini.username}
+                  </h2>
+                  {promoMini.bio && (
+                    <p className="mt-1 text-sm text-muted-foreground line-clamp-2">
+                      {promoMini.bio}
+                    </p>
+                  )}
+                </div>
+                <Link href={`/m/${promoMini.username}`}>
+                  <Button size="lg" className="gap-2">
+                    <MessageSquare className="h-4 w-4" />
+                    Try it free
+                  </Button>
+                </Link>
+                <p className="text-xs text-muted-foreground">
+                  No signup required
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+      )}
 
       {/* How it Works */}
       <section className="w-full border-t border-border/50 py-24">
