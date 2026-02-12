@@ -19,6 +19,7 @@ import {
   type ModelInfo,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { AuthGate } from "@/components/auth-gate";
 import {
   Key,
   BarChart3,
@@ -342,37 +343,10 @@ function AccountTab() {
 }
 
 export default function SettingsPage() {
-  const { user, loading: authLoading, login } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>("api-keys");
 
-  if (authLoading) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <Skeleton className="h-8 w-48" />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-secondary">
-          <Key className="h-7 w-7 text-muted-foreground" />
-        </div>
-        <div className="text-center">
-          <p className="font-medium text-foreground">Sign in required</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Log in with GitHub to access settings.
-          </p>
-        </div>
-        <Button onClick={login} size="sm" className="mt-2">
-          Sign In
-        </Button>
-      </div>
-    );
-  }
-
   return (
+    <AuthGate icon={Key} message="Log in with GitHub to access settings.">
     <div className="mx-auto max-w-2xl px-4 py-12">
       <div className="mb-8">
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
@@ -409,5 +383,6 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
     </div>
+    </AuthGate>
   );
 }

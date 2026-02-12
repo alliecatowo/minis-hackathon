@@ -17,7 +17,7 @@ from app.plugins.base import IngestionResult, IngestionSource
 logger = logging.getLogger(__name__)
 
 
-async def _get_cached(session: AsyncSession, mini_id: int, source_name: str, data_key: str) -> Any | None:
+async def _get_cached(session: AsyncSession, mini_id: str, source_name: str, data_key: str) -> Any | None:
     """Check for valid cached data."""
     from app.models.ingestion_data import IngestionData
 
@@ -35,7 +35,7 @@ async def _get_cached(session: AsyncSession, mini_id: int, source_name: str, dat
 
 
 async def _save_cache(
-    session: AsyncSession, mini_id: int, source_name: str, data_key: str, data: Any, ttl_hours: int = 24
+    session: AsyncSession, mini_id: str, source_name: str, data_key: str, data: Any, ttl_hours: int = 24
 ) -> None:
     """Save or update cached data."""
     from app.models.ingestion_data import IngestionData
@@ -83,7 +83,7 @@ class GitHubSource(IngestionSource):
             identifier: GitHub username.
             **config: Optional mini_id (int) for caching.
         """
-        mini_id: int | None = config.get("mini_id")
+        mini_id: str | None = config.get("mini_id")
         db_session: AsyncSession | None = config.get("session")
 
         use_cache = mini_id is not None and db_session is not None
@@ -129,7 +129,7 @@ class GitHubSource(IngestionSource):
         )
 
     async def _fetch_with_cache(
-        self, identifier: str, mini_id: int, session: AsyncSession
+        self, identifier: str, mini_id: str, session: AsyncSession
     ) -> GitHubData:
         """Fetch GitHub data, using IngestionData cache where available."""
         # Try loading all cached pieces

@@ -1,4 +1,5 @@
 import datetime
+import uuid
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -9,8 +10,8 @@ from app.models.mini import Base
 class UserSettings(Base):
     __tablename__ = "user_settings"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), unique=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), unique=True)
     llm_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     llm_provider: Mapped[str] = mapped_column(String(50), default="gemini")
     preferred_model: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -5,7 +5,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Plus, Github, LogOut, Menu, X, Settings } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Plus, Github, Menu, X, Settings, Shield, BarChart3, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 
@@ -21,6 +29,10 @@ export function Nav() {
         ? "text-foreground font-medium"
         : "text-muted-foreground hover:text-foreground"
     );
+
+  const initials = user
+    ? user.github_username.slice(0, 2).toUpperCase()
+    : "";
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-sm">
@@ -49,11 +61,6 @@ export function Nav() {
                 Orgs
               </Link>
             )}
-            {user && (
-              <Link href="/settings" className={linkClass("/settings")}>
-                <Settings className="h-3.5 w-3.5" />
-              </Link>
-            )}
           </nav>
         </div>
         <div className="flex items-center gap-3">
@@ -64,23 +71,48 @@ export function Nav() {
             </Button>
           </Link>
           {loading ? null : user ? (
-            <div className="hidden items-center gap-2 sm:flex">
-              <Link href={`/m/${user.github_username}`}>
-                <Avatar className="h-7 w-7 cursor-pointer">
-                  <AvatarImage src={user.avatar_url || undefined} alt={user.github_username} />
-                  <AvatarFallback className="text-[10px]">
-                    {user.github_username.slice(0, 2).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-              </Link>
-              <Button size="sm" variant="ghost" onClick={logout} className="h-7 w-7 p-0">
-                <LogOut className="h-3.5 w-3.5" />
-              </Button>
+            <div className="hidden sm:block">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" className="rounded-full ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                    <Avatar className="h-8 w-8 cursor-pointer">
+                      <AvatarImage src={user.avatar_url || undefined} alt={user.github_username} />
+                      <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
+                    </Avatar>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuLabel className="font-normal">
+                    <div className="flex flex-col gap-0.5">
+                      <p className="text-sm font-medium">{user.display_name || user.github_username}</p>
+                      <p className="text-xs text-muted-foreground">@{user.github_username}</p>
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings" className="cursor-pointer gap-2">
+                      <Settings className="h-3.5 w-3.5" />
+                      Settings
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings?tab=usage" className="cursor-pointer gap-2">
+                      <BarChart3 className="h-3.5 w-3.5" />
+                      Usage
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={logout} className="cursor-pointer gap-2 text-muted-foreground focus:text-destructive">
+                    <LogOut className="h-3.5 w-3.5" />
+                    Log out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           ) : (
             <Button size="sm" variant="outline" onClick={login} className="hidden gap-1.5 sm:flex">
               <Github className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Login</span>
+              <span className="hidden sm:inline">Sign in</span>
             </Button>
           )}
           <button
@@ -125,7 +157,7 @@ export function Nav() {
                 onClick={() => { logout(); setMenuOpen(false); }}
                 className="text-left text-sm text-muted-foreground hover:text-foreground"
               >
-                Logout
+                Log out
               </button>
             ) : (
               <button
@@ -133,7 +165,7 @@ export function Nav() {
                 onClick={() => { login(); setMenuOpen(false); }}
                 className="text-left text-sm text-muted-foreground hover:text-foreground"
               >
-                Login with GitHub
+                Sign in with GitHub
               </button>
             )}
           </div>

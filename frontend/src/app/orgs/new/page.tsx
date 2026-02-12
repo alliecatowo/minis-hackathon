@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft } from "lucide-react";
+import { AuthGate } from "@/components/auth-gate";
+import { ArrowLeft, Building2 } from "lucide-react";
 
 function slugify(text: string): string {
   return text
@@ -14,7 +15,7 @@ function slugify(text: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-export default function NewOrgPage() {
+function NewOrgForm() {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("");
   const [name, setName] = useState("");
@@ -131,5 +132,13 @@ export default function NewOrgPage() {
         </div>
       </form>
     </div>
+  );
+}
+
+export default function NewOrgPage() {
+  return (
+    <AuthGate icon={Building2} message="Sign in to create an organization.">
+      <NewOrgForm />
+    </AuthGate>
   );
 }

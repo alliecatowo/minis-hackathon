@@ -25,6 +25,8 @@ from app.synthesis.chief import run_chief_synthesis
 from app.synthesis.explorers import get_explorer
 from app.synthesis.explorers.base import ExplorerReport
 from app.synthesis.memory_assembler import (
+    _merge_knowledge_graphs,
+    _merge_principles,
     assemble_memory,
     extract_roles_llm,
     extract_skills_llm,
@@ -40,6 +42,7 @@ import app.synthesis.explorers.blog_explorer  # noqa: F401
 import app.synthesis.explorers.hackernews_explorer  # noqa: F401
 import app.synthesis.explorers.stackoverflow_explorer  # noqa: F401
 import app.synthesis.explorers.devto_explorer  # noqa: F401
+import app.synthesis.explorers.website_explorer  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +59,9 @@ async def run_pipeline(
     session_factory: Any,
     on_progress: ProgressCallback | None = None,
     sources: list[str] | None = None,
-    owner_id: int | None = None,
-    mini_id: int | None = None,
+    owner_id: str | None = None,
+    mini_id: str | None = None,
+    source_identifiers: dict[str, str] | None = None,
 ) -> None:
     """Run the full mini creation pipeline.
 
@@ -75,12 +79,32 @@ async def run_pipeline(
         sources: List of ingestion source names to use. Defaults to ["github"].
         owner_id: Optional owner ID for user-specific data directories.
         mini_id: The database ID of the Mini record to update.
+        source_identifiers: Per-source identifiers (e.g. {"hackernews": "pg"}).
     """
     emit = on_progress or _noop_callback
     source_names = sources or ["github"]
 
+    # ── Langfuse tracing (no-op when disabled) ────────────────────────
+    trace = None
+    langfuse_client = None
+    try:
+        from app.core.config import settings as _settings
+        if _settings.langfuse_enabled:
+            from langfuse import Langfuse
+            langfuse_client = Langfuse()
+            trace = langfuse_client.trace(
+                name="mini_creation_pipeline",
+                user_id=username,
+                metadata={"sources": source_names, "mini_id": mini_id},
+            )
+    except Exception:
+        logger.debug("Langfuse tracing unavailable, continuing without it")
+        trace = None
+
     try:
         # ── Stage 1: FETCH ───────────────────────────────────────────────
+        if trace:
+            fetch_span = trace.span(name="fetch", metadata={"sources": source_names})
         await emit(PipelineEvent(
             stage="fetch", status="started",
             message=f"Fetching data from {', '.join(source_names)}...",
@@ -111,6 +135,11 @@ async def run_pipeline(
                 logger.warning("Unknown source: %s, skipping", source_name)
                 continue
 
+            # Use per-source identifier if provided, otherwise fall back to username
+            identifier = username
+            if source_identifiers:
+                identifier = source_identifiers.get(source_name, username)
+
             # Build kwargs — pass mini_id + session for caching when available
             fetch_kwargs: dict[str, Any] = {}
             if mini_id is not None:
@@ -123,9 +152,9 @@ async def run_pipeline(
                 async with session_factory() as fetch_session:
                     async with fetch_session.begin():
                         fetch_kwargs["session"] = fetch_session
-                        result = await source.fetch(username, **fetch_kwargs)
+                        result = await source.fetch(identifier, **fetch_kwargs)
             else:
-                result = await source.fetch(username, **fetch_kwargs)
+                result = await source.fetch(identifier, **fetch_kwargs)
 
             results.append(result)
             all_stats[source_name] = result.stats
@@ -152,7 +181,12 @@ async def run_pipeline(
         # Cache evidence for chat tools
         evidence_cache = "\n\n---\n\n".join(r.evidence for r in results if r.evidence)
 
+        if trace:
+            fetch_span.end()
+
         # ── Stage 2: EXPLORE ─────────────────────────────────────────────
+        if trace:
+            explore_span = trace.span(name="explore", metadata={"explorer_count": len(results)})
         await emit(PipelineEvent(
             stage="explore", status="started",
             message=f"Launching {len(results)} explorer agent(s)...",
@@ -206,7 +240,12 @@ async def run_pipeline(
         if not explorer_reports:
             raise ValueError("No explorer reports produced — cannot synthesize")
 
+        if trace:
+            explore_span.end()
+
         # ── Stage 3: ASSEMBLE MEMORY ─────────────────────────────────────
+        if trace:
+            assemble_span = trace.span(name="assemble_memory", metadata={"report_count": len(explorer_reports)})
         await emit(PipelineEvent(
             stage="assemble", status="started",
             message="Assembling memory from explorer reports...",
@@ -221,53 +260,40 @@ async def run_pipeline(
             extract_traits_llm(explorer_reports),
         )
 
+        # Persist structured knowledge graph and principles
+        merged_kg = _merge_knowledge_graphs(explorer_reports)
+        merged_principles = _merge_principles(explorer_reports)
+        kg_json = merged_kg.model_dump(mode="json")
+        principles_json = merged_principles.model_dump(mode="json")
+
         await emit(PipelineEvent(
             stage="assemble", status="completed",
             message=f"Memory assembled ({len(memory_content)} chars)",
             progress=0.55,
         ))
 
-        # ── Stage 3.5: CONTEXT SYNTHESIS ──────────────────────────────────
-        await emit(PipelineEvent(
-            stage="context_synthesis", status="started",
-            message="Synthesizing communication contexts...",
-            progress=0.55,
-        ))
-
-        context_data = []
-        try:
-            from app.synthesis.context_synthesizer import synthesize_contexts
-            async with session_factory() as ctx_session:
-                async with ctx_session.begin():
-                    context_data = await synthesize_contexts(
-                        username, explorer_reports, ctx_session, mini_id,
-                    )
-        except Exception as e:
-            logger.warning("Context synthesis failed (non-fatal): %s", e)
-
-        await emit(PipelineEvent(
-            stage="context_synthesis", status="completed",
-            message=f"Synthesized {len(context_data)} communication context(s)",
-            progress=0.6,
-        ))
+        if trace:
+            assemble_span.end()
 
         # ── Stage 4: SYNTHESIZE ──────────────────────────────────────────
+        if trace:
+            synthesize_span = trace.span(name="synthesize")
         await emit(PipelineEvent(
             stage="synthesize", status="started",
             message="Chief synthesizer crafting soul document...",
             progress=0.6,
         ))
 
-        context_summaries = [
-            {
-                "context_key": c.context_key,
-                "display_name": c.display_name,
-                "voice_modulation": c.voice_modulation,
-            }
-            for c in context_data
-        ] if context_data else None
+        # Collect context evidence from all explorer reports to pass to chief
+        all_context_evidence: dict[str, list[str]] = {}
+        for report in explorer_reports:
+            for ctx_key, ctx_quotes in report.context_evidence.items():
+                all_context_evidence.setdefault(ctx_key, []).extend(ctx_quotes)
 
-        spirit_content = await run_chief_synthesis(username, explorer_reports, context_summaries=context_summaries)
+        spirit_content = await run_chief_synthesis(
+            username, explorer_reports,
+            context_evidence=all_context_evidence if all_context_evidence else None,
+        )
 
         # Extract profile info from the first source that has it (prefer github)
         display_name = username
@@ -289,7 +315,12 @@ async def run_pipeline(
             progress=0.9,
         ))
 
+        if trace:
+            synthesize_span.end()
+
         # ── Stage 5: SAVE ────────────────────────────────────────────────
+        if trace:
+            save_span = trace.span(name="save")
         await emit(PipelineEvent(
             stage="save", status="started",
             message="Saving mini...", progress=0.9,
@@ -331,7 +362,7 @@ async def run_pipeline(
                         spirit_content=mini.spirit_content,
                         memory_content=mini.memory_content,
                         system_prompt=mini.system_prompt,
-                        values_json=mini.values_json,
+                        values_json=json.dumps(mini.values_json) if isinstance(mini.values_json, (dict, list)) else mini.values_json,
                         trigger=trigger,
                     ))
 
@@ -341,16 +372,19 @@ async def run_pipeline(
                 mini.spirit_content = spirit_content
                 mini.memory_content = memory_content
                 mini.system_prompt = system_prompt
-                mini.values_json = values_json
-                mini.roles_json = roles_json
-                mini.skills_json = skills_json
-                mini.traits_json = traits_json
-                mini.metadata_json = json.dumps(all_stats)
-                mini.sources_used = json.dumps(
-                    [r.source_name for r in results]
-                )
+                mini.values_json = json.loads(values_json) if isinstance(values_json, str) else values_json
+                mini.roles_json = json.loads(roles_json) if isinstance(roles_json, str) else roles_json
+                mini.skills_json = json.loads(skills_json) if isinstance(skills_json, str) else skills_json
+                mini.traits_json = json.loads(traits_json) if isinstance(traits_json, str) else traits_json
+                mini.knowledge_graph_json = kg_json
+                mini.principles_json = principles_json
+                mini.metadata_json = all_stats
+                mini.sources_used = [r.source_name for r in results]
                 mini.evidence_cache = evidence_cache
                 mini.status = "ready"
+
+        if trace:
+            save_span.end()
 
         await emit(PipelineEvent(
             stage="save", status="completed",
@@ -383,20 +417,24 @@ async def run_pipeline(
         except Exception:
             logger.exception("Failed to update mini status to failed for %s", username)
 
+    finally:
+        if langfuse_client:
+            langfuse_client.flush()
+
 
 # In-memory store for pipeline events (keyed by mini_id)
 # Used by SSE endpoints to stream progress to clients
-_pipeline_events: dict[int, asyncio.Queue[PipelineEvent | None]] = {}
+_pipeline_events: dict[str, asyncio.Queue[PipelineEvent | None]] = {}
 
 
-def get_event_queue(mini_id: int) -> asyncio.Queue[PipelineEvent | None]:
+def get_event_queue(mini_id: str) -> asyncio.Queue[PipelineEvent | None]:
     """Get or create an event queue for a mini's pipeline."""
     if mini_id not in _pipeline_events:
         _pipeline_events[mini_id] = asyncio.Queue()
     return _pipeline_events[mini_id]
 
 
-def cleanup_event_queue(mini_id: int) -> None:
+def cleanup_event_queue(mini_id: str) -> None:
     """Remove the event queue for a mini."""
     _pipeline_events.pop(mini_id, None)
 
@@ -405,8 +443,9 @@ async def run_pipeline_with_events(
     username: str,
     session_factory: Any,
     sources: list[str] | None = None,
-    owner_id: int | None = None,
-    mini_id: int | None = None,
+    owner_id: str | None = None,
+    mini_id: str | None = None,
+    source_identifiers: dict[str, str] | None = None,
 ) -> None:
     """Run pipeline and push events to the in-memory queue for SSE streaming."""
     if mini_id is None:
@@ -419,6 +458,7 @@ async def run_pipeline_with_events(
     await run_pipeline(
         username, session_factory, on_progress=push_event, sources=sources,
         owner_id=owner_id, mini_id=mini_id,
+        source_identifiers=source_identifiers,
     )
 
     # Signal completion

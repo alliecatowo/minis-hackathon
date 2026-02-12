@@ -16,13 +16,20 @@ class Settings(BaseSettings):
         GITHUB_CLIENT_SECRET - GitHub OAuth app client secret
         JWT_SECRET          - Secret key for JWT signing (must change from default)
         CORS_ORIGINS        - Comma-separated allowed origins (include Vercel URL)
-        DATABASE_URL        - SQLite connection string (set in fly.toml for prod)
+        DATABASE_URL        - PostgreSQL connection string
+        NEON_DATABASE_URL   - Neon connection string (takes priority over DATABASE_URL)
     """
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
-    # Database — dev default is local file; prod uses /data/ volume on Fly.io
-    database_url: str = "sqlite+aiosqlite:///./minis.db"
+    # Database — default is local PostgreSQL; override with NEON_DATABASE_URL for Neon
+    database_url: str = "postgresql+asyncpg://localhost:5432/minis"
+    neon_database_url: str = ""  # Neon connection string (takes priority when set)
+
+    @property
+    def effective_database_url(self) -> str:
+        """Return Neon URL if set, otherwise the default database_url."""
+        return self.neon_database_url or self.database_url
 
     # GitHub API access for profile ingestion
     github_token: str = ""
@@ -34,6 +41,18 @@ class Settings(BaseSettings):
     github_client_id: str = ""
     github_client_secret: str = ""
     jwt_secret: str = "dev-secret-change-in-production"
+    jwt_secret_previous: str = ""  # Previous JWT secret for zero-downtime rotation
+    service_jwt_secret: str = "dev-service-secret-change-in-production"  # Shared secret between BFF and backend
+    encryption_key: str = ""
+
+    # Environment (development | staging | production)
+    environment: str = "development"
+
+    # Langfuse observability
+    langfuse_enabled: bool = False
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = "https://us.cloud.langfuse.com"
 
     # Production settings
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"  # comma-separated origins
@@ -44,6 +63,14 @@ class Settings(BaseSettings):
 
     # Admin
     admin_usernames: str = "allie"  # comma-separated
+
+    # WebAuthn (passkey support -- future use)
+    webauthn_rp_id: str = "localhost"
+    webauthn_rp_name: str = "Minis"
+
+    @property
+    def is_development(self) -> bool:
+        return self.environment == "development"
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -63,5 +90,5 @@ logging.basicConfig(
 )
 
 # Warn about missing config in production
-if not settings.debug and not settings.github_token:
+if not settings.is_development and not settings.github_token:
     logger.warning("GITHUB_TOKEN is not set — GitHub ingestion will fail")

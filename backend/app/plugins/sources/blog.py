@@ -33,7 +33,7 @@ _CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}"
 _DC_NS = "{http://purl.org/dc/elements/1.1/}"
 
 # Max content length per post (characters) to keep evidence manageable
-_MAX_POST_CONTENT = 2000
+_MAX_POST_CONTENT = 4000
 _MAX_POSTS = 50
 
 

@@ -3,9 +3,8 @@
 import { useState, useCallback, useRef } from "react";
 import { Upload, File, X, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { authHeaders } from "@/lib/auth";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
+const API_BASE = "/api/proxy";
 
 interface FileUploadProps {
   onUploadComplete?: (result: { files_saved: number; total_size: number }) => void;
@@ -52,7 +51,6 @@ export function FileUpload({ onUploadComplete }: FileUploadProps) {
     try {
       const res = await fetch(`${API_BASE}/upload/claude-code`, {
         method: "POST",
-        headers: authHeaders(),
         body: formData,
       });
       if (!res.ok) {

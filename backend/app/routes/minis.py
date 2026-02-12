@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from app.core.access import require_mini_access, require_mini_owner
 from app.core.auth import get_current_user, get_optional_user
 from app.core.rate_limit import check_rate_limit
 from app.db import async_session, get_session
@@ -32,6 +33,7 @@ async def list_sources():
         "hackernews": {"name": "Hacker News", "description": "Comments, posts, and tech opinions"},
         "stackoverflow": {"name": "Stack Overflow", "description": "Top answers and expertise"},
         "devblog": {"name": "Dev.to", "description": "Dev.to articles, tutorials, and discussions"},
+        "website": {"name": "Website", "description": "Personal or project website pages"},
     }
     return [
         {
@@ -92,6 +94,7 @@ async def create_mini(
         run_pipeline_with_events(
             username, async_session, sources=sources,
             owner_id=owner_id, mini_id=mini.id,
+            source_identifiers=body.source_identifiers or None,
         )
     )
 
@@ -152,7 +155,7 @@ async def get_mini_by_username(
 
 @router.get("/{id}")
 async def get_mini(
-    id: int,
+    id: str,
     session: AsyncSession = Depends(get_session),
     user: User | None = Depends(get_optional_user),
 ):
@@ -174,7 +177,7 @@ async def get_mini(
 
 @router.delete("/{id}", status_code=204)
 async def delete_mini(
-    id: int,
+    id: str,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
@@ -192,8 +195,16 @@ async def delete_mini(
 
 
 @router.get("/{id}/status")
-async def mini_status_stream(id: int):
+async def mini_status_stream(
+    id: str,
+    session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(get_optional_user),
+):
     """SSE stream of pipeline progress events."""
+    result = await session.execute(select(Mini).where(Mini.id == id))
+    mini = result.scalar_one_or_none()
+    if mini:
+        require_mini_access(mini, user)
     queue = get_event_queue(id)
 
     async def event_generator():
@@ -218,10 +229,11 @@ async def mini_status_stream(id: int):
 
 @router.get("/{id}/repos")
 async def list_mini_repos(
-    id: int,
+    id: str,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
-    """List repos with their inclusion status for a mini."""
+    """List repos with their inclusion status for a mini. Owner only."""
     import json
 
     from app.models.ingestion_data import IngestionData, MiniRepoConfig
@@ -231,6 +243,7 @@ async def list_mini_repos(
     mini = result.scalar_one_or_none()
     if not mini:
         raise HTTPException(status_code=404, detail="Mini not found")
+    require_mini_owner(mini, user)
 
     # Get cached repo data
     result = await session.execute(
@@ -268,38 +281,21 @@ async def list_mini_repos(
     ]
 
 
-@router.get("/{id}/contexts")
-async def list_mini_contexts(
-    id: int,
-    session: AsyncSession = Depends(get_session),
-):
-    """List communication contexts for a mini."""
-    from app.models.context import CommunicationContext
-
-    result = await session.execute(
-        select(CommunicationContext).where(CommunicationContext.mini_id == id)
-    )
-    contexts = result.scalars().all()
-    return [
-        {
-            "id": c.id,
-            "context_key": c.context_key,
-            "display_name": c.display_name,
-            "description": c.description,
-            "voice_modulation": c.voice_modulation,
-            "confidence": c.confidence,
-        }
-        for c in contexts
-    ]
-
-
 @router.get("/{id}/revisions")
 async def list_mini_revisions(
-    id: int,
+    id: str,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
-    """List revision history for a mini."""
+    """List revision history for a mini. Owner only."""
     from app.models.revision import MiniRevision
+
+    # Check ownership
+    mini_result = await session.execute(select(Mini).where(Mini.id == id))
+    mini = mini_result.scalar_one_or_none()
+    if not mini:
+        raise HTTPException(status_code=404, detail="Mini not found")
+    require_mini_owner(mini, user)
 
     result = await session.execute(
         select(MiniRevision)
@@ -320,12 +316,20 @@ async def list_mini_revisions(
 
 @router.get("/{id}/revisions/{revision_id}")
 async def get_mini_revision(
-    id: int,
-    revision_id: int,
+    id: str,
+    revision_id: str,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
-    """Get full content of a specific revision."""
+    """Get full content of a specific revision. Owner only."""
     from app.models.revision import MiniRevision
+
+    # Check ownership
+    mini_result = await session.execute(select(Mini).where(Mini.id == id))
+    mini = mini_result.scalar_one_or_none()
+    if not mini:
+        raise HTTPException(status_code=404, detail="Mini not found")
+    require_mini_owner(mini, user)
 
     result = await session.execute(
         select(MiniRevision).where(

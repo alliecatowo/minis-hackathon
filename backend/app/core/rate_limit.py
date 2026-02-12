@@ -12,11 +12,13 @@ from app.models.user_settings import UserSettings
 RATE_LIMITS: dict[str, int] = {
     "mini_create": 1,
     "chat_message": 25,
+    "team_chat": 15,
+    "file_upload": 5,
 }
 
 
 async def check_rate_limit(
-    user_id: int, event_type: str, session: AsyncSession
+    user_id: str, event_type: str, session: AsyncSession
 ) -> None:
     limit = RATE_LIMITS.get(event_type)
     if limit is None:

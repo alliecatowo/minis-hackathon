@@ -1,4 +1,5 @@
 import datetime
+import uuid
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -9,8 +10,8 @@ from app.models.mini import Base
 class MiniRevision(Base):
     __tablename__ = "mini_revisions"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    mini_id: Mapped[int] = mapped_column(Integer, ForeignKey("minis.id", ondelete="CASCADE"))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    mini_id: Mapped[str] = mapped_column(String(36), ForeignKey("minis.id", ondelete="CASCADE"))
     revision_number: Mapped[int] = mapped_column(Integer)
     spirit_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     memory_content: Mapped[str | None] = mapped_column(Text, nullable=True)

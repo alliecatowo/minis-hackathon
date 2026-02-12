@@ -156,6 +156,7 @@ const highlights = [
 ];
 
 function LandingPage() {
+  const { login } = useAuth();
   const [minis, setMinis] = useState<Mini[]>([]);
   const [minisLoading, setMinisLoading] = useState(true);
 
@@ -266,11 +267,9 @@ function LandingPage() {
           <p className="mt-3 text-muted-foreground">
             Create your first mini in under a minute.
           </p>
-          <Button asChild size="lg" className="mt-8 gap-1.5">
-            <Link href="/">
-              Get Started
-              <ArrowRight className="h-4 w-4" />
-            </Link>
+          <Button size="lg" className="mt-8 gap-1.5" onClick={login}>
+            Get Started
+            <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
       </section>

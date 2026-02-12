@@ -3,7 +3,8 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_optional_user
+from app.core.access import require_team_access
+from app.core.auth import get_current_user, get_optional_user
 from app.db import get_session
 from app.models.mini import Mini
 from app.models.team import Team, TeamMember
@@ -48,7 +49,7 @@ def _generate_subagent_md(mini: Mini) -> str:
 
 @router.get("/minis/{mini_id}/subagent", response_class=PlainTextResponse)
 async def export_subagent(
-    mini_id: int,
+    mini_id: str,
     format: str = "claude_code",
     session: AsyncSession = Depends(get_session),
     user: User | None = Depends(get_optional_user),
@@ -70,7 +71,7 @@ async def export_subagent(
 
 @router.get("/minis/{mini_id}/soul-doc", response_class=PlainTextResponse)
 async def export_soul_doc(
-    mini_id: int,
+    mini_id: str,
     session: AsyncSession = Depends(get_session),
     user: User | None = Depends(get_optional_user),
 ):
@@ -90,10 +91,10 @@ async def export_soul_doc(
 
 @router.get("/teams/{team_id}/agent-team")
 async def export_team_agents(
-    team_id: int,
+    team_id: str,
     format: str = "claude_code",
     session: AsyncSession = Depends(get_session),
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """Export all minis in a team as Claude Code agent definitions.
 
@@ -103,6 +104,8 @@ async def export_team_agents(
     team = result.scalar_one_or_none()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
+
+    await require_team_access(team, user, session)
 
     # Fetch member minis
     stmt = (

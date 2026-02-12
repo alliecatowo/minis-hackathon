@@ -1,20 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Proxy /api/* requests to the backend.
-  // - Local dev: defaults to http://localhost:8000
-  // - Vercel prod: set BACKEND_URL env var to the Fly.io backend URL
-  //   (e.g. https://minis-api.fly.dev)
-  async rewrites() {
-    const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
-    return [
-      {
-        // Proxy only /api/proxy/* to backend, NOT /api/auth/*
-        source: "/api/proxy/:path*",
-        destination: `${backendUrl}/api/:path*`,
-      },
-    ];
-  },
+  // BFF proxy at app/api/proxy/[...path]/route.ts handles backend forwarding.
+  // Do NOT add rewrites for /api/proxy/* — on Vercel, edge rewrites run before
+  // serverless functions and would bypass the BFF (which adds the service JWT).
 };
 
 export default nextConfig;

@@ -11,9 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { listMinis, type Mini } from "@/lib/api";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
+import { listMinis, addTeamMember, type Mini } from "@/lib/api";
 
 interface AddMiniDialogProps {
   teamId: number;
@@ -54,20 +52,8 @@ export function AddMiniDialog({
   const handleAdd = async (mini: Mini) => {
     setAdding(mini.username);
     setError(null);
-    const token = localStorage.getItem("minis_token");
     try {
-      const res = await fetch(`${API_BASE}/teams/${teamId}/members`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ mini_id: mini.id, role }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: "Failed to add member" }));
-        throw new Error(err.detail || "Failed to add member");
-      }
+      await addTeamMember(String(teamId), mini.id, role);
       onAdded();
       onOpenChange(false);
     } catch (err) {

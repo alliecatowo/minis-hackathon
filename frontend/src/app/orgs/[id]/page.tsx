@@ -25,7 +25,7 @@ import {
 type Tab = "members" | "teams" | "settings";
 
 interface OrgMember {
-  user_id: number;
+  user_id: string;
   username: string;
   display_name: string | null;
   avatar_url: string | null;
@@ -34,18 +34,18 @@ interface OrgMember {
 }
 
 interface OrgTeam {
-  id: number;
+  id: string;
   name: string;
   description: string | null;
   member_count: number;
 }
 
 interface OrgDetail {
-  id: number;
+  id: string;
   name: string;
   display_name: string;
   description: string | null;
-  owner_id: number;
+  owner_id: string;
   created_at: string;
   members?: OrgMember[];
 }
@@ -53,7 +53,7 @@ interface OrgDetail {
 export default function OrgDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const orgId = Number(params.id);
+  const orgId = String(params.id);
   const { user } = useAuth();
 
   const [org, setOrg] = useState<OrgDetail | null>(null);
@@ -64,7 +64,7 @@ export default function OrgDetailPage() {
   const [activeTab, setActiveTab] = useState<Tab>("members");
 
   // Members state
-  const [removing, setRemoving] = useState<number | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
 
   // Teams state
   const [showNewTeam, setShowNewTeam] = useState(false);
@@ -108,7 +108,7 @@ export default function OrgDetailPage() {
 
   const isOwner = !!user && !!org && user.id === org.owner_id;
 
-  const handleRemoveMember = async (userId: number) => {
+  const handleRemoveMember = async (userId: string) => {
     setRemoving(userId);
     try {
       const { removeOrgMember } = await import("@/lib/api");

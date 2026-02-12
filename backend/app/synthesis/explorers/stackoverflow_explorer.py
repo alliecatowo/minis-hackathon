@@ -54,6 +54,15 @@ personality signals. You have access to the following tools:
   representative quotes using context_key "technical_discussion" to capture \
   how they sound when explaining technical concepts. Save at least 3-5 quotes.
 
+- save_knowledge_node: Save a node in the Knowledge Graph for technologies \
+  and domains they answer about. Set depth based on answer quality and \
+  reputation in that tag.
+- save_knowledge_edge: Link knowledge nodes (e.g., "Django" USED_IN \
+  "web-backend", "Python" EXPERT_IN "async").
+- save_principle: Save teaching or technical principles they consistently \
+  apply (e.g., trigger="beginner question", action="explain why not just how", \
+  value="pedagogy").
+
 - finish: Call when you have thoroughly analyzed all evidence.
 
 IMPORTANT ANALYSIS GUIDELINES:

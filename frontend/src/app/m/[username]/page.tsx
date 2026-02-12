@@ -24,19 +24,16 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { ChatMessageBubble } from "@/components/chat-message";
-import { ContextPicker } from "@/components/context-picker";
 import { PersonalityRadar } from "@/components/personality-radar";
 import {
   getMiniByUsername,
-  getMiniContexts,
   deleteMini,
   fetchChatStream,
   type Mini,
-  type MiniContext,
   type ChatMessage,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { Send, ChevronLeft, ChevronRight, Trash2, ArrowLeft, Github, MessageSquare, Sparkles, AlertCircle } from "lucide-react";
+import { Send, ChevronLeft, ChevronRight, Trash2, ArrowLeft, Github, MessageSquare, Sparkles, AlertCircle, Lock, LogIn } from "lucide-react";
 
 const STARTERS = [
   "What's your strongest engineering opinion?",
@@ -45,8 +42,9 @@ const STARTERS = [
   "What technology are you most passionate about?",
 ];
 
-function parseSourcesUsed(sourcesUsed?: string): string[] {
+function parseSourcesUsed(sourcesUsed?: string | string[]): string[] {
   if (!sourcesUsed) return [];
+  if (Array.isArray(sourcesUsed)) return sourcesUsed;
   try {
     const parsed = JSON.parse(sourcesUsed);
     if (Array.isArray(parsed)) return parsed;
@@ -87,7 +85,7 @@ export default function MiniProfilePage() {
   const params = useParams();
   const router = useRouter();
   const username = params.username as string;
-  const { user } = useAuth();
+  const { user, login } = useAuth();
 
   const [mini, setMini] = useState<Mini | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,8 +99,6 @@ export default function MiniProfilePage() {
   const pendingToolCallsRef = useRef<Array<{ tool: string; args: Record<string, string>; result?: string }>>([]);
   const [toolActivity, setToolActivity] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeContext, setActiveContext] = useState<string | null>(null);
-  const [contexts, setContexts] = useState<MiniContext[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -114,13 +110,6 @@ export default function MiniProfilePage() {
       .catch(() => setError("Could not load this mini."))
       .finally(() => setLoading(false));
   }, [username]);
-
-  // Fetch contexts when mini loads
-  useEffect(() => {
-    if (mini?.id) {
-      getMiniContexts(mini.id).then(setContexts).catch(() => {});
-    }
-  }, [mini?.id]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -143,7 +132,6 @@ export default function MiniProfilePage() {
           mini!.id,
           text,
           history,
-          activeContext ?? undefined,
         );
         if (!res.ok) throw new Error("Chat request failed");
         if (!res.body) throw new Error("No response body");
@@ -292,7 +280,7 @@ export default function MiniProfilePage() {
         textareaRef.current?.focus();
       }
     },
-    [mini, messages, isStreaming, activeContext]
+    [mini, messages, isStreaming]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -343,27 +331,41 @@ export default function MiniProfilePage() {
   }
 
   if (error || !mini || mini.status === "failed") {
+    const isFailed = mini?.status === "failed";
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
-            <AlertCircle className="h-6 w-6 text-destructive" />
+        <div className="w-full max-w-md rounded-xl border border-border/50 bg-card p-8 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-secondary">
+            {isFailed ? (
+              <AlertCircle className="h-6 w-6 text-destructive" />
+            ) : (
+              <Lock className="h-6 w-6 text-muted-foreground" />
+            )}
           </div>
           <h2 className="mb-2 text-lg font-semibold">
-            {mini?.status === "failed" ? "Mini Creation Failed" : "Mini Not Found"}
+            {isFailed ? "Mini Creation Failed" : "Mini Not Available"}
           </h2>
           <p className="mb-6 text-sm text-muted-foreground">
-            {error || (mini?.status === "failed"
+            {isFailed
               ? `Something went wrong while creating @${username}'s mini. You can try creating it again.`
-              : `We couldn't find a mini for @${username}.`)}
+              : `This mini doesn't exist or is private. @${username} may not have been cloned yet, or the owner has restricted access.`}
           </p>
           <div className="flex flex-col items-center gap-3">
-            <Link href={`/create?username=${username}`}>
-              <Button variant="default" className="gap-2">
-                <Sparkles className="h-4 w-4" />
-                Retry Creation
-              </Button>
-            </Link>
+            {isFailed ? (
+              <Link href={`/create?username=${username}`}>
+                <Button variant="default" className="gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  Retry Creation
+                </Button>
+              </Link>
+            ) : (
+              <Link href={`/create?username=${username}`}>
+                <Button variant="default" className="gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  Create This Mini
+                </Button>
+              </Link>
+            )}
             <Link
               href="/gallery"
               className="text-sm text-muted-foreground underline transition-colors hover:text-foreground"
@@ -500,53 +502,7 @@ export default function MiniProfilePage() {
 
           <Separator />
 
-          {/* ---- Section 2: Contexts (collapsible, open by default if contexts exist) ---- */}
-          {contexts.length > 0 && (
-            <>
-              <SidebarSection title="Contexts" defaultOpen>
-                <div className="space-y-2">
-                  {contexts.map((ctx) => (
-                    <button
-                      key={ctx.context_key}
-                      onClick={() =>
-                        setActiveContext(
-                          activeContext === ctx.context_key ? null : ctx.context_key
-                        )
-                      }
-                      className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition-all ${
-                        activeContext === ctx.context_key
-                          ? "border-chart-1/40 bg-chart-1/10 text-foreground"
-                          : "border-border/40 text-muted-foreground hover:border-border hover:text-foreground"
-                      }`}
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate font-medium text-[13px]">
-                          {ctx.display_name}
-                        </p>
-                        {ctx.description && (
-                          <p className="truncate text-[11px] text-muted-foreground/70">
-                            {ctx.description}
-                          </p>
-                        )}
-                      </div>
-                      <Badge
-                        variant="outline"
-                        className="ml-2 shrink-0 text-[10px] tabular-nums"
-                        style={{
-                          opacity: Math.max(0.4, ctx.confidence),
-                        }}
-                      >
-                        {Math.round(ctx.confidence * 100)}%
-                      </Badge>
-                    </button>
-                  ))}
-                </div>
-              </SidebarSection>
-              <Separator />
-            </>
-          )}
-
-          {/* ---- Section 3: Skills & Traits (collapsible, collapsed by default) ---- */}
+          {/* ---- Section 2: Skills & Traits (collapsible, collapsed by default) ---- */}
           {hasSkillsOrTraits && (
             <>
               <SidebarSection title="Skills & Traits">
@@ -681,17 +637,29 @@ export default function MiniProfilePage() {
                     Ask about their coding philosophy, opinions, and experiences
                   </p>
                 </div>
-                <div className="grid w-full max-w-sm gap-2">
-                  {STARTERS.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => sendMessage(s)}
-                      className="rounded-lg border border-border/50 px-4 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:border-border hover:bg-secondary hover:text-foreground"
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
+                {user ? (
+                  <div className="grid w-full max-w-sm gap-2">
+                    {STARTERS.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => sendMessage(s)}
+                        className="rounded-lg border border-border/50 px-4 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:border-border hover:bg-secondary hover:text-foreground"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 rounded-xl border border-border/50 bg-secondary/30 px-8 py-6">
+                    <LogIn className="h-5 w-5 text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">
+                      Sign in to chat with <span className="font-mono font-medium text-foreground">@{username}</span>
+                    </p>
+                    <Button onClick={login} size="sm">
+                      Sign In with GitHub
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -733,40 +701,42 @@ export default function MiniProfilePage() {
 
         {/* Input area with context picker */}
         <div className="border-t">
-          {/* Context picker bar */}
-          {contexts.length > 0 && (
-            <div className="border-b border-border/40 px-4">
-              <div className="mx-auto max-w-3xl">
-                <ContextPicker
-                  contexts={contexts}
-                  activeContext={activeContext}
-                  onContextChange={setActiveContext}
-                />
+          {user ? (
+            <>
+              <div className="p-4">
+                <div className="mx-auto flex max-w-3xl items-end gap-2">
+                  <Textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={`Message @${mini.username}... (Shift+Enter for newline)`}
+                    className="min-h-[44px] max-h-32 resize-none font-mono text-sm"
+                    rows={1}
+                    disabled={isStreaming}
+                  />
+                  <Button
+                    size="icon"
+                    onClick={() => sendMessage(input)}
+                    disabled={!input.trim() || isStreaming}
+                    className="h-[44px] w-[44px] shrink-0"
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
-          <div className="p-4">
-            <div className="mx-auto flex max-w-3xl items-end gap-2">
-              <Textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={`Message @${mini.username}... (Shift+Enter for newline)`}
-                className="min-h-[44px] max-h-32 resize-none font-mono text-sm"
-                rows={1}
-                disabled={isStreaming}
-              />
-              <Button
-                size="icon"
-                onClick={() => sendMessage(input)}
-                disabled={!input.trim() || isStreaming}
-                className="h-[44px] w-[44px] shrink-0"
-              >
-                <Send className="h-4 w-4" />
+            </>
+          ) : (
+            <div className="flex items-center justify-center gap-3 p-4">
+              <p className="text-sm text-muted-foreground">
+                Sign in to chat with @{mini.username}
+              </p>
+              <Button onClick={login} size="sm" variant="outline" className="gap-1.5">
+                <LogIn className="h-3.5 w-3.5" />
+                Sign In
               </Button>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

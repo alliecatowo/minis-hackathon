@@ -43,7 +43,7 @@ class OrgTeamCreateRequest(BaseModel):
 
 
 class OrgSummaryResponse(BaseModel):
-    id: int
+    id: str
     name: str
     display_name: str
     description: str | None
@@ -54,8 +54,8 @@ class OrgSummaryResponse(BaseModel):
 
 
 class OrgMemberResponse(BaseModel):
-    id: int
-    user_id: int
+    id: str
+    user_id: str
     username: str
     display_name: str | None
     avatar_url: str | None
@@ -64,8 +64,8 @@ class OrgMemberResponse(BaseModel):
 
 
 class OrgMemberWithMinisResponse(BaseModel):
-    id: int
-    user_id: int
+    id: str
+    user_id: str
     username: str
     display_name: str | None
     avatar_url: str | None
@@ -75,12 +75,12 @@ class OrgMemberWithMinisResponse(BaseModel):
 
 
 class OrgDetailResponse(BaseModel):
-    id: int
+    id: str
     name: str
     display_name: str
     description: str | None
     avatar_url: str | None
-    owner_id: int
+    owner_id: str
     members: list[OrgMemberResponse]
     created_at: datetime.datetime
 
@@ -94,7 +94,7 @@ class InviteResponse(BaseModel):
 
 
 class OrgTeamSummaryResponse(BaseModel):
-    id: int
+    id: str
     name: str
     description: str | None
     member_count: int
@@ -109,7 +109,7 @@ router = APIRouter(prefix="/orgs", tags=["orgs"])
 
 
 async def _get_membership(
-    session: AsyncSession, org_id: int, user_id: int
+    session: AsyncSession, org_id: str, user_id: str
 ) -> OrgMember | None:
     result = await session.execute(
         select(OrgMember).where(
@@ -120,7 +120,7 @@ async def _get_membership(
 
 
 async def _require_membership(
-    session: AsyncSession, org_id: int, user_id: int
+    session: AsyncSession, org_id: str, user_id: str
 ) -> OrgMember:
     member = await _get_membership(session, org_id, user_id)
     if not member:
@@ -129,7 +129,7 @@ async def _require_membership(
 
 
 async def _require_admin(
-    session: AsyncSession, org_id: int, user_id: int
+    session: AsyncSession, org_id: str, user_id: str
 ) -> OrgMember:
     member = await _require_membership(session, org_id, user_id)
     if member.role not in ("owner", "admin"):
@@ -138,7 +138,7 @@ async def _require_admin(
 
 
 async def _require_owner(
-    session: AsyncSession, org_id: int, user_id: int
+    session: AsyncSession, org_id: str, user_id: str
 ) -> OrgMember:
     member = await _require_membership(session, org_id, user_id)
     if member.role != "owner":
@@ -146,7 +146,7 @@ async def _require_owner(
     return member
 
 
-async def _get_org_or_404(session: AsyncSession, org_id: int) -> Organization:
+async def _get_org_or_404(session: AsyncSession, org_id: str) -> Organization:
     result = await session.execute(
         select(Organization).where(Organization.id == org_id)
     )
@@ -157,7 +157,7 @@ async def _get_org_or_404(session: AsyncSession, org_id: int) -> Organization:
 
 
 async def _get_org_members(
-    session: AsyncSession, org_id: int
+    session: AsyncSession, org_id: str
 ) -> list[OrgMemberResponse]:
     stmt = (
         select(
@@ -285,7 +285,7 @@ async def list_orgs(
 
 @router.get("/{org_id}", response_model=OrgDetailResponse)
 async def get_org(
-    org_id: int,
+    org_id: str,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -309,7 +309,7 @@ async def get_org(
 
 @router.put("/{org_id}", response_model=OrgDetailResponse)
 async def update_org(
-    org_id: int,
+    org_id: str,
     body: OrgUpdateRequest,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
@@ -344,7 +344,7 @@ async def update_org(
 
 @router.delete("/{org_id}", status_code=204)
 async def delete_org(
-    org_id: int,
+    org_id: str,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -365,7 +365,7 @@ async def delete_org(
 
 @router.post("/{org_id}/invite", response_model=InviteResponse, status_code=201)
 async def create_invite(
-    org_id: int,
+    org_id: str,
     body: InviteCreateRequest,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
@@ -454,7 +454,7 @@ async def join_org(
 
 @router.get("/{org_id}/members", response_model=list[OrgMemberWithMinisResponse])
 async def list_members(
-    org_id: int,
+    org_id: str,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -488,7 +488,7 @@ async def list_members(
     minis = mini_result.all()
 
     # Group minis by owner
-    minis_by_owner: dict[int, list[dict]] = {}
+    minis_by_owner: dict[str, list[dict]] = {}
     for m in minis:
         owner_id = m.owner_id
         if owner_id is not None:
@@ -518,8 +518,8 @@ async def list_members(
 
 @router.delete("/{org_id}/members/{user_id}", status_code=204)
 async def remove_member(
-    org_id: int,
-    user_id: int,
+    org_id: str,
+    user_id: str,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -540,7 +540,7 @@ async def remove_member(
 
 @router.post("/{org_id}/teams", response_model=OrgTeamSummaryResponse, status_code=201)
 async def create_org_team(
-    org_id: int,
+    org_id: str,
     body: OrgTeamCreateRequest,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
@@ -572,7 +572,7 @@ async def create_org_team(
 
 @router.get("/{org_id}/teams", response_model=list[OrgTeamSummaryResponse])
 async def list_org_teams(
-    org_id: int,
+    org_id: str,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):

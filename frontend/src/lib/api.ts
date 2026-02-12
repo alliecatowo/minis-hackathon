@@ -1,6 +1,4 @@
-import { authHeaders } from "@/lib/auth";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
+const API_BASE = "/api/proxy";
 
 export interface Value {
   name: string;
@@ -9,9 +7,9 @@ export interface Value {
 }
 
 export interface Mini {
-  id: number;
+  id: string;
   username: string;
-  owner_id: number | null;
+  owner_id: string | null;
   visibility: "public" | "private" | "team";
   display_name: string;
   avatar_url: string;
@@ -20,7 +18,7 @@ export interface Mini {
   system_prompt: string;
   values: Value[];
   status: "pending" | "processing" | "ready" | "failed";
-  sources_used?: string;
+  sources_used?: string | string[];
   roles?: { primary: string; secondary: string[] };
   skills?: string[];
   traits?: string[];
@@ -49,7 +47,6 @@ export interface SourceInfo {
 export async function getSources(): Promise<SourceInfo[]> {
   const res = await fetch(`${API_BASE}/minis/sources`);
   if (!res.ok) {
-    // Fallback to default if endpoint not yet available
     return [
       { id: "github", name: "GitHub", description: "Commits, PRs, and reviews", available: true },
       { id: "claude_code", name: "Claude Code", description: "Conversation history", available: false },
@@ -58,11 +55,21 @@ export async function getSources(): Promise<SourceInfo[]> {
   return res.json();
 }
 
-export async function createMini(username: string, sources?: string[]): Promise<Mini> {
+export async function createMini(
+  username: string,
+  sources?: string[],
+  sourceIdentifiers?: Record<string, string>,
+): Promise<Mini> {
   const res = await fetch(`${API_BASE}/minis`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ username, ...(sources && { sources }) }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username,
+      ...(sources && { sources }),
+      ...(sourceIdentifiers && Object.keys(sourceIdentifiers).length > 0 && {
+        source_identifiers: sourceIdentifiers,
+      }),
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Failed to create mini" }));
@@ -71,7 +78,7 @@ export async function createMini(username: string, sources?: string[]): Promise<
   return res.json();
 }
 
-export async function getMiniById(id: number): Promise<Mini> {
+export async function getMiniById(id: string): Promise<Mini> {
   const res = await fetch(`${API_BASE}/minis/${id}`);
   if (!res.ok) {
     throw new Error("Failed to fetch mini");
@@ -99,29 +106,26 @@ export async function listMinis(): Promise<Mini[]> {
 }
 
 export async function getMyMinis(): Promise<Mini[]> {
-  const res = await fetch(`${API_BASE}/minis?mine=true`, {
-    headers: authHeaders(),
-  });
+  const res = await fetch(`${API_BASE}/minis?mine=true`);
   if (!res.ok) {
     throw new Error("Failed to fetch your minis");
   }
   return res.json();
 }
 
-export async function deleteMini(id: number): Promise<void> {
+export async function deleteMini(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/minis/${id}`, {
     method: "DELETE",
-    headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to delete mini");
 }
 
-export function subscribePipelineStatus(id: number): EventSource {
+export function subscribePipelineStatus(id: string): EventSource {
   return new EventSource(`${API_BASE}/minis/${id}/status`);
 }
 
 export function streamChat(
-  id: number,
+  id: string,
   message: string,
   history: ChatMessage[]
 ): EventSource {
@@ -132,15 +136,14 @@ export function streamChat(
 }
 
 export async function fetchChatStream(
-  id: number,
+  id: string,
   message: string,
   history: ChatMessage[],
-  context?: string
 ): Promise<Response> {
   return fetch(`${API_BASE}/minis/${id}/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ message, history, ...(context && { context }) }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, history }),
   });
 }
 
@@ -167,9 +170,7 @@ export interface ModelInfo {
 }
 
 export async function getSettings(): Promise<UserSettings> {
-  const res = await fetch(`${API_BASE}/settings`, {
-    headers: authHeaders(),
-  });
+  const res = await fetch(`${API_BASE}/settings`);
   if (!res.ok) throw new Error("Failed to fetch settings");
   return res.json();
 }
@@ -181,7 +182,7 @@ export async function updateSettings(data: {
 }): Promise<UserSettings> {
   const res = await fetch(`${API_BASE}/settings`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update settings");
@@ -189,9 +190,7 @@ export async function updateSettings(data: {
 }
 
 export async function getUsage(): Promise<UsageInfo> {
-  const res = await fetch(`${API_BASE}/settings/usage`, {
-    headers: authHeaders(),
-  });
+  const res = await fetch(`${API_BASE}/settings/usage`);
   if (!res.ok) throw new Error("Failed to fetch usage");
   return res.json();
 }
@@ -199,23 +198,6 @@ export async function getUsage(): Promise<UsageInfo> {
 export async function getAvailableModels(): Promise<Record<string, ModelInfo[]>> {
   const res = await fetch(`${API_BASE}/settings/models`);
   if (!res.ok) throw new Error("Failed to fetch models");
-  return res.json();
-}
-
-// --- Mini context API functions ---
-
-export interface MiniContext {
-  id: number;
-  context_key: string;
-  display_name: string;
-  description: string;
-  voice_modulation: string;
-  confidence: number;
-}
-
-export async function getMiniContexts(miniId: number): Promise<MiniContext[]> {
-  const res = await fetch(`${API_BASE}/minis/${miniId}/contexts`);
-  if (!res.ok) return [];
   return res.json();
 }
 
@@ -230,10 +212,8 @@ export interface RepoInfo {
   included: boolean;
 }
 
-export async function getMiniRepos(miniId: number): Promise<RepoInfo[]> {
-  const res = await fetch(`${API_BASE}/minis/${miniId}/repos`, {
-    headers: authHeaders(),
-  });
+export async function getMiniRepos(miniId: string): Promise<RepoInfo[]> {
+  const res = await fetch(`${API_BASE}/minis/${miniId}/repos`);
   if (!res.ok) return [];
   return res.json();
 }
@@ -241,37 +221,25 @@ export async function getMiniRepos(miniId: number): Promise<RepoInfo[]> {
 export async function createMiniWithExclusions(
   username: string,
   sources: string[],
-  excludedRepos: string[]
+  excludedRepos: string[],
+  sourceIdentifiers?: Record<string, string>,
 ): Promise<Mini> {
   const res = await fetch(`${API_BASE}/minis`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ username, sources, excluded_repos: excludedRepos }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username,
+      sources,
+      excluded_repos: excludedRepos,
+      ...(sourceIdentifiers && Object.keys(sourceIdentifiers).length > 0 && {
+        source_identifiers: sourceIdentifiers,
+      }),
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Failed to create mini" }));
     throw new Error(err.detail || "Failed to create mini");
   }
-  return res.json();
-}
-
-// --- Auth API functions ---
-
-export async function exchangeGithubCode(code: string): Promise<{ token: string; user: any }> {
-  const res = await fetch(`${API_BASE}/auth/github`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code }),
-  });
-  if (!res.ok) throw new Error("Auth failed");
-  return res.json();
-}
-
-export async function getCurrentUser(token: string): Promise<any> {
-  const res = await fetch(`${API_BASE}/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error("Invalid token");
   return res.json();
 }
 
@@ -283,7 +251,6 @@ export async function uploadClaudeCode(files: File[]): Promise<{ files_saved: nu
 
   const res = await fetch(`${API_BASE}/upload/claude-code`, {
     method: "POST",
-    headers: authHeaders(),
     body: formData,
   });
   if (!res.ok) {
@@ -298,7 +265,7 @@ export async function uploadClaudeCode(files: File[]): Promise<{ files_saved: nu
 export async function createTeam(name: string, description?: string): Promise<any> {
   const res = await fetch(`${API_BASE}/teams`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, ...(description && { description }) }),
   });
   if (!res.ok) {
@@ -309,43 +276,38 @@ export async function createTeam(name: string, description?: string): Promise<an
 }
 
 export async function listTeams(): Promise<any[]> {
-  const res = await fetch(`${API_BASE}/teams`, {
-    headers: authHeaders(),
-  });
+  const res = await fetch(`${API_BASE}/teams`);
   if (!res.ok) throw new Error("Failed to fetch teams");
   return res.json();
 }
 
-export async function getTeam(id: number): Promise<any> {
-  const res = await fetch(`${API_BASE}/teams/${id}`, {
-    headers: authHeaders(),
-  });
+export async function getTeam(id: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/teams/${id}`);
   if (!res.ok) throw new Error("Failed to fetch team");
   return res.json();
 }
 
-export async function updateTeam(id: number, data: { name?: string; description?: string }): Promise<any> {
+export async function updateTeam(id: string, data: { name?: string; description?: string }): Promise<any> {
   const res = await fetch(`${API_BASE}/teams/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update team");
   return res.json();
 }
 
-export async function deleteTeam(id: number): Promise<void> {
+export async function deleteTeam(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/teams/${id}`, {
     method: "DELETE",
-    headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to delete team");
 }
 
-export async function addTeamMember(teamId: number, miniId: number, role?: string): Promise<any> {
+export async function addTeamMember(teamId: string, miniId: string, role?: string): Promise<any> {
   const res = await fetch(`${API_BASE}/teams/${teamId}/members`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mini_id: miniId, ...(role && { role }) }),
   });
   if (!res.ok) {
@@ -355,10 +317,9 @@ export async function addTeamMember(teamId: number, miniId: number, role?: strin
   return res.json();
 }
 
-export async function removeTeamMember(teamId: number, miniId: number): Promise<void> {
+export async function removeTeamMember(teamId: string, miniId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/teams/${teamId}/members/${miniId}`, {
     method: "DELETE",
-    headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to remove member");
 }
@@ -368,7 +329,7 @@ export async function removeTeamMember(teamId: number, miniId: number): Promise<
 export async function createOrg(data: { name: string; display_name: string; description?: string }): Promise<any> {
   const res = await fetch(`${API_BASE}/orgs`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -379,43 +340,37 @@ export async function createOrg(data: { name: string; display_name: string; desc
 }
 
 export async function listOrgs(): Promise<any[]> {
-  const res = await fetch(`${API_BASE}/orgs`, {
-    headers: authHeaders(),
-  });
+  const res = await fetch(`${API_BASE}/orgs`);
   if (!res.ok) throw new Error("Failed to fetch orgs");
   return res.json();
 }
 
-export async function getOrg(id: number): Promise<any> {
-  const res = await fetch(`${API_BASE}/orgs/${id}`, {
-    headers: authHeaders(),
-  });
+export async function getOrg(id: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/orgs/${id}`);
   if (!res.ok) throw new Error("Failed to fetch org");
   return res.json();
 }
 
-export async function updateOrg(id: number, data: { display_name?: string; description?: string }): Promise<any> {
+export async function updateOrg(id: string, data: { display_name?: string; description?: string }): Promise<any> {
   const res = await fetch(`${API_BASE}/orgs/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update org");
   return res.json();
 }
 
-export async function deleteOrg(id: number): Promise<void> {
+export async function deleteOrg(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/orgs/${id}`, {
     method: "DELETE",
-    headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to delete org");
 }
 
-export async function generateInvite(orgId: number): Promise<{ invite_code: string }> {
+export async function generateInvite(orgId: string): Promise<{ invite_code: string }> {
   const res = await fetch(`${API_BASE}/orgs/${orgId}/invite`, {
     method: "POST",
-    headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to generate invite");
   return res.json();
@@ -424,7 +379,6 @@ export async function generateInvite(orgId: number): Promise<{ invite_code: stri
 export async function joinOrg(code: string): Promise<any> {
   const res = await fetch(`${API_BASE}/orgs/join/${code}`, {
     method: "POST",
-    headers: authHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Invalid or expired invite" }));
@@ -433,26 +387,23 @@ export async function joinOrg(code: string): Promise<any> {
   return res.json();
 }
 
-export async function listOrgMembers(orgId: number): Promise<any[]> {
-  const res = await fetch(`${API_BASE}/orgs/${orgId}/members`, {
-    headers: authHeaders(),
-  });
+export async function listOrgMembers(orgId: string): Promise<any[]> {
+  const res = await fetch(`${API_BASE}/orgs/${orgId}/members`);
   if (!res.ok) throw new Error("Failed to fetch members");
   return res.json();
 }
 
-export async function removeOrgMember(orgId: number, userId: number): Promise<void> {
+export async function removeOrgMember(orgId: string, userId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/orgs/${orgId}/members/${userId}`, {
     method: "DELETE",
-    headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to remove member");
 }
 
-export async function createOrgTeam(orgId: number, data: { name: string; description?: string }): Promise<any> {
+export async function createOrgTeam(orgId: string, data: { name: string; description?: string }): Promise<any> {
   const res = await fetch(`${API_BASE}/orgs/${orgId}/teams`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -462,10 +413,8 @@ export async function createOrgTeam(orgId: number, data: { name: string; descrip
   return res.json();
 }
 
-export async function listOrgTeams(orgId: number): Promise<any[]> {
-  const res = await fetch(`${API_BASE}/orgs/${orgId}/teams`, {
-    headers: authHeaders(),
-  });
+export async function listOrgTeams(orgId: string): Promise<any[]> {
+  const res = await fetch(`${API_BASE}/orgs/${orgId}/teams`);
   if (!res.ok) throw new Error("Failed to fetch org teams");
   return res.json();
 }

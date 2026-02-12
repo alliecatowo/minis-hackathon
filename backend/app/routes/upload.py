@@ -3,8 +3,11 @@ import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_current_user
+from app.core.rate_limit import check_rate_limit
+from app.db import get_session
 from app.models.user import User
 
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -16,8 +19,10 @@ MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 async def upload_claude_code(
     files: list[UploadFile] = File(...),
     user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
 ):
     """Upload Claude Code JSONL files for enhanced mini creation."""
+    await check_rate_limit(user.id, "file_upload", session)
     upload_dir = Path(f"data/uploads/{user.id}/claude_code")
     upload_dir.mkdir(parents=True, exist_ok=True)
 

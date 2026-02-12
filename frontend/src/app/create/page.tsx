@@ -17,6 +17,7 @@ import {
   type SourceInfo,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { AuthGate } from "@/components/auth-gate";
 import {
   Github,
   MessageSquare,
@@ -51,6 +52,10 @@ const SOURCE_IDENTIFIER_META: Record<
     label: "Dev.to username",
     placeholder: "e.g. bendhalpern",
   },
+  website: {
+    label: "Website URL",
+    placeholder: "e.g. https://allisons.dev",
+  },
 };
 
 /** Pick a lucide icon based on source id. */
@@ -68,6 +73,8 @@ function SourceIcon({ id, className }: { id: string; className?: string }) {
       return <Code className={className} />;
     case "devblog":
       return <Code className={className} />;
+    case "website":
+      return <Globe className={className} />;
     default:
       return <MessageSquare className={className} />;
   }
@@ -456,16 +463,27 @@ function CreatePageInner() {
       }
 
       // If not already processing, kick off creation
+      // Filter out empty source identifiers
+      const filteredIdentifiers = Object.fromEntries(
+        Object.entries(sourceIdentifiers).filter(([, v]) => v.trim() !== "")
+      );
+      const hasIdentifiers = Object.keys(filteredIdentifiers).length > 0;
+
       let mini = existing;
       if (!existing || existing.status === "failed") {
         if (excludedRepos.size > 0) {
           mini = await createMiniWithExclusions(
             username,
             selectedSources,
-            Array.from(excludedRepos)
+            Array.from(excludedRepos),
+            hasIdentifiers ? filteredIdentifiers : undefined,
           );
         } else {
-          mini = await createMini(username, selectedSources);
+          mini = await createMini(
+            username,
+            selectedSources,
+            hasIdentifiers ? filteredIdentifiers : undefined,
+          );
         }
       }
 
@@ -514,7 +532,7 @@ function CreatePageInner() {
         err instanceof Error ? err.message : "Failed to start pipeline."
       );
     }
-  }, [username, router, selectedSources, excludedRepos]);
+  }, [username, router, selectedSources, excludedRepos, sourceIdentifiers]);
 
   // Auto-start if mini is already processing
   useEffect(() => {
@@ -681,14 +699,16 @@ function CreatePageInner() {
 
 export default function CreatePage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-[80vh] items-center justify-center">
-          <p className="text-muted-foreground">Loading...</p>
-        </div>
-      }
-    >
-      <CreatePageInner />
-    </Suspense>
+    <AuthGate icon={Github} message="Sign in with GitHub to create a mini.">
+      <Suspense
+        fallback={
+          <div className="flex min-h-[80vh] items-center justify-center">
+            <p className="text-muted-foreground">Loading...</p>
+          </div>
+        }
+      >
+        <CreatePageInner />
+      </Suspense>
+    </AuthGate>
   );
 }

@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { AuthGate } from "@/components/auth-gate";
 import { Building2, Plus, Users } from "lucide-react";
 
 interface OrgSummary {
@@ -31,6 +32,7 @@ export default function OrgsPage() {
   }, []);
 
   return (
+    <AuthGate icon={Building2} message="Sign in to manage your organizations.">
     <div className="mx-auto max-w-6xl px-4 py-12">
       <div className="mb-8 flex items-center justify-between">
         <div>
@@ -119,5 +121,6 @@ export default function OrgsPage() {
         </div>
       )}
     </div>
+    </AuthGate>
   );
 }

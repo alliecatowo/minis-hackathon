@@ -11,7 +11,7 @@ import { AddMiniDialog } from "@/components/add-mini-dialog";
 import { useAuth } from "@/lib/auth";
 import { ArrowLeft, Plus, X, Users } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
+const API_BASE = "/api/proxy";
 
 interface TeamMember {
   mini_id: number;
@@ -65,7 +65,7 @@ export default function TeamDetailPage() {
     setRemoving(member.username);
     try {
       const { removeTeamMember } = await import("@/lib/api");
-      await removeTeamMember(teamId, member.mini_id);
+      await removeTeamMember(String(teamId), String(member.mini_id));
       await fetchTeam();
     } catch {
       // Silently fail, could show toast

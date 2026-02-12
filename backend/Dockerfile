@@ -1,5 +1,7 @@
 FROM python:3.13-slim
 
+RUN apt-get update && apt-get install -y --no-install-recommends gosu libpq-dev && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Install uv for fast dependency resolution
@@ -14,17 +16,19 @@ RUN uv sync --no-install-project
 # Copy application code
 COPY . .
 
-# Create non-root user and give ownership of app + data dirs
+# Create non-root user and give ownership of app dir
 RUN useradd --create-home appuser && \
     mkdir -p /data && \
     chown -R appuser:appuser /app /data
-USER appuser
 
-# Default DATABASE_URL points to the Fly.io persistent volume mount
-ENV DATABASE_URL="sqlite+aiosqlite:////data/minis.db"
+# Default DATABASE_URL — override with NEON_DATABASE_URL for Neon
+ENV DATABASE_URL="postgresql+asyncpg://localhost:5432/minis"
 
 # Expose port (overridden by $PORT at runtime)
 EXPOSE 8000
 
-# Run directly from the venv to avoid uv sync at runtime
+# Entrypoint: fix volume permissions (mounted as root by Fly.io) then drop to appuser
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

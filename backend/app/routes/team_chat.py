@@ -7,8 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from app.core.access import require_team_access
 from app.core.agent import AgentEvent, run_agent_streaming
-from app.core.auth import get_optional_user
+from app.core.auth import get_current_user
+from app.core.rate_limit import check_rate_limit
 from app.db import get_session
 from app.models.mini import Mini
 from app.models.team import Team, TeamMember
@@ -42,17 +44,21 @@ async def _collect_mini_response(
 
 @router.post("/{team_id}/chat")
 async def team_chat(
-    team_id: int,
+    team_id: str,
     body: TeamChatRequest,
     session: AsyncSession = Depends(get_session),
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """Send a message to all minis in a team and stream their responses via SSE."""
+    await check_rate_limit(user.id, "team_chat", session)
+
     # Fetch team
     result = await session.execute(select(Team).where(Team.id == team_id))
     team = result.scalar_one_or_none()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
+
+    await require_team_access(team, user, session)
 
     # Fetch member minis
     stmt = (

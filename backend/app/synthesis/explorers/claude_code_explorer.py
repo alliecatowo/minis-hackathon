@@ -94,6 +94,13 @@ deeper into a subset of the evidence.
 Claude Code conversations are the "agent_chat" context — save representative \
 quotes using context_key "agent_chat" to capture how they talk to AI coding \
 assistants. Save at least 3-5 quotes this way.
+- **save_knowledge_node**: Save a node in the Knowledge Graph for any \
+technology, pattern, or tool they use or discuss. Set depth based on how \
+deeply they engage with it.
+- **save_knowledge_edge**: Link knowledge nodes (e.g., "FastAPI" USED_IN \
+"backend-project", "TypeScript" EXPERT_IN "generics").
+- **save_principle**: Save decision rules revealed by their choices (e.g., \
+trigger="test failure", action="fix before moving on", value="correctness").
 - **finish**: Call when you've thoroughly analyzed all evidence.
 
 ## Critical Instructions
