@@ -19,7 +19,8 @@ async function proxyRequest(req: NextRequest, params: { path: string[] }): Promi
   const path = params.path.join("/");
 
   // Log to confirm the BFF route is handling requests (not a Vercel edge rewrite)
-  const token = await getToken({ req, secret: process.env.AUTH_SECRET! }).catch(() => null);
+  const isSecure = req.url.startsWith("https");
+  const token = await getToken({ req, secret: process.env.AUTH_SECRET!, secureCookie: isSecure }).catch(() => null);
   console.log(`[proxy] ${req.method} /api/${path} hasAuth=${!!token?.backendUserId}`);
 
   // Debug endpoint
