@@ -1,18 +1,20 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 
 function AuthCallbackContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const [error, setError] = useState<string | null>(null);
+  const initiated = useRef(false);
 
   useEffect(() => {
-    const session = searchParams.get("session");
+    if (initiated.current) return;
+    initiated.current = true;
 
+    const session = searchParams.get("session");
+    
     if (!session) {
-      setError("No session token received");
+      window.location.href = "/?error=no_session";
       return;
     }
 
@@ -25,24 +27,13 @@ function AuthCallbackContent() {
         if (res.ok) {
           window.location.href = "/";
         } else {
-          setError("Failed to establish session");
+          window.location.href = "/?error=session_failed";
         }
       })
-      .catch(() => setError("Failed to establish session"));
+      .catch(() => {
+        window.location.href = "/?error=session_failed";
+      });
   }, [searchParams]);
-
-  if (error) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center">
-          <p className="text-lg text-red-500">{error}</p>
-          <a href="/" className="mt-4 block text-blue-500 hover:underline">
-            Go home
-          </a>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex min-h-screen items-center justify-center">
