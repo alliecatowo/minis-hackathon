@@ -25,6 +25,8 @@ jobs:
       - name: Create Neon branch
         id: neon-branch
         uses: neondatabase/create-branch-action@v5
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         with:
           project_id: ${{ secrets.NEON_PROJECT_ID }}
           branch_name: pr-${{ github.event.number }}
@@ -104,6 +106,8 @@ jobs:
     steps:
       - name: Delete Neon branch
         uses: neondatabase/delete-branch-action@v3
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         with:
           project_id: ${{ secrets.NEON_PROJECT_ID }}
           branch_name: pr-${{ github.event.number }}
