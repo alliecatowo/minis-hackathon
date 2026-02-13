@@ -142,7 +142,7 @@ cd mcp-server && uv run minis-mcp
 
 ## Live Demo
 
-**[https://frontend-red-one-13.vercel.app](https://frontend-red-one-13.vercel.app)**
+**[https://my-mini.me](https://my-mini.me)**
 
 ## Deployment
 

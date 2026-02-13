@@ -48,13 +48,17 @@ jobs:
             });
             const botComment = comments.find(c => c.user.type === 'Bot' && c.body.includes('## Preview Deployment'));
             
+            const branch = '${{ github.head_ref }}'.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+            
             const body = `## Preview Deployment
             
             | Service | URL |
             |---------|-----|
-            | **Frontend** | https://${{ github.head_ref }}--frontend-red-one-13.vercel.app |
+            | **Frontend** | https://preview-${branch}.my-mini.me |
             | **Backend** | https://minis-api.fly.dev (production, uses Neon pr-${{ github.event.number }} branch) |
             | **Database** | Neon branch \`pr-${{ github.event.number }}\` |
+            
+            > Note: Custom domain requires DNS propagation. Vercel preview: https://${{ github.head_ref }}--frontend-red-one-13.vercel.app
             
             Merging this PR will deploy to production and clean up the Neon branch.`;
             
