@@ -177,7 +177,7 @@ class TestAssembleMemory:
         report = make_report(memory_entries=entries)
         result = assemble_memory([report], username="testuser")
 
-        assert "# testuser's Knowledge & Beliefs" in result
+        assert "# testuser's Unified Memory" in result
         assert "## Voice & Typing Patterns" in result
         assert "## Technical Expertise" in result
         assert "## Engineering Values & Tradeoffs" in result
@@ -240,7 +240,7 @@ class TestAssembleMemory:
     def test_no_username_title(self):
         report = make_report(memory_entries=[make_memory()])
         result = assemble_memory([report])
-        assert "# Knowledge & Beliefs" in result
+        assert "# Unified Memory" in result
 
 
 # ── extract_values_json ──────────────────────────────────────────────
