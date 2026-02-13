@@ -227,9 +227,7 @@ to convincingly speak in their voice and make decisions the way they do?
 {evidence}
 """
 
-    async def explore(
-        self, username: str, evidence: str, raw_data: dict
-    ) -> ExplorerReport:
+    async def explore(self, username: str, evidence: str, raw_data: dict) -> ExplorerReport:
         """Override to add message read tools for full data access."""
         all_messages: list[dict[str, Any]] = raw_data.get("all_messages", [])
         messages_by_project: dict[str, list[dict[str, Any]]] = raw_data.get(
@@ -258,12 +256,12 @@ to convincingly speak in their voice and make decisions the way they do?
             tech_mention = sum(1 for m in all_messages if m.get("has_tech_mention"))
 
             lines = [
-                f"## Claude Code Data Overview",
+                "## Claude Code Data Overview",
                 f"- Total messages: {total}",
                 f"- Projects: {project_count}",
                 f"- Time range: {time_range or 'unknown'}",
-                f"",
-                f"### Signal Distribution",
+                "",
+                "### Signal Distribution",
                 f"- Personality signals: {personality}",
                 f"- Decision signals: {decision}",
                 f"- Architecture signals: {architecture}",
@@ -299,9 +297,7 @@ to convincingly speak in their voice and make decisions the way they do?
             if not page:
                 return f"No messages at offset {offset} (project has {len(msgs)} total)."
 
-            lines = [
-                f"## {project} — messages {offset + 1}-{offset + len(page)} of {len(msgs)}"
-            ]
+            lines = [f"## {project} — messages {offset + 1}-{offset + len(page)} of {len(msgs)}"]
             for i, m in enumerate(page):
                 ts = m.get("timestamp", "")[:19]
                 raw = m.get("raw_text", m.get("text", ""))
@@ -315,7 +311,7 @@ to convincingly speak in their voice and make decisions the way they do?
             if remaining > 0:
                 lines.append(
                     f"\n--- {remaining} more messages. "
-                    f"Call read_messages(project=\"{project}\", offset={offset + limit}) to continue. ---"
+                    f'Call read_messages(project="{project}", offset={offset + limit}) to continue. ---'
                 )
 
             return "\n".join(lines)
@@ -329,14 +325,10 @@ to convincingly speak in their voice and make decisions the way they do?
                 pattern = re.compile(re.escape(query), re.IGNORECASE)
 
             if project:
-                search_pool = [
-                    (project, m) for m in messages_by_project.get(project, [])
-                ]
+                search_pool = [(project, m) for m in messages_by_project.get(project, [])]
             else:
                 search_pool = [
-                    (proj, m)
-                    for proj, msgs in messages_by_project.items()
-                    for m in msgs
+                    (proj, m) for proj, msgs in messages_by_project.items() for m in msgs
                 ]
 
             matches: list[str] = []
@@ -394,7 +386,7 @@ to convincingly speak in their voice and make decisions the way they do?
             if remaining > 0:
                 lines.append(
                     f"\n--- {remaining} more. "
-                    f"Call read_conversation(project=\"{project}\", offset={offset + limit}) to continue. ---"
+                    f'Call read_conversation(project="{project}", offset={offset + limit}) to continue. ---'
                 )
 
             return "\n".join(lines)
@@ -426,7 +418,10 @@ to convincingly speak in their voice and make decisions the way they do?
                 if cm.get("timestamp") == target_ts and cm.get("role") == "user":
                     # Also check text similarity to handle multiple user msgs at same timestamp
                     cm_text = cm.get("raw_text", cm.get("text", ""))
-                    if cm_text[:100] == target_msg.get("raw_text", target_msg.get("text", ""))[:100]:
+                    if (
+                        cm_text[:100]
+                        == target_msg.get("raw_text", target_msg.get("text", ""))[:100]
+                    ):
                         conv_idx = ci
                         break
 
@@ -447,7 +442,7 @@ to convincingly speak in their voice and make decisions the way they do?
 
             lines = [
                 f"## Context around message #{message_index} in {project}",
-                f"Target: \"{target_text}...\"",
+                f'Target: "{target_text}..."',
                 f"Showing conversation positions {start + 1}-{end}:",
                 "",
             ]

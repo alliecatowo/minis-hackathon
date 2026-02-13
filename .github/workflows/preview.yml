@@ -18,6 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Create Neon branch
         id: neon-branch
         uses: neondatabase/create-branch-action@v5
@@ -39,11 +43,12 @@ jobs:
           env: |
             NEON_DATABASE_URL=${{ steps.neon-branch.outputs.db_url_with_pooler }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+            GITHUB_TOKEN=${{ secrets.GH_TOKEN }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
-            SERVICE_JWT_SECRET=${{ secrets.SERVICE_JWT_SECRET }}
+            SERVICE_JWT_SECRET=${{ secrets.JWT_SECRET }}
 
       - name: Update Vercel preview env
+        if: ${{ secrets.VERCEL_TOKEN != '' }}
         run: |
           curl -X PATCH "https://api.vercel.com/v9/projects/${{ secrets.VERCEL_PROJECT_ID }}/env?teamId=${{ secrets.VERCEL_ORG_ID }}" \
             -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
