@@ -135,28 +135,28 @@ const steps = [
 const highlights = [
   {
     icon: Search,
-    title: "Multi-Source Analysis",
-    description: "GitHub, Stack Overflow, Hacker News, blogs",
+    title: "Predict Before You Ask",
+    description: "Request a review from your busy senior and predict what they'll say—without bothering them",
   },
   {
     icon: Bot,
     title: "Agentic Pipeline",
-    description: "Explorer agents mine personality from each source",
+    description: "Explorer agents mine personality, decisions, and values from each source",
   },
   {
     icon: Users,
     title: "Team Collaboration",
-    description: "Assemble teams of minis for reviews and brainstorms",
+    description: "Assemble teams of minis for reviews and brainstorms. Get Linus and DHH to debate your architecture",
   },
   {
     icon: Wrench,
-    title: "MCP Integration",
-    description: "Use minis as tools in Claude Code",
+    title: "Claude Code Integration",
+    description: "@alliecatowo in your terminal. Talk to minis while you code",
   },
   {
-    icon: Download,
-    title: "Subagent Export",
-    description: "Export as Claude Code agent definitions",
+    icon: MessageSquare,
+    title: "Slack & GitHub",
+    description: "@mention any mini in Slack or GitHub PRs for instant feedback",
   },
   {
     icon: Radar,
@@ -192,8 +192,8 @@ function LandingPage() {
           </span>
         </h1>
         <p className="mt-4 max-w-lg text-base text-muted-foreground sm:text-lg">
-          Enter a GitHub username. We&apos;ll mine their commits, PRs, and
-          reviews to create an AI that thinks like them.
+          It&apos;s not about how smart an AI is. It&apos;s about capturing how{" "}
+          <strong>your team</strong> thinks—their decisions, expertise, values, and experiences.
         </p>
         <HeroInput />
       </section>
@@ -212,7 +212,7 @@ function LandingPage() {
                 </Avatar>
                 <div>
                   <h2 className="text-lg font-semibold">
-                    Chat with {promoMini.display_name || promoMini.username}
+                    Chat with our founder, Allie!
                   </h2>
                   {promoMini.bio && (
                     <p className="mt-1 text-sm text-muted-foreground line-clamp-2">

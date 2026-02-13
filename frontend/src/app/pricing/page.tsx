@@ -28,6 +28,7 @@ const tiers = [
     cta: "Get Started",
     href: "/",
     highlighted: false,
+    comingSoon: false,
   },
   {
     name: "Team",
@@ -38,12 +39,13 @@ const tiers = [
       "25 minis",
       "Organization teams",
       "Private repo analysis",
-      "Subagent export",
+      "Slack integration",
       "Priority processing",
     ],
-    cta: "Start Free Trial",
-    href: "/",
+    cta: "Coming Soon",
+    href: "#",
     highlighted: true,
+    comingSoon: true,
   },
   {
     name: "Enterprise",
@@ -60,24 +62,25 @@ const tiers = [
     cta: "Contact Us",
     href: "/",
     highlighted: false,
+    comingSoon: false,
   },
 ];
 
 const faqs = [
   {
-    question: "Is the free tier really free?",
-    answer:
-      "Yes, forever. Create up to 5 minis from public GitHub data.",
-  },
-  {
     question: "How accurate are the personality clones?",
     answer:
-      "Accuracy depends on the developer\u2019s public footprint. More activity = more accurate clone.",
+      "Accuracy depends on the developer's public footprint. More activity = more accurate clone. The more they've written, the better we capture their decision-making style.",
   },
   {
     question: "Can I use minis commercially?",
     answer:
       "Yes, all paid plans include commercial usage rights.",
+  },
+  {
+    question: "What's the difference between a mini and a generic AI assistant?",
+    answer:
+      "A mini captures the specific combination of a person's decisions, expertise, values, and experiences. It's not about intelligence—it's about predicting what *that specific person* would say.",
   },
 ];
 
@@ -93,7 +96,6 @@ export default function PricingPage() {
         </p>
       </div>
 
-      {/* Tiers */}
       <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-3">
         {tiers.map((tier) => (
           <Card
@@ -110,7 +112,14 @@ export default function PricingPage() {
               </div>
             )}
             <CardHeader>
-              <CardTitle className="text-lg">{tier.name}</CardTitle>
+              <CardTitle className="text-lg">
+                {tier.name}
+                {tier.comingSoon && (
+                  <span className="ml-2 inline-block rounded-full bg-chart-1/20 px-2 py-0.5 text-[10px] font-medium text-chart-1">
+                    Coming Soon
+                  </span>
+                )}
+              </CardTitle>
               <CardDescription>{tier.description}</CardDescription>
               <div className="pt-2">
                 <span className="text-3xl font-bold">{tier.price}</span>
@@ -136,6 +145,7 @@ export default function PricingPage() {
                 asChild
                 variant={tier.highlighted ? "default" : "outline"}
                 className="w-full"
+                disabled={tier.comingSoon}
               >
                 <Link href={tier.href}>{tier.cta}</Link>
               </Button>
@@ -144,7 +154,6 @@ export default function PricingPage() {
         ))}
       </div>
 
-      {/* FAQ */}
       <div className="mx-auto mt-24 max-w-2xl">
         <h2 className="mb-8 text-center text-2xl font-bold tracking-tight">
           Frequently Asked Questions

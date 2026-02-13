@@ -45,6 +45,9 @@ export function Nav() {
             <Link href="/features" className={linkClass("/features")}>
               Features
             </Link>
+            <Link href="/roadmap" className={linkClass("/roadmap")}>
+              Roadmap
+            </Link>
             <Link href="/pricing" className={linkClass("/pricing")}>
               Pricing
             </Link>
@@ -129,6 +132,9 @@ export function Nav() {
           <div className="flex flex-col gap-3">
             <Link href="/features" className={linkClass("/features")} onClick={() => setMenuOpen(false)}>
               Features
+            </Link>
+            <Link href="/roadmap" className={linkClass("/roadmap")} onClick={() => setMenuOpen(false)}>
+              Roadmap
             </Link>
             <Link href="/pricing" className={linkClass("/pricing")} onClick={() => setMenuOpen(false)}>
               Pricing
