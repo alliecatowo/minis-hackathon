@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 # Max retries for transient Gemini empty-choices / malformed responses
 _MAX_RETRIES = 3
+# Extra retries specifically for rate-limit (429) errors with longer backoff
+_MAX_RATE_LIMIT_RETRIES = 5
+_RATE_LIMIT_BACKOFF_BASE = 10  # seconds
 
 # Gemini-specific params to disable thinking (prevents multi-turn tool call failures)
 # See: https://github.com/BerriAI/litellm/issues/17949
@@ -132,9 +135,10 @@ async def run_agent(
     ]
 
     for turn in range(max_turns):
-        # Retry loop for transient empty-choices / malformed responses
+        # Retry loop with separate handling for rate-limit vs transient errors
         msg = None
-        for attempt in range(_MAX_RETRIES):
+        rate_limit_retries = 0
+        for attempt in range(_MAX_RETRIES + _MAX_RATE_LIMIT_RETRIES):
             try:
                 # Build completion kwargs
                 kwargs: dict[str, Any] = {
@@ -174,19 +178,52 @@ async def run_agent(
                 msg = response.choices[0].message
                 break
             except Exception as e:
-                logger.warning(
-                    "Tool-calling error on turn %d attempt %d: %s", turn, attempt, e
-                )
-                await asyncio.sleep(0.5 * (attempt + 1))
-                continue
+                is_rate_limit = "RateLimitError" in type(e).__name__ or "429" in str(e)
+                if is_rate_limit and rate_limit_retries < _MAX_RATE_LIMIT_RETRIES:
+                    rate_limit_retries += 1
+                    wait = _RATE_LIMIT_BACKOFF_BASE * rate_limit_retries
+                    logger.warning(
+                        "Rate limited on turn %d (retry %d/%d), waiting %ds",
+                        turn, rate_limit_retries, _MAX_RATE_LIMIT_RETRIES, wait,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                elif not is_rate_limit and attempt < _MAX_RETRIES:
+                    logger.warning(
+                        "Tool-calling error on turn %d attempt %d: %s", turn, attempt, e
+                    )
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                else:
+                    logger.warning(
+                        "Retries exhausted on turn %d: %s", turn, e
+                    )
+                    break
 
         if msg is None:
             # All retries exhausted — fall back to no-tools mode
             logger.warning("All retries exhausted on turn %d, falling back", turn)
             return await _fallback_no_tools(messages, model, tool_outputs, turn + 1, api_key=api_key)
 
-        # If no tool calls, agent is done
+        # If no tool calls, agent wants to stop
         if not msg.tool_calls:
+            # For required_until_finish: the LLM is trying to bail via text response.
+            # Append the text and nudge it to keep calling tools on the next turn.
+            if tool_choice_strategy == "required_until_finish":
+                logger.warning(
+                    "Agent returned text on turn %d despite required tool_choice, nudging to continue",
+                    turn,
+                )
+                messages.append({"role": "assistant", "content": msg.content or ""})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You MUST call a tool. You cannot respond with text. "
+                        "Continue your analysis using the available tools, or "
+                        "call finish if you believe you are done."
+                    ),
+                })
+                continue
             return AgentResult(
                 final_response=msg.content,
                 tool_outputs=tool_outputs,
@@ -224,15 +261,26 @@ async def run_agent(
                 }
             )
 
-        # Check if any tool call was the designated finish tool
-        if finish_tool_name and any(
-            tc.function.name == finish_tool_name for tc in msg.tool_calls
-        ):
-            return AgentResult(
-                final_response=None,
-                tool_outputs=tool_outputs,
-                turns_used=turn + 1,
-            )
+        # Check if the finish tool was called AND accepted (handler didn't reject).
+        # A gated finish handler returns a string starting with "NOT YET" when
+        # rejecting — in that case, keep going so the agent can do more work.
+        if finish_tool_name:
+            for tc in msg.tool_calls:
+                if tc.function.name == finish_tool_name:
+                    # Find the corresponding tool result message
+                    tc_id = tc.id[:64] if tc.id else ""
+                    tool_result_msg = next(
+                        (m for m in messages if m.get("role") == "tool" and m.get("tool_call_id") == tc_id),
+                        None,
+                    )
+                    result_content = tool_result_msg.get("content", "") if tool_result_msg else ""
+                    if not result_content.startswith("NOT YET"):
+                        return AgentResult(
+                            final_response=None,
+                            tool_outputs=tool_outputs,
+                            turns_used=turn + 1,
+                        )
+                    break  # Finish was rejected — continue agent loop
 
     # Exhausted max turns
     return AgentResult(
@@ -345,7 +393,8 @@ async def run_agent_streaming(
 
     for turn in range(max_turns):
         msg = None
-        for attempt in range(_MAX_RETRIES):
+        rate_limit_retries = 0
+        for attempt in range(_MAX_RETRIES + _MAX_RATE_LIMIT_RETRIES):
             try:
                 kwargs: dict[str, Any] = {
                     "model": model,
@@ -374,6 +423,16 @@ async def run_agent_streaming(
                 msg = response.choices[0].message
                 break
             except Exception as e:
+                is_rate_limit = "RateLimitError" in type(e).__name__ or "429" in str(e)
+                if is_rate_limit and rate_limit_retries < _MAX_RATE_LIMIT_RETRIES:
+                    rate_limit_retries += 1
+                    wait = _RATE_LIMIT_BACKOFF_BASE * rate_limit_retries
+                    logger.warning(
+                        "Rate limited on turn %d (retry %d/%d), waiting %ds",
+                        turn, rate_limit_retries, _MAX_RATE_LIMIT_RETRIES, wait,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
                 logger.warning("Streaming agent error turn %d attempt %d: %s", turn, attempt, e)
                 await asyncio.sleep(0.5 * (attempt + 1))
 
@@ -446,12 +505,20 @@ async def run_agent_streaming(
                 data=json.dumps({"tool": fn_name, "summary": result_str[:200]}),
             )
 
-        # Check if any tool call was the designated finish tool
-        if finish_tool_name and any(
-            tc.function.name == finish_tool_name for tc in msg.tool_calls
-        ):
-            yield AgentEvent(type="done", data="")
-            return
+        # Check if the finish tool was called AND accepted
+        if finish_tool_name:
+            for tc in msg.tool_calls:
+                if tc.function.name == finish_tool_name:
+                    tc_id = tc.id[:64] if tc.id else ""
+                    tool_result_msg = next(
+                        (m for m in messages if m.get("role") == "tool" and m.get("tool_call_id") == tc_id),
+                        None,
+                    )
+                    result_content = tool_result_msg.get("content", "") if tool_result_msg else ""
+                    if not result_content.startswith("NOT YET"):
+                        yield AgentEvent(type="done", data="")
+                        return
+                    break  # Finish was rejected — continue
 
     # Max turns exhausted — force a final streaming response without tools
     # Strip tool/tool_calls since we're not passing tool definitions
