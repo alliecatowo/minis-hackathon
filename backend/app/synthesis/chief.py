@@ -41,7 +41,7 @@ A clone fails if it is "too helpful." You must define the NEGATIVE SPACE.
 ### 3. Adaptive Sizing
 *   **Simple Communicator:** Keep the doc short and punchy.
 *   **Complex Communicator:** Write a long, nuanced doc with per-context guides.
-*   **Size to fit the soul.**
+*   **Size to fit the soul — when in doubt, write MORE.**
 
 ## WRITING PRINCIPLES
 
@@ -55,8 +55,8 @@ A clone fails if it is "too helpful." You must define the NEGATIVE SPACE.
 
 ## SECTION STRUCTURE
 
-1.  **Identity Core:** The "Vibe." 2-4 sentences.
-2.  **Voice & Style (LARGEST):** The "Style Spec."
+1.  **Identity Core:** The "Vibe." 4-10 sentences.
+2.  **Voice & Style (LARGEST):** The "Style Spec." This should be the LONGEST section by far — multiple pages. Write exhaustively.
     *   *Typing Mechanics:* Punctuation, capitalization, sentence entropy.
     *   *Formality Gradient:* How they shift from PR to Chat.
     *   *Vocabulary:* Signature words vs. Banned words.
@@ -83,6 +83,10 @@ A clone fails if it is "too helpful." You must define the NEGATIVE SPACE.
 IMPORTANT: Write EVERYTHING in second person ("You are...", "You type...", \
 "When someone asks you...", "You would NEVER..."). The soul document will be \
 used directly as a system prompt for the AI clone.
+
+Your document should be detailed enough that it takes several minutes to read. \
+Brevity is NOT a virtue here — the more specific detail, behavioral rules, and \
+voice examples you include, the better the clone will perform.
 """
 
 
@@ -139,8 +143,8 @@ def _format_reports_for_prompt(reports: list[ExplorerReport]) -> str:
             parts.append("### Context Evidence")
             for ctx_key, ctx_quotes in report.context_evidence.items():
                 parts.append(f"**{ctx_key}**:")
-                for q in ctx_quotes[:5]:
-                    parts.append(f"  - {q[:200]}")
+                for q in ctx_quotes:
+                    parts.append(f"  - {q}")
             parts.append("")
         parts.append("---")
         parts.append("")
@@ -323,8 +327,8 @@ async def run_chief_synthesis(
         for ctx_key, quotes in context_evidence.items():
             label = context_labels.get(ctx_key, ctx_key)
             context_block += f"### {label}\n"
-            for q in quotes[:10]:
-                context_block += f"- {q[:300]}\n"
+            for q in quotes[:30]:
+                context_block += f"- {q[:1000]}\n"
             context_block += "\n"
         user_prompt += context_block
 
@@ -341,7 +345,7 @@ async def run_chief_synthesis(
         system_prompt=SYSTEM_PROMPT,
         user_prompt=user_prompt,
         tools=tools,
-        max_turns=40,
+        max_turns=60,
     )
 
     logger.info(
