@@ -1,0 +1,123 @@
+name: Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+env:
+  FLY_REGION: iad
+  NEON_REGION: aws-us-east-1
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    if: github.event.action != 'closed'
+    outputs:
+      fly_url: ${{ steps.deploy-backend.outputs.url }}
+      neon_branch: ${{ steps.neon-branch.outputs.branch_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Neon branch
+        id: neon-branch
+        uses: neondatabase/create-branch-action@v5
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          branch_name: pr-${{ github.event.number }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+
+      - name: Deploy to Fly review app
+        id: deploy-backend
+        uses: superfly/fly-pr-review-apps@1.0.0
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        with:
+          name: minis-api-pr-${{ github.event.number }}
+          config: backend/fly.toml
+          dockerfile: backend/Dockerfile
+          buildcontext: backend
+          env: |
+            NEON_DATABASE_URL=${{ steps.neon-branch.outputs.db_url_with_pooler }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            SERVICE_JWT_SECRET=${{ secrets.SERVICE_JWT_SECRET }}
+
+      - name: Update Vercel preview env
+        run: |
+          curl -X PATCH "https://api.vercel.com/v9/projects/${{ secrets.VERCEL_PROJECT_ID }}/env?teamId=${{ secrets.VERCEL_ORG_ID }}" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "key": "BACKEND_URL",
+              "value": "${{ steps.deploy-backend.outputs.url }}",
+              "type": "plain",
+              "target": ["preview"],
+              "gitBranch": "${{ github.head_ref }}"
+            }'
+
+      - name: Comment PR with preview URLs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const botComment = comments.find(c => c.user.type === 'Bot' && c.body.includes('## Preview Deployment'));
+            
+            const body = `## Preview Deployment
+            
+            | Service | URL |
+            |---------|-----|
+            | **Frontend** | https://${{ github.head_ref }}--frontend-red-one-13.vercel.app |
+            | **Backend** | ${{ steps.deploy-backend.outputs.url }} |
+            | **Database** | Neon branch \`pr-${{ github.event.number }}\` |
+            
+            Merging this PR will deploy to production and clean up preview resources.`;
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            }
+
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.action == 'closed'
+    steps:
+      - name: Delete Neon branch
+        uses: neondatabase/delete-branch-action@v3
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          branch_name: pr-${{ github.event.number }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+        continue-on-error: true
+
+      - name: Delete Fly review app
+        run: |
+          curl -X DELETE "https://api.machines.dev/v1/apps/minis-api-pr-${{ github.event.number }}" \
+            -H "Authorization: Bearer ${{ secrets.FLY_API_TOKEN }}"
+        continue-on-error: true
+
+      - name: Comment PR cleanup
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '🧹 Preview resources have been cleaned up.'
+            });
