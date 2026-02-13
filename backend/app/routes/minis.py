@@ -282,6 +282,7 @@ async def list_mini_repos(
         try:
             repos = json.loads(cached.data_json)
         except json.JSONDecodeError:
+            # Invalid JSON in cache, use empty list
             pass
 
     # Get repo configs

@@ -8,8 +8,6 @@ import { Input } from "@/components/ui/input";
 import { AuthGate } from "@/components/auth-gate";
 import { ArrowLeft, Users } from "lucide-react";
 
-const API_BASE = "/api/proxy";
-
 function NewTeamForm() {
   const router = useRouter();
   const [name, setName] = useState("");

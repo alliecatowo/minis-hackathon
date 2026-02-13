@@ -4,7 +4,6 @@ import uuid
 from sqlalchemy import (
     DateTime,
     ForeignKey,
-    Integer,
     JSON,
     String,
     Text,

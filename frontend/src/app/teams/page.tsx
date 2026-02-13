@@ -8,8 +8,6 @@ import { TeamCard } from "@/components/team-card";
 import { AuthGate } from "@/components/auth-gate";
 import { Users, Plus } from "lucide-react";
 
-const API_BASE = "/api/proxy";
-
 interface TeamSummary {
   id: number;
   name: string;

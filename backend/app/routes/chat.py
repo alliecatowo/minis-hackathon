@@ -108,9 +108,6 @@ def _build_chat_tools(mini: Mini) -> list[AgentTool]:
         if not matching_nodes:
             return f"No knowledge graph entries found matching '{query}'."
 
-        # Build node ID set for edge lookup
-        matched_ids = {n["id"] for n in matching_nodes}
-
         # Format results
         parts: list[str] = []
         for node in matching_nodes:
