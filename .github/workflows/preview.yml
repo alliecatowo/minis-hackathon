@@ -3,6 +3,7 @@ name: Preview
 on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
 
 env:
   FLY_REGION: iad
