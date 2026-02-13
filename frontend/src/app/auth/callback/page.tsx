@@ -11,17 +11,17 @@ function AuthCallbackContent() {
     if (initiated.current) return;
     initiated.current = true;
 
-    const session = searchParams.get("session");
+    const token = searchParams.get("token");
     
-    if (!session) {
-      window.location.href = "/?error=no_session";
+    if (!token) {
+      window.location.href = "/?error=no_token";
       return;
     }
 
     fetch("/api/auth/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session }),
+      body: JSON.stringify({ token }),
     })
       .then((res) => {
         if (res.ok) {
