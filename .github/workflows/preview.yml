@@ -32,7 +32,7 @@ jobs:
           project_id: ${{ secrets.NEON_PROJECT_ID }}
           branch_name: pr-${{ github.event.number }}
           api_key: ${{ secrets.NEON_API_KEY }}
-          role_name: neondb_owner
+          username: neondb_owner
 
       - name: Deploy to Fly review app
         id: deploy-backend
