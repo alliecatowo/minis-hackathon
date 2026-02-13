@@ -9,7 +9,11 @@ else is watching.
 
 from __future__ import annotations
 
-from app.synthesis.explorers.base import Explorer
+import re
+from typing import Any
+
+from app.core.agent import AgentTool
+from app.synthesis.explorers.base import Explorer, ExplorerReport
 
 
 class ClaudeCodeExplorer(Explorer):
@@ -138,29 +142,64 @@ sessions over days is a core value. An opinion from a single frustrated \
 moment is situational. Look for what they ALWAYS do, not what they JUST did. \
 If something only appears in recent messages, treat it with skepticism — it \
 might be a temporary mood, not a stable trait.
+
+## Exhaustiveness Requirements
+
+You have 50 turns. You MUST use them thoroughly:
+- Call get_overview() and list_projects() first.
+- Read messages from EVERY project, not just the first one.
+- Use search_messages with at least 5 different query patterns across all projects:
+  e.g., "I think", "should we", "frustrat|annoy", "love|great|awesome", "don't|shouldn't|never"
+- Use read_context_around for at least 5 interesting messages to understand triggers.
+- Cover ALL memory categories: communication_style, decision_making, emotional_patterns,
+  technical_identity, values, working_style, opinions, humor, expertise.
+- Save findings AS YOU READ, not all at the end.
+- Do not finish early. Use all available turns to build the deepest possible profile.
 """
 
     def user_prompt(self, username: str, evidence: str, raw_data: dict) -> str:
         project_count = raw_data.get("project_count", 0)
+        total_messages = raw_data.get("total_message_count", 0)
         projects = raw_data.get("projects", [])
         project_list = ", ".join(projects[:10])
         if len(projects) > 10:
             project_list += f" (+{len(projects) - 10} more)"
 
         return f"""\
-Analyze the following Claude Code conversation evidence for **{username}**.
+Analyze Claude Code conversation evidence for **{username}**.
 
-This evidence comes from {project_count} project(s): {project_list}
+This evidence comes from {project_count} project(s) with {total_messages} \
+total messages: {project_list}
 
-The messages below are things {username} actually typed to an AI coding \
-assistant. They are organized by signal type — decision-making messages first \
-(most valuable), then personality/opinion signals, then architecture \
-discussions, then technical preferences.
+## IMPORTANT: Use Your Read Tools Systematically
 
-## Instructions
+You have access to the FULL, unfiltered message data via tools. The evidence \
+summary below is just an index — it only contains filtered highlights. To do \
+a thorough analysis, you MUST:
 
-1. Read through ALL the evidence carefully. Don't skim.
-2. Use **save_memory** to record specific observations:
+1. Call **get_overview()** to see high-level stats and signal distribution.
+2. Call **list_projects()** to see all projects with message counts.
+3. For EACH project, call **read_messages(project=<name>)** to page through \
+ALL user messages. Use offset/limit to paginate. Read EVERY page.
+4. Use **search_messages(query=<pattern>)** to find specific patterns across \
+all projects (e.g., search for "I think", "should", "hate", "love", etc.)
+5. When you find interesting messages (strong emotions, opinions, frustration, \
+excitement), use **read_context_around(project, message_index)** to see \
+what the AI said that TRIGGERED that reaction. Understanding WHY they said \
+something is as important as WHAT they said.
+6. Use **read_conversation(project)** to read full conversation threads \
+(user + assistant) when you need to understand the flow of an interaction.
+7. ONLY after reading and understanding the full context, start saving analysis.
+
+The INSIGHT LOOP: Read user messages → spot emotion/opinion → check context \
+→ understand the trigger → save the finding with full understanding. \
+Example: "She's usually chill, but gets sharp when someone suggests a change \
+that would break production" — you can only learn this by seeing BOTH the \
+user message AND what the AI proposed.
+
+## What to Save
+
+Use **save_memory** to record specific observations:
    - Category "communication_style": How they talk (terse? verbose? casual? formal?)
    - Category "decision_making": What they prioritize, how they weigh trade-offs
    - Category "emotional_patterns": What triggers frustration/excitement, how they express it
@@ -170,13 +209,15 @@ discussions, then technical preferences.
    - Category "opinions": Strong takes on specific tools/patterns/practices
    - Category "humor": If they joke or use irony, capture the style
    - Category "expertise": What they clearly know deeply vs. are learning
-3. Use **save_finding** for broader personality insights (write as if \
+Use **save_finding** for broader personality insights (write as if \
 describing a real person to someone who will roleplay as them).
-4. Use **save_quote** for the most personality-revealing quotes — ones that \
+Use **save_quote** for the most personality-revealing quotes — ones that \
 capture voice, attitude, and character. Include what was happening (context).
-5. If you see an interesting cluster of messages, use **analyze_deeper** to \
-look for patterns you might miss on a surface read.
-6. Call **finish** when done.
+Use **save_context_evidence** with context_key "agent_chat" to save \
+representative quotes of how they talk to AI coding assistants. Save at \
+least 3-5 quotes this way.
+Use **analyze_deeper** if you spot interesting clusters worth deeper analysis.
+Call **finish** when done.
 
 Focus on what makes {username} DISTINCTIVE. What would someone need to know \
 to convincingly speak in their voice and make decisions the way they do?
@@ -185,6 +226,375 @@ to convincingly speak in their voice and make decisions the way they do?
 
 {evidence}
 """
+
+    async def explore(self, username: str, evidence: str, raw_data: dict) -> ExplorerReport:
+        """Override to add message read tools for full data access."""
+        all_messages: list[dict[str, Any]] = raw_data.get("all_messages", [])
+        messages_by_project: dict[str, list[dict[str, Any]]] = raw_data.get(
+            "messages_by_project", {}
+        )
+        conversations_by_project: dict[str, list[dict[str, Any]]] = raw_data.get(
+            "conversations_by_project", {}
+        )
+
+        async def get_overview() -> str:
+            """Return high-level stats about the Claude Code conversation data."""
+            total = len(all_messages)
+            project_count = len(messages_by_project)
+
+            # Compute time range
+            timestamps = [m.get("timestamp", "") for m in all_messages if m.get("timestamp")]
+            timestamps.sort()
+            time_range = ""
+            if timestamps:
+                time_range = f"{timestamps[0]} to {timestamps[-1]}"
+
+            # Signal distribution
+            personality = sum(1 for m in all_messages if m.get("has_personality"))
+            decision = sum(1 for m in all_messages if m.get("has_decision"))
+            architecture = sum(1 for m in all_messages if m.get("has_architecture"))
+            tech_mention = sum(1 for m in all_messages if m.get("has_tech_mention"))
+
+            lines = [
+                "## Claude Code Data Overview",
+                f"- Total messages: {total}",
+                f"- Projects: {project_count}",
+                f"- Time range: {time_range or 'unknown'}",
+                "",
+                "### Signal Distribution",
+                f"- Personality signals: {personality}",
+                f"- Decision signals: {decision}",
+                f"- Architecture signals: {architecture}",
+                f"- Tech mention signals: {tech_mention}",
+                "",
+                "### Projects",
+            ]
+            for proj, msgs in sorted(messages_by_project.items()):
+                lines.append(f"- {proj}: {len(msgs)} messages")
+
+            return "\n".join(lines)
+
+        async def list_projects() -> str:
+            """Return all project names with message counts and date ranges."""
+            lines = ["## Projects"]
+            for proj, msgs in sorted(messages_by_project.items()):
+                ts = [m.get("timestamp", "") for m in msgs if m.get("timestamp")]
+                ts.sort()
+                date_range = ""
+                if ts:
+                    date_range = f" ({ts[0][:10]} to {ts[-1][:10]})"
+                lines.append(f"- **{proj}**: {len(msgs)} messages{date_range}")
+            return "\n".join(lines)
+
+        async def read_messages(project: str, offset: int = 0, limit: int = 50) -> str:
+            """Read messages from a project with pagination."""
+            msgs = messages_by_project.get(project)
+            if msgs is None:
+                available = ", ".join(sorted(messages_by_project.keys()))
+                return f"Project '{project}' not found. Available: {available}"
+
+            page = msgs[offset : offset + limit]
+            if not page:
+                return f"No messages at offset {offset} (project has {len(msgs)} total)."
+
+            lines = [f"## {project} — messages {offset + 1}-{offset + len(page)} of {len(msgs)}"]
+            for i, m in enumerate(page):
+                ts = m.get("timestamp", "")[:19]
+                raw = m.get("raw_text", m.get("text", ""))
+                # Truncate very long messages for readability
+                if len(raw) > 1000:
+                    raw = raw[:1000] + "... (truncated)"
+                lines.append(f"\n### [{offset + i + 1}] {ts}")
+                lines.append(raw)
+
+            remaining = len(msgs) - (offset + len(page))
+            if remaining > 0:
+                lines.append(
+                    f"\n--- {remaining} more messages. "
+                    f'Call read_messages(project="{project}", offset={offset + limit}) to continue. ---'
+                )
+
+            return "\n".join(lines)
+
+        async def search_messages(query: str, project: str | None = None) -> str:
+            """Search messages by regex/substring. Optionally filter by project."""
+            try:
+                pattern = re.compile(query, re.IGNORECASE)
+            except re.error:
+                # Fall back to literal substring match
+                pattern = re.compile(re.escape(query), re.IGNORECASE)
+
+            if project:
+                search_pool = [(project, m) for m in messages_by_project.get(project, [])]
+            else:
+                search_pool = [
+                    (proj, m) for proj, msgs in messages_by_project.items() for m in msgs
+                ]
+
+            matches: list[str] = []
+            for proj, m in search_pool:
+                raw = m.get("raw_text", m.get("text", ""))
+                if pattern.search(raw):
+                    ts = m.get("timestamp", "")[:19]
+                    text = raw if len(raw) <= 500 else raw[:500] + "..."
+                    matches.append(f"[{proj}] {ts}: {text}")
+
+                if len(matches) >= 50:
+                    break
+
+            if not matches:
+                return f"No messages matching '{query}'."
+
+            header = f"## Search results for '{query}'"
+            if project:
+                header += f" in {project}"
+            header += f" ({len(matches)} matches"
+            if len(matches) >= 50:
+                header += ", showing first 50"
+            header += ")"
+
+            return header + "\n\n" + "\n\n".join(matches)
+
+        # TODO: Add LLM-powered semantic search tool (find_relevant) here.
+        # Should use llm_completion to understand meaning, not keyword matching.
+
+        async def read_conversation(project: str, offset: int = 0, limit: int = 20) -> str:
+            """Read full conversation thread (user + assistant) with pagination."""
+            convos = conversations_by_project.get(project)
+            if convos is None:
+                available = ", ".join(sorted(conversations_by_project.keys()))
+                if not available:
+                    return "No conversation data available (conversations_by_project is empty)."
+                return f"Project '{project}' not found. Available: {available}"
+
+            page = convos[offset : offset + limit]
+            if not page:
+                return f"No messages at offset {offset} (project has {len(convos)} total conversation messages)."
+
+            lines = [
+                f"## {project} — conversation {offset + 1}-{offset + len(page)} of {len(convos)}"
+            ]
+            for i, m in enumerate(page):
+                role = m.get("role", "?")
+                ts = m.get("timestamp", "")[:19]
+                text = m.get("text", m.get("raw_text", ""))
+                role_label = "USER" if role == "user" else "ASSISTANT"
+                lines.append(f"\n**[{offset + i + 1}] {role_label}** ({ts})")
+                lines.append(text)
+
+            remaining = len(convos) - (offset + len(page))
+            if remaining > 0:
+                lines.append(
+                    f"\n--- {remaining} more. "
+                    f'Call read_conversation(project="{project}", offset={offset + limit}) to continue. ---'
+                )
+
+            return "\n".join(lines)
+
+        async def read_context_around(project: str, message_index: int) -> str:
+            """Read ~5 messages before and after a user message to see full context.
+
+            message_index is 1-based (from read_messages output). This returns
+            the surrounding conversation (user + assistant) so you can see what
+            the user was reacting to.
+            """
+            user_msgs = messages_by_project.get(project)
+            convos = conversations_by_project.get(project)
+            if user_msgs is None or convos is None:
+                return f"Project '{project}' not found or has no conversation data."
+
+            # Convert 1-based to 0-based
+            idx = message_index - 1
+            if idx < 0 or idx >= len(user_msgs):
+                return f"Invalid message_index {message_index}. Valid range: 1-{len(user_msgs)}"
+
+            target_msg = user_msgs[idx]
+            target_ts = target_msg.get("timestamp", "")
+            target_text = target_msg.get("raw_text", target_msg.get("text", ""))[:200]
+
+            # Find this message in the conversation by matching timestamp
+            conv_idx = None
+            for ci, cm in enumerate(convos):
+                if cm.get("timestamp") == target_ts and cm.get("role") == "user":
+                    # Also check text similarity to handle multiple user msgs at same timestamp
+                    cm_text = cm.get("raw_text", cm.get("text", ""))
+                    if (
+                        cm_text[:100]
+                        == target_msg.get("raw_text", target_msg.get("text", ""))[:100]
+                    ):
+                        conv_idx = ci
+                        break
+
+            if conv_idx is None:
+                # Fallback: find closest timestamp match
+                for ci, cm in enumerate(convos):
+                    if cm.get("timestamp") == target_ts and cm.get("role") == "user":
+                        conv_idx = ci
+                        break
+
+            if conv_idx is None:
+                return f"Could not locate message #{message_index} in conversation data."
+
+            # Extract context window: 5 before, the message, 5 after
+            start = max(0, conv_idx - 5)
+            end = min(len(convos), conv_idx + 6)
+            context = convos[start:end]
+
+            lines = [
+                f"## Context around message #{message_index} in {project}",
+                f'Target: "{target_text}..."',
+                f"Showing conversation positions {start + 1}-{end}:",
+                "",
+            ]
+            for i, m in enumerate(context):
+                role = m.get("role", "?")
+                ts = m.get("timestamp", "")[:19]
+                text = m.get("text", m.get("raw_text", ""))
+                role_label = "USER" if role == "user" else "ASSISTANT"
+                marker = " <<<< TARGET" if (start + i) == conv_idx else ""
+                lines.append(f"**[{start + i + 1}] {role_label}** ({ts}){marker}")
+                lines.append(text)
+                lines.append("")
+
+            return "\n".join(lines)
+
+        # Inject the extra tools into the base explore() flow
+        self._extra_tools = [
+            AgentTool(
+                name="get_overview",
+                description=(
+                    "Get high-level stats about the Claude Code conversation data: "
+                    "total messages, projects, time range, and signal distribution. "
+                    "Call this first to understand the scope of the data."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+                handler=get_overview,
+            ),
+            AgentTool(
+                name="list_projects",
+                description=(
+                    "List all projects with message counts and date ranges. "
+                    "Use this to decide which projects to read first."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+                handler=list_projects,
+            ),
+            AgentTool(
+                name="read_messages",
+                description=(
+                    "Read the FULL unfiltered messages from a specific project. "
+                    "Returns raw_text with timestamps. Use offset/limit to paginate "
+                    "(default 50 per page). Read through ALL pages for each project."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "project": {
+                            "type": "string",
+                            "description": "Project name (from list_projects)",
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Start index (default 0)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Messages per page (default 50)",
+                        },
+                    },
+                    "required": ["project"],
+                },
+                handler=read_messages,
+            ),
+            AgentTool(
+                name="search_messages",
+                description=(
+                    "Search all messages by regex pattern. Optionally filter by project. "
+                    "Use this to find specific patterns like 'I think', 'should', "
+                    "'frustrat', 'love', 'hate', etc. Returns up to 50 matches."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Regex pattern to search for (case-insensitive)",
+                        },
+                        "project": {
+                            "type": "string",
+                            "description": "Optional: limit search to a specific project",
+                        },
+                    },
+                    "required": ["query"],
+                },
+                handler=search_messages,
+            ),
+            AgentTool(
+                name="read_conversation",
+                description=(
+                    "Read the FULL conversation thread (both user AND assistant messages) "
+                    "for a project. This shows you what the AI said AND what the user "
+                    "replied — essential for understanding CONTEXT. When you see an "
+                    "interesting user message, use this to understand what triggered it. "
+                    "Paginated with offset/limit (default 20 per page)."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "project": {
+                            "type": "string",
+                            "description": "Project name (from list_projects)",
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Start index (default 0)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Messages per page (default 20)",
+                        },
+                    },
+                    "required": ["project"],
+                },
+                handler=read_conversation,
+            ),
+            AgentTool(
+                name="read_context_around",
+                description=(
+                    "See ~5 messages before and after a specific user message, including "
+                    "assistant responses. Use this when you find an interesting user "
+                    "message (from read_messages or search_messages) and want to "
+                    "understand WHAT TRIGGERED IT — what was the AI doing that made "
+                    "them frustrated/excited/opinionated? The message_index is 1-based, "
+                    "matching the numbers from read_messages output."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "project": {
+                            "type": "string",
+                            "description": "Project name",
+                        },
+                        "message_index": {
+                            "type": "integer",
+                            "description": "1-based index of the user message (from read_messages output)",
+                        },
+                    },
+                    "required": ["project", "message_index"],
+                },
+                handler=read_context_around,
+            ),
+        ]
+
+        return await super().explore(username, evidence, raw_data)
 
 
 # --- Registration ---

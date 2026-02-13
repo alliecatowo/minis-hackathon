@@ -7,16 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AuthGate } from "@/components/auth-gate";
+import { OrgSummary } from "@/lib/api";
 import { Building2, Plus, Users } from "lucide-react";
-
-interface OrgSummary {
-  id: number;
-  name: string;
-  display_name: string;
-  description: string | null;
-  member_count: number;
-  created_at: string;
-}
 
 export default function OrgsPage() {
   const [orgs, setOrgs] = useState<OrgSummary[]>([]);

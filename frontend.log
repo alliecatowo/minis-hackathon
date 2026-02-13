@@ -1,0 +1,226 @@
+[dev-frontend] $ cd frontend && pnpm dev
+
+> frontend@0.1.0 dev /home/Allie/develop/minis-hackathon/frontend
+> next dev
+
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://10.0.0.209:3000
+- Environments: .env.local
+
+✓ Starting...
+✓ Ready in 760ms
+ GET / 200 in 1325ms (compile: 1077ms, render: 248ms)
+✓ Compiled in 61ms
+✓ Compiled in 52ms
+ GET / 200 in 130ms (compile: 36ms, render: 95ms)
+✓ Compiled in 63ms
+✓ Compiled in 131ms
+ GET / 200 in 123ms (compile: 41ms, render: 82ms)
+ GET / 200 in 71ms (compile: 2ms, render: 69ms)
+ GET / 200 in 68ms (compile: 8ms, render: 61ms)
+ GET / 200 in 75ms (compile: 2ms, render: 73ms)
+ GET / 200 in 73ms (compile: 1525µs, render: 72ms)
+ GET / 200 in 72ms (compile: 1677µs, render: 70ms)
+ GET / 200 in 73ms (compile: 4ms, render: 69ms)
+ GET / 200 in 74ms (compile: 3ms, render: 71ms)
+ GET / 200 in 82ms (compile: 1527µs, render: 80ms)
+ GET / 200 in 78ms (compile: 1449µs, render: 77ms)
+ GET / 200 in 77ms (compile: 1682µs, render: 76ms)
+ GET / 200 in 75ms (compile: 2ms, render: 73ms)
+ GET / 200 in 73ms (compile: 1793µs, render: 71ms)
+ GET / 200 in 67ms (compile: 1482µs, render: 66ms)
+ GET / 200 in 67ms (compile: 1424µs, render: 66ms)
+ GET / 200 in 67ms (compile: 1869µs, render: 65ms)
+ GET / 200 in 69ms (compile: 1725µs, render: 67ms)
+ GET / 200 in 68ms (compile: 1776µs, render: 67ms)
+ GET / 200 in 65ms (compile: 1651µs, render: 63ms)
+ GET / 200 in 65ms (compile: 1730µs, render: 64ms)
+ GET / 200 in 66ms (compile: 1752µs, render: 64ms)
+ GET / 200 in 66ms (compile: 1687µs, render: 65ms)
+ GET / 200 in 65ms (compile: 1611µs, render: 64ms)
+ GET / 200 in 65ms (compile: 1562µs, render: 63ms)
+ GET / 200 in 54ms (compile: 1693µs, render: 52ms)
+ GET / 200 in 42ms (compile: 1685µs, render: 41ms)
+ GET / 200 in 39ms (compile: 1446µs, render: 38ms)
+ GET / 200 in 43ms (compile: 1439µs, render: 41ms)
+ GET / 200 in 64ms (compile: 4ms, render: 60ms)
+ GET / 200 in 61ms (compile: 2ms, render: 59ms)
+ GET / 200 in 60ms (compile: 2ms, render: 58ms)
+ GET / 200 in 61ms (compile: 1458µs, render: 59ms)
+ GET / 200 in 51ms (compile: 1399µs, render: 50ms)
+ GET / 200 in 40ms (compile: 1473µs, render: 39ms)
+ GET / 200 in 29ms (compile: 1438µs, render: 28ms)
+ GET / 200 in 15ms (compile: 1508µs, render: 14ms)
+ GET / 200 in 108ms (compile: 42ms, render: 66ms)
+ GET / 200 in 60ms (compile: 1522µs, render: 59ms)
+ GET / 200 in 54ms (compile: 1780µs, render: 52ms)
+ GET / 200 in 59ms (compile: 2ms, render: 57ms)
+ GET / 200 in 58ms (compile: 1687µs, render: 56ms)
+ GET / 200 in 66ms (compile: 1514µs, render: 64ms)
+ GET / 200 in 65ms (compile: 2ms, render: 63ms)
+ GET / 200 in 64ms (compile: 1925µs, render: 62ms)
+ GET / 200 in 67ms (compile: 1953µs, render: 65ms)
+ GET / 200 in 67ms (compile: 1425µs, render: 66ms)
+ GET / 200 in 67ms (compile: 1686µs, render: 66ms)
+ GET / 200 in 67ms (compile: 1515µs, render: 65ms)
+ GET / 200 in 66ms (compile: 1924µs, render: 64ms)
+ GET / 200 in 64ms (compile: 1558µs, render: 62ms)
+ GET / 200 in 63ms (compile: 1567µs, render: 62ms)
+ GET / 200 in 62ms (compile: 1516µs, render: 60ms)
+ GET / 200 in 65ms (compile: 4ms, render: 60ms)
+ GET / 200 in 61ms (compile: 1681µs, render: 59ms)
+ GET / 200 in 60ms (compile: 1641µs, render: 58ms)
+ GET / 200 in 60ms (compile: 1381µs, render: 58ms)
+ GET / 200 in 60ms (compile: 1390µs, render: 59ms)
+ GET / 200 in 59ms (compile: 1442µs, render: 58ms)
+ GET / 200 in 60ms (compile: 1451µs, render: 58ms)
+ GET / 200 in 60ms (compile: 1381µs, render: 59ms)
+ GET / 200 in 61ms (compile: 1364µs, render: 60ms)
+ GET / 200 in 65ms (compile: 4ms, render: 61ms)
+ GET / 200 in 62ms (compile: 1412µs, render: 60ms)
+ GET / 200 in 61ms (compile: 1365µs, render: 59ms)
+ GET / 200 in 61ms (compile: 1484µs, render: 59ms)
+ GET / 200 in 61ms (compile: 1528µs, render: 60ms)
+ GET / 200 in 59ms (compile: 1892µs, render: 57ms)
+ GET / 200 in 58ms (compile: 1490µs, render: 57ms)
+ GET / 200 in 59ms (compile: 1412µs, render: 58ms)
+ GET / 200 in 59ms (compile: 1371µs, render: 57ms)
+ GET / 200 in 47ms (compile: 4ms, render: 43ms)
+ GET / 200 in 34ms (compile: 1444µs, render: 33ms)
+ GET / 200 in 24ms (compile: 1529µs, render: 23ms)
+ GET / 200 in 13ms (compile: 1374µs, render: 12ms)
+✓ Compiled in 112ms
+(node:342436) [DEP0060] DeprecationWarning: The `util._extend` API is deprecated. Please use Object.assign() instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Failed to proxy http://localhost:8000/api/auth/session AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+ GET / 200 in 186ms (compile: 35ms, render: 151ms)
+ GET / 200 in 133ms (compile: 1571µs, render: 131ms)
+Failed to proxy http://localhost:8000/api/auth/session AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+Failed to proxy http://localhost:8000/api/auth/session AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+Failed to proxy http://localhost:8000/api/proxy/minis AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+Failed to proxy http://localhost:8000/api/proxy/minis AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+ GET / 200 in 90ms (compile: 47ms, render: 42ms)
+ GET / 200 in 75ms (compile: 2ms, render: 73ms)
+ GET / 200 in 75ms (compile: 2ms, render: 73ms)
+ GET / 200 in 60ms (compile: 2ms, render: 57ms)
+ GET / 200 in 79ms (compile: 2ms, render: 77ms)
+ GET / 200 in 68ms (compile: 2ms, render: 65ms)
+ GET / 200 in 88ms (compile: 1957µs, render: 86ms)
+ GET / 200 in 95ms (compile: 2ms, render: 93ms)
+ GET / 200 in 95ms (compile: 2ms, render: 93ms)
+ GET / 200 in 98ms (compile: 3ms, render: 95ms)
+ GET / 200 in 93ms (compile: 2ms, render: 90ms)
+ GET / 200 in 91ms (compile: 3ms, render: 88ms)
+ GET / 200 in 90ms (compile: 2ms, render: 88ms)
+ GET / 200 in 91ms (compile: 3ms, render: 88ms)
+ GET / 200 in 92ms (compile: 1755µs, render: 91ms)
+ GET / 200 in 95ms (compile: 2ms, render: 93ms)
+ GET / 200 in 94ms (compile: 3ms, render: 91ms)
+ GET / 200 in 91ms (compile: 2ms, render: 89ms)
+ GET / 200 in 88ms (compile: 3ms, render: 85ms)
+ GET / 200 in 84ms (compile: 3ms, render: 81ms)
+ GET / 200 in 84ms (compile: 1924µs, render: 82ms)
+ GET / 200 in 86ms (compile: 3ms, render: 83ms)
+ GET / 200 in 87ms (compile: 2ms, render: 85ms)
+ GET / 200 in 90ms (compile: 1697µs, render: 88ms)
+ GET / 200 in 92ms (compile: 3ms, render: 89ms)
+ GET / 200 in 90ms (compile: 2ms, render: 88ms)
+ GET / 200 in 87ms (compile: 7ms, render: 79ms)
+ GET / 200 in 79ms (compile: 3ms, render: 76ms)
+ GET / 200 in 74ms (compile: 2ms, render: 72ms)
+ GET / 200 in 70ms (compile: 2ms, render: 68ms)
+ GET / 200 in 67ms (compile: 1854µs, render: 65ms)
+ GET / 200 in 69ms (compile: 2ms, render: 66ms)
+ GET / 200 in 66ms (compile: 1490µs, render: 64ms)
+ GET / 200 in 65ms (compile: 1384µs, render: 64ms)
+ GET / 200 in 53ms (compile: 1416µs, render: 52ms)
+ GET / 200 in 42ms (compile: 1756µs, render: 40ms)
+ GET / 200 in 25ms (compile: 1358µs, render: 24ms)
+ GET / 200 in 14ms (compile: 1614µs, render: 13ms)
+  Reload env: .env.local
+ GET / 200 in 388ms (compile: 363ms, render: 25ms)
+✓ Compiled in 68ms
+✓ Compiled in 220ms
+ GET / 200 in 180ms (compile: 26ms, render: 154ms)
+Failed to proxy http://localhost:8000/api/auth/session AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+Failed to proxy http://localhost:8000/api/auth/session AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+Failed to proxy http://localhost:8000/api/proxy/minis AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+Failed to proxy http://localhost:8000/api/proxy/minis AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+AggregateError: 
+    at ignore-listed frames {
+  code: 'ECONNREFUSED'
+}
+ GET / 404 in 166ms (compile: 106ms, render: 59ms)
+ GET / 200 in 38ms (compile: 1928µs, render: 36ms)
+⚠ Found a change in next.config.ts. Restarting the server to apply the changes...
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://10.0.0.209:3000
+- Environments: .env.local
+
+✓ Starting...
+⨯ Unable to acquire lock at /home/Allie/develop/minis-hackathon/frontend/.next/dev/lock, is another instance of next dev running?
+  Suggestion: If you intended to restart next dev, terminate the other process, and then try again.
+[?25h
+ ELIFECYCLE  Command failed with exit code 1.
+[dev-frontend] ERROR task failed

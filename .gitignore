@@ -29,3 +29,7 @@ out/
 Thumbs.db
 backend/data/
 .vercel
+
+# Log files
+*.log
+.env*.local

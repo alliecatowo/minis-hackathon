@@ -63,6 +63,10 @@ class Explorer(ABC):
     """
 
     source_name: str = "base"
+    min_memories: int = 25
+    min_findings: int = 5
+    min_quotes: int = 8
+    min_knowledge_nodes: int = 8
 
     @abstractmethod
     def system_prompt(self) -> str:
@@ -87,6 +91,13 @@ class Explorer(ABC):
         principles_matrix = PrinciplesMatrix()
         finished = False
 
+        def _progress_summary() -> str:
+            return (
+                f"\n\n[PROGRESS: {len(memories)} memories, {len(findings)} findings, "
+                f"{len(quotes)} quotes, {len(knowledge_graph.nodes)} nodes, "
+                f"{len(principles_matrix.principles)} principles]"
+            )
+
         # --- Tool handlers ---
 
         async def save_memory(
@@ -105,17 +116,17 @@ class Explorer(ABC):
                 evidence_quote=evidence_quote,
             )
             memories.append(entry)
-            return f"Saved memory: {category}/{topic}"
+            return f"Saved memory: {category}/{topic}" + _progress_summary()
 
         async def save_finding(finding: str) -> str:
             findings.append(finding)
-            return "Finding saved."
+            return "Finding saved." + _progress_summary()
 
         async def save_quote(context: str, quote: str, signal_type: str) -> str:
             quotes.append(
                 {"context": context, "quote": quote, "signal_type": signal_type}
             )
-            return "Quote saved."
+            return "Quote saved." + _progress_summary()
 
         async def analyze_deeper(subset: str, question: str) -> str:
             result = await llm_completion(
@@ -130,7 +141,7 @@ class Explorer(ABC):
 
         async def save_context_evidence(context_key: str, quote: str) -> str:
             context_evidence.setdefault(context_key, []).append(quote)
-            return f"Evidence saved for context: {context_key}"
+            return f"Evidence saved for context: {context_key}" + _progress_summary()
 
         async def save_knowledge_node(
             name: str,
@@ -155,10 +166,10 @@ class Explorer(ABC):
                 existing.confidence = max(existing.confidence, confidence)
                 if evidence:
                     existing.evidence.append(evidence)
-                return f"Updated knowledge node: {name}"
+                return f"Updated knowledge node: {name}" + _progress_summary()
             else:
                 knowledge_graph.nodes.append(node)
-                return f"Created knowledge node: {name}"
+                return f"Created knowledge node: {name}" + _progress_summary()
 
         async def save_knowledge_edge(
             source: str,
@@ -175,7 +186,7 @@ class Explorer(ABC):
                 evidence=[evidence] if evidence else [],
             )
             knowledge_graph.edges.append(edge)
-            return f"Created edge: {source} -> {target}"
+            return f"Created edge: {source} -> {target}" + _progress_summary()
 
         async def save_principle(
             trigger: str,
@@ -192,12 +203,26 @@ class Explorer(ABC):
                 evidence=[evidence] if evidence else [],
             )
             principles_matrix.principles.append(principle)
-            return f"Saved principle: {trigger} -> {action}"
+            return f"Saved principle: {trigger} -> {action}" + _progress_summary()
 
         async def finish(summary: str = "") -> str:
             nonlocal finished
+            gaps = []
+            if len(memories) < self.min_memories:
+                gaps.append(f"memories ({len(memories)}/{self.min_memories})")
+            if len(findings) < self.min_findings:
+                gaps.append(f"findings ({len(findings)}/{self.min_findings})")
+            if len(quotes) < self.min_quotes:
+                gaps.append(f"quotes ({len(quotes)}/{self.min_quotes})")
+            if len(knowledge_graph.nodes) < self.min_knowledge_nodes:
+                gaps.append(f"knowledge nodes ({len(knowledge_graph.nodes)}/{self.min_knowledge_nodes})")
+            if gaps:
+                return (
+                    f"NOT YET COMPLETE. Still needed: {', '.join(gaps)}. "
+                    f"Keep reading and analyzing the evidence." + _progress_summary()
+                )
             finished = True
-            return "Exploration complete."
+            return "Exploration complete." + _progress_summary()
 
         # --- Build tool list ---
 
@@ -406,7 +431,7 @@ class Explorer(ABC):
             ),
             AgentTool(
                 name="finish",
-                description="Signal that exploration is complete. Call this when you have thoroughly analyzed all evidence.",
+                description="Signal that exploration is complete. Will be REJECTED if minimum work thresholds are not met. Check your progress counts before calling.",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -440,7 +465,10 @@ class Explorer(ABC):
             system_prompt=self.system_prompt(),
             user_prompt=self.user_prompt(username, evidence, raw_data),
             tools=tools,
-            max_turns=40,
+            max_turns=50,
+            max_output_tokens=65536,
+            tool_choice_strategy="required_until_finish",
+            finish_tool_name="finish",
         )
 
         logger.info(

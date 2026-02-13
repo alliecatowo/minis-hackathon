@@ -249,8 +249,8 @@ def _format_prs(prs: list[dict]) -> str:
 
         lines.append(f"### [{repo_label}] {title}")
         if body:
-            if len(body) > 500:
-                body = body[:500] + "..."
+            if len(body) > 1500:
+                body = body[:1500] + "..."
             lines.append(body)
         lines.append("")
     return "\n".join(lines)
@@ -264,7 +264,7 @@ def _format_review_comments(
     lines = [f"## {header}"]
     lines.append(f"({preamble})\n")
 
-    for comment in comments[:40]:
+    for comment in comments[:80]:
         body = (comment.get("body") or "").strip()
         if not body:
             continue
@@ -300,7 +300,7 @@ def _format_issue_comments(comments: list[dict]) -> str:
         "problems and solutions, how they ask questions, and how they "
         "interact with collaborators in open discussion)\n"
     )
-    for comment in comments[:25]:
+    for comment in comments[:50]:
         body = (comment.get("body") or "").strip()
         if not body:
             continue

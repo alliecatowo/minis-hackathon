@@ -39,7 +39,9 @@ class Settings(BaseSettings):
     neon_auth_jwks_url: str = ""
     jwt_secret: str = "dev-secret-change-in-production"
     jwt_secret_previous: str = ""  # Previous JWT secret for zero-downtime rotation
-    service_jwt_secret: str = "dev-service-secret-change-in-production"  # Shared secret between BFF and backend
+    service_jwt_secret: str = (
+        "dev-service-secret-change-in-production"  # Shared secret between BFF and backend
+    )
     encryption_key: str = ""
 
     # Environment (development | staging | production)
@@ -52,6 +54,7 @@ class Settings(BaseSettings):
     langfuse_host: str = "https://us.cloud.langfuse.com"
 
     # Production settings
+    frontend_url: str = "http://localhost:3000"  # Primary frontend URL for redirects
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"  # comma-separated origins
     debug: bool = True
     log_level: str = "INFO"

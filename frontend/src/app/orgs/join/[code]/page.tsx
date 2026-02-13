@@ -13,7 +13,7 @@ export default function JoinOrgPage() {
   const code = params.code as string;
 
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
-  const [orgId, setOrgId] = useState<number | null>(null);
+  const [orgId, setOrgId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {

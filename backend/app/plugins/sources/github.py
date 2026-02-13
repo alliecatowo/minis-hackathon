@@ -117,6 +117,11 @@ class GitHubSource(IngestionSource):
                         for r in github_data.repos
                     ],
                 },
+                # Full data for explorer deep-dive tools
+                "pull_requests_full": github_data.pull_requests,
+                "review_comments_full": github_data.review_comments,
+                "issue_comments_full": github_data.issue_comments,
+                "commits_full": github_data.commits,
             },
             stats={
                 "repos_count": len(github_data.repos),

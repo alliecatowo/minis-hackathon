@@ -7,7 +7,6 @@ from app.ingestion.formatter import (
     _format_profile,
     _format_repos,
 )
-from app.ingestion.github import GitHubData
 
 
 # ── _format_profile ──────────────────────────────────────────────────
@@ -83,14 +82,16 @@ class TestFormatRepos:
     def test_more_than_15_repos_shows_catalog(self):
         repos = []
         for i in range(20):
-            repos.append({
-                "full_name": f"user/repo-{i}",
-                "name": f"repo-{i}",
-                "description": f"Repo number {i}",
-                "language": "Go",
-                "stargazers_count": i,
-                "topics": [],
-            })
+            repos.append(
+                {
+                    "full_name": f"user/repo-{i}",
+                    "name": f"repo-{i}",
+                    "description": f"Repo number {i}",
+                    "language": "Go",
+                    "stargazers_count": i,
+                    "topics": [],
+                }
+            )
         result = _format_repos(repos)
         assert "## Top Repositories" in result
         assert "Complete Repository Catalog" in result

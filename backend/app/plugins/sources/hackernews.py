@@ -63,16 +63,10 @@ class HackerNewsSource(IngestionSource):
         )
 
 
-async def _fetch_hn_data(
-    client: httpx.AsyncClient, username: str
-) -> tuple[list[dict], list[dict]]:
+async def _fetch_hn_data(client: httpx.AsyncClient, username: str) -> tuple[list[dict], list[dict]]:
     """Fetch comments and story submissions for a HN user in parallel."""
-    comments_url = (
-        f"{_HN_API_BASE}/search?tags=comment,author_{username}&hitsPerPage=100"
-    )
-    stories_url = (
-        f"{_HN_API_BASE}/search?tags=story,author_{username}&hitsPerPage=50"
-    )
+    comments_url = f"{_HN_API_BASE}/search?tags=comment,author_{username}&hitsPerPage=100"
+    stories_url = f"{_HN_API_BASE}/search?tags=story,author_{username}&hitsPerPage=50"
 
     comments_resp, stories_resp = await _parallel_get(client, comments_url, stories_url)
 
@@ -82,9 +76,7 @@ async def _fetch_hn_data(
     return comments, stories
 
 
-async def _parallel_get(
-    client: httpx.AsyncClient, *urls: str
-) -> list[dict | None]:
+async def _parallel_get(client: httpx.AsyncClient, *urls: str) -> list[dict | None]:
     """GET multiple URLs concurrently, returning parsed JSON or None on failure."""
     import asyncio
 
@@ -99,9 +91,7 @@ async def _parallel_get(
     return list(await asyncio.gather(*[_get(u) for u in urls]))
 
 
-def _format_hn_evidence(
-    username: str, comments: list[dict], stories: list[dict]
-) -> str:
+def _format_hn_evidence(username: str, comments: list[dict], stories: list[dict]) -> str:
     """Format HN data into structured evidence text for LLM analysis."""
     sections: list[str] = []
 
@@ -137,10 +127,7 @@ def _format_hn_evidence(
             )
 
     if not sections:
-        return (
-            f"## HackerNews Activity\n"
-            f"No public HackerNews activity found for user '{username}'."
-        )
+        return f"## HackerNews Activity\nNo public HackerNews activity found for user '{username}'."
 
     intro = (
         "## HackerNews Activity\n"
@@ -210,7 +197,6 @@ def _format_comments(
 
         story_title = comment.get("story_title") or "Unknown Discussion"
         points = comment.get("points")
-        created_at = comment.get("created_at", "")
 
         # Detect signal markers
         tags = []
@@ -228,8 +214,8 @@ def _format_comments(
         if len(clean_text) > 600:
             clean_text = clean_text[:600] + "..."
 
-        lines.append(f"**On: \"{story_title}\"**{tag_str}{points_str}")
-        lines.append(f"> \"{clean_text}\"")
+        lines.append(f'**On: "{story_title}"**{tag_str}{points_str}')
+        lines.append(f'> "{clean_text}"')
         lines.append("")
 
     return "\n".join(lines)

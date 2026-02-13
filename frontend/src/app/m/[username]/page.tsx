@@ -98,7 +98,7 @@ export default function MiniProfilePage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
-  const [pendingToolCalls, setPendingToolCalls] = useState<Array<{ tool: string; args: Record<string, string>; result?: string }>>([]);
+  const [, setPendingToolCalls] = useState<Array<{ tool: string; args: Record<string, string>; result?: string }>>([]);
   const pendingToolCallsRef = useRef<Array<{ tool: string; args: Record<string, string>; result?: string }>>([]);
   const [toolActivity, setToolActivity] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -287,7 +287,7 @@ export default function MiniProfilePage() {
         textareaRef.current?.focus();
       }
     },
-    [mini, messages, isStreaming]
+    [mini, messages, isStreaming, user]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

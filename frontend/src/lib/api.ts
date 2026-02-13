@@ -133,7 +133,6 @@ export function subscribePipelineStatus(id: string): EventSource {
 export function streamChat(
   id: string,
   message: string,
-  history: ChatMessage[]
 ): EventSource {
   const es = new EventSource(
     `${API_BASE}/minis/${id}/chat?message=${encodeURIComponent(message)}`
@@ -268,7 +267,21 @@ export async function uploadClaudeCode(files: File[]): Promise<{ files_saved: nu
 
 // --- Team API functions ---
 
-export async function createTeam(name: string, description?: string): Promise<any> {
+export interface Team {
+  id: string;
+  name: string;
+  description: string | null;
+  member_count: number;
+  owner_username: string;
+  created_at: string;
+}
+
+export interface TeamMember {
+  mini_id: string;
+  role: string;
+}
+
+export async function createTeam(name: string, description?: string): Promise<Team> {
   const res = await fetch(`${API_BASE}/teams`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -281,19 +294,19 @@ export async function createTeam(name: string, description?: string): Promise<an
   return res.json();
 }
 
-export async function listTeams(): Promise<any[]> {
+export async function listTeams(): Promise<Team[]> {
   const res = await fetch(`${API_BASE}/teams`);
   if (!res.ok) throw new Error("Failed to fetch teams");
   return res.json();
 }
 
-export async function getTeam(id: string): Promise<any> {
+export async function getTeam(id: string): Promise<Team> {
   const res = await fetch(`${API_BASE}/teams/${id}`);
   if (!res.ok) throw new Error("Failed to fetch team");
   return res.json();
 }
 
-export async function updateTeam(id: string, data: { name?: string; description?: string }): Promise<any> {
+export async function updateTeam(id: string, data: { name?: string; description?: string }): Promise<Team> {
   const res = await fetch(`${API_BASE}/teams/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -310,7 +323,7 @@ export async function deleteTeam(id: string): Promise<void> {
   if (!res.ok) throw new Error("Failed to delete team");
 }
 
-export async function addTeamMember(teamId: string, miniId: string, role?: string): Promise<any> {
+export async function addTeamMember(teamId: string, miniId: string, role?: string): Promise<TeamMember> {
   const res = await fetch(`${API_BASE}/teams/${teamId}/members`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -332,7 +345,40 @@ export async function removeTeamMember(teamId: string, miniId: string): Promise<
 
 // --- Org API functions ---
 
-export async function createOrg(data: { name: string; display_name: string; description?: string }): Promise<any> {
+export interface OrgSummary {
+  id: string;
+  name: string;
+  display_name: string;
+  description: string | null;
+  avatar_url: string | null;
+  member_count: number;
+  role: string;
+  created_at: string;
+}
+
+export interface Org {
+  id: string;
+  name: string;
+  display_name: string;
+  description: string | null;
+  avatar_url: string | null;
+  owner_id: string;
+  members?: OrgMember[];
+  created_at: string;
+}
+
+export interface OrgMember {
+  id: string;
+  org_id: string;
+  user_id: string;
+  username: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+  role: string;
+  joined_at: string;
+}
+
+export async function createOrg(data: { name: string; display_name: string; description?: string }): Promise<Org> {
   const res = await fetch(`${API_BASE}/orgs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -345,19 +391,19 @@ export async function createOrg(data: { name: string; display_name: string; desc
   return res.json();
 }
 
-export async function listOrgs(): Promise<any[]> {
+export async function listOrgs(): Promise<OrgSummary[]> {
   const res = await fetch(`${API_BASE}/orgs`);
   if (!res.ok) throw new Error("Failed to fetch orgs");
   return res.json();
 }
 
-export async function getOrg(id: string): Promise<any> {
+export async function getOrg(id: string): Promise<Org> {
   const res = await fetch(`${API_BASE}/orgs/${id}`);
   if (!res.ok) throw new Error("Failed to fetch org");
   return res.json();
 }
 
-export async function updateOrg(id: string, data: { display_name?: string; description?: string }): Promise<any> {
+export async function updateOrg(id: string, data: { display_name?: string; description?: string }): Promise<Org> {
   const res = await fetch(`${API_BASE}/orgs/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -382,7 +428,7 @@ export async function generateInvite(orgId: string): Promise<{ invite_code: stri
   return res.json();
 }
 
-export async function joinOrg(code: string): Promise<any> {
+export async function joinOrg(code: string): Promise<OrgMember> {
   const res = await fetch(`${API_BASE}/orgs/join/${code}`, {
     method: "POST",
   });
@@ -393,7 +439,7 @@ export async function joinOrg(code: string): Promise<any> {
   return res.json();
 }
 
-export async function listOrgMembers(orgId: string): Promise<any[]> {
+export async function listOrgMembers(orgId: string): Promise<OrgMember[]> {
   const res = await fetch(`${API_BASE}/orgs/${orgId}/members`);
   if (!res.ok) throw new Error("Failed to fetch members");
   return res.json();
@@ -406,7 +452,7 @@ export async function removeOrgMember(orgId: string, userId: string): Promise<vo
   if (!res.ok) throw new Error("Failed to remove member");
 }
 
-export async function createOrgTeam(orgId: string, data: { name: string; description?: string }): Promise<any> {
+export async function createOrgTeam(orgId: string, data: { name: string; description?: string }): Promise<Team> {
   const res = await fetch(`${API_BASE}/orgs/${orgId}/teams`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -419,7 +465,7 @@ export async function createOrgTeam(orgId: string, data: { name: string; descrip
   return res.json();
 }
 
-export async function listOrgTeams(orgId: string): Promise<any[]> {
+export async function listOrgTeams(orgId: string): Promise<Team[]> {
   const res = await fetch(`${API_BASE}/orgs/${orgId}/teams`);
   if (!res.ok) throw new Error("Failed to fetch org teams");
   return res.json();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -26,28 +26,37 @@ import {
 function HeroInput() {
   const router = useRouter();
   const [username, setUsername] = useState("");
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [avatarLoading, setAvatarLoading] = useState(false);
+  const [loadedAvatar, setLoadedAvatar] = useState<string | null>(null);
+  const [loadedUsername, setLoadedUsername] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
 
+  const avatarLoading = useMemo(() => {
+    const trimmed = username.trim();
+    return trimmed !== "" && trimmed !== loadedUsername && loadedAvatar !== `https://github.com/${trimmed}.png`;
+  }, [username, loadedUsername, loadedAvatar]);
+
+  const avatarUrl = useMemo(() => {
+    if (!username.trim()) return null;
+    return loadedAvatar;
+  }, [username, loadedAvatar]);
+
   useEffect(() => {
-    if (!username.trim()) {
-      setAvatarUrl(null);
+    const trimmed = username.trim();
+    if (!trimmed) {
       return;
     }
 
-    setAvatarLoading(true);
     const timeout = setTimeout(() => {
       const img = new Image();
       img.onload = () => {
-        setAvatarUrl(`https://github.com/${username}.png`);
-        setAvatarLoading(false);
+        setLoadedAvatar(`https://github.com/${trimmed}.png`);
+        setLoadedUsername(trimmed);
       };
       img.onerror = () => {
-        setAvatarUrl(null);
-        setAvatarLoading(false);
+        setLoadedAvatar(null);
+        setLoadedUsername("");
       };
-      img.src = `https://github.com/${username}.png`;
+      img.src = `https://github.com/${trimmed}.png`;
     }, 400);
 
     return () => clearTimeout(timeout);

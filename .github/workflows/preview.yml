@@ -1,0 +1,104 @@
+name: Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
+
+env:
+  FLY_REGION: iad
+  NEON_REGION: aws-us-east-1
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    if: github.event.action != 'closed'
+    outputs:
+      fly_url: ${{ steps.deploy-backend.outputs.url }}
+      neon_branch: ${{ steps.neon-branch.outputs.branch_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Create Neon branch
+        id: neon-branch
+        uses: neondatabase/create-branch-action@v5
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          branch_name: pr-${{ github.event.number }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          username: neondb_owner
+
+      - name: Comment PR with preview URLs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const botComment = comments.find(c => c.user.type === 'Bot' && c.body.includes('## Preview Deployment'));
+            
+            const branch = '${{ github.head_ref }}'.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+            
+            const body = `## Preview Deployment
+            
+            | Service | URL |
+            |---------|-----|
+            | **Frontend** | https://preview-${branch}.my-mini.me |
+            | **Backend** | https://minis-api.fly.dev (production, uses Neon pr-${{ github.event.number }} branch) |
+            | **Database** | Neon branch \`pr-${{ github.event.number }}\` |
+            
+            > Note: Custom domain requires DNS propagation. Vercel preview: https://${{ github.head_ref }}--frontend-red-one-13.vercel.app
+            
+            Merging this PR will deploy to production and clean up the Neon branch.`;
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            }
+
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.action == 'closed'
+    steps:
+      - name: Delete Neon branch
+        uses: neondatabase/delete-branch-action@v3
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          branch_name: pr-${{ github.event.number }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+        continue-on-error: true
+
+      - name: Comment PR cleanup
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '🧹 Preview resources (Neon branch) have been cleaned up.'
+            });

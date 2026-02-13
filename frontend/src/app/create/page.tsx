@@ -540,7 +540,7 @@ function CreatePageInner() {
         err instanceof Error ? err.message : "Failed to start pipeline."
       );
     }
-  }, [username, router, selectedSources, excludedRepos, sourceIdentifiers]);
+  }, [username, router, selectedSources, excludedRepos, sourceIdentifiers, regenerate]);
 
   // Auto-start if mini is already processing
   useEffect(() => {

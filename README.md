@@ -140,17 +140,26 @@ Five tools available via Model Context Protocol:
 cd mcp-server && uv run minis-mcp
 ```
 
+## Live Demo
+
+**[https://my-mini.me](https://my-mini.me)**
+
 ## Deployment
 
-**Frontend** -- Deployed on Vercel.
+[![Deploy to Fly.io + Neon + Vercel](https://img.shields.io/badge/Deploy%20Your%20Own-Fly.io%20%2B%20Neon%20%2B%20Vercel-purple?style=for-the-badge)](https://github.com/alliecatowo/minis-hackathon/blob/main/DEPLOY.md)
+
+One-click deployment with:
+- **Neon** — Serverless Postgres with automatic branching per PR
+- **Fly.io** — Backend API with review apps for every pull request  
+- **Vercel** — Frontend with preview deployments wired to preview backends
+
+**Manual deployment:**
 
 ```bash
+# Frontend
 cd frontend && vercel --prod
-```
 
-**Backend** -- Deployed on Fly.io.
-
-```bash
+# Backend  
 cd backend && fly deploy
 ```
 
@@ -158,6 +167,16 @@ Environment variables needed:
 
 - **Frontend**: `NEXT_PUBLIC_API_URL`
 - **Backend**: `GEMINI_API_KEY`, `GITHUB_TOKEN`, `DEFAULT_LLM_MODEL`, `DATABASE_URL` (PostgreSQL connection string), `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`
+
+## CI/CD
+
+Every pull request gets a full preview environment:
+
+- **Neon branch** — Isolated database (`pr-42` for PR #42)
+- **Fly review app** — `minis-api-pr-42.fly.dev` pointing to Neon branch
+- **Vercel preview** — Auto-wired to Fly review app
+
+Merged PRs deploy automatically to production.
 
 ## Tech Stack
 

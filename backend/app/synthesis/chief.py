@@ -14,6 +14,23 @@ from app.synthesis.explorers.base import ExplorerReport
 
 logger = logging.getLogger(__name__)
 
+REQUIRED_SECTIONS = {
+    "Identity Core", "Voice & Style", "Personality & Emotional Patterns",
+    "Values & Beliefs", "Anti-Values & DON'Ts", "Conflict & Pushback",
+    "Voice Samples", "Quirks & Imperfection",
+}
+
+MIN_SECTION_LENGTHS = {
+    "Voice & Style": 5000,
+    "Identity Core": 500,
+    "Personality & Emotional Patterns": 2000,
+    "Values & Beliefs": 2000,
+    "Anti-Values & DON'Ts": 2000,
+    "Conflict & Pushback": 1500,
+    "Voice Samples": 1500,
+    "Quirks & Imperfection": 1000,
+}
+
 SYSTEM_PROMPT = """\
 You are the Chief Synthesizer — a Voice Architect building a "Forgery Manual" for \
 a digital twin. Your SINGLE goal: produce a soul document so precise that it \
@@ -41,7 +58,7 @@ A clone fails if it is "too helpful." You must define the NEGATIVE SPACE.
 ### 3. Adaptive Sizing
 *   **Simple Communicator:** Keep the doc short and punchy.
 *   **Complex Communicator:** Write a long, nuanced doc with per-context guides.
-*   **Size to fit the soul.**
+*   **Size to fit the soul — when in doubt, write MORE.**
 
 ## WRITING PRINCIPLES
 
@@ -55,8 +72,8 @@ A clone fails if it is "too helpful." You must define the NEGATIVE SPACE.
 
 ## SECTION STRUCTURE
 
-1.  **Identity Core:** The "Vibe." 2-4 sentences.
-2.  **Voice & Style (LARGEST):** The "Style Spec."
+1.  **Identity Core:** The "Vibe." 4-10 sentences.
+2.  **Voice & Style (LARGEST):** The "Style Spec." This should be the LONGEST section by far — multiple pages. Write exhaustively.
     *   *Typing Mechanics:* Punctuation, capitalization, sentence entropy.
     *   *Formality Gradient:* How they shift from PR to Chat.
     *   *Vocabulary:* Signature words vs. Banned words.
@@ -73,6 +90,23 @@ A clone fails if it is "too helpful." You must define the NEGATIVE SPACE.
 8.  **Voice Samples:** Reference quotes.
 9.  **Quirks & Imperfection:** Typos, tics, habits.
 
+## SECTION LENGTH MINIMUMS
+
+Each section has a minimum character count. The finish tool will REJECT your work if any section is below its minimum. Plan accordingly — Voice & Style needs the most content.
+
+| Section | Min Chars |
+|---------|-----------|
+| Identity Core | 500 |
+| Voice & Style | 5,000 |
+| Personality & Emotional Patterns | 2,000 |
+| Values & Beliefs | 2,000 |
+| Anti-Values & DON'Ts | 2,000 |
+| Conflict & Pushback | 1,500 |
+| Voice Samples | 1,500 |
+| Quirks & Imperfection | 1,000 |
+
+Use the `review_sections` tool to check your progress before calling finish.
+
 ## WORKFLOW
 
 1.  **Triangulate:** Find the CONVERGENCE (Core Traits) and DIVERGENCE (Context Shifts).
@@ -83,6 +117,10 @@ A clone fails if it is "too helpful." You must define the NEGATIVE SPACE.
 IMPORTANT: Write EVERYTHING in second person ("You are...", "You type...", \
 "When someone asks you...", "You would NEVER..."). The soul document will be \
 used directly as a system prompt for the AI clone.
+
+Your document should be detailed enough that it takes several minutes to read. \
+Brevity is NOT a virtue here — the more specific detail, behavioral rules, and \
+voice examples you include, the better the clone will perform.
 """
 
 
@@ -139,8 +177,8 @@ def _format_reports_for_prompt(reports: list[ExplorerReport]) -> str:
             parts.append("### Context Evidence")
             for ctx_key, ctx_quotes in report.context_evidence.items():
                 parts.append(f"**{ctx_key}**:")
-                for q in ctx_quotes[:5]:
-                    parts.append(f"  - {q[:200]}")
+                for q in ctx_quotes:
+                    parts.append(f"  - {q}")
             parts.append("")
         parts.append("---")
         parts.append("")
@@ -206,8 +244,48 @@ async def run_chief_synthesis(
         )
         return result
 
+    async def review_sections() -> str:
+        if not sections:
+            return "No sections written yet."
+        lines = ["## Current Soul Document Status"]
+        total = 0
+        for name in ["Identity Core", "Voice & Style", "Personality & Emotional Patterns",
+                      "Values & Beliefs", "Anti-Values & DON'Ts", "Conflict & Pushback",
+                      "Voice Samples", "Quirks & Imperfection"]:
+            content = sections.get(name, "")
+            chars = len(content)
+            total += chars
+            min_req = MIN_SECTION_LENGTHS.get(name, 0)
+            status = "OK" if chars >= min_req else f"NEEDS {min_req - chars} MORE CHARS"
+            lines.append(f"- **{name}**: {chars} chars (min: {min_req}) — {status}")
+        lines.append(f"\n**Total: {total} chars**")
+        return "\n".join(lines)
+
     async def finish_tool() -> str:
         nonlocal finished
+        missing = REQUIRED_SECTIONS - set(sections.keys())
+        too_short = []
+        for name, min_len in MIN_SECTION_LENGTHS.items():
+            content = sections.get(name, "")
+            if content and len(content) < min_len:
+                too_short.append(f"{name} ({len(content)}/{min_len} chars)")
+
+        issues = []
+        if missing:
+            issues.append(f"Missing sections: {', '.join(sorted(missing))}")
+        if too_short:
+            issues.append(f"Too short: {', '.join(too_short)}")
+
+        if issues:
+            section_status = ", ".join(
+                f"{name}: {len(sections.get(name, ''))}"
+                for name in sorted(REQUIRED_SECTIONS)
+            )
+            return (
+                f"NOT YET COMPLETE. {'; '.join(issues)}. "
+                f"Current status: [{section_status}]. "
+                f"Use write_section to add missing sections or rewrite short ones."
+            )
         finished = True
         return "Soul document finalized."
 
@@ -262,8 +340,22 @@ async def run_chief_synthesis(
             handler=request_detail,
         ),
         AgentTool(
+            name="review_sections",
+            description=(
+                "Review all sections written so far with character counts and "
+                "minimum length requirements. Call this before finish to ensure "
+                "all sections meet the minimum thresholds."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+            handler=review_sections,
+        ),
+        AgentTool(
             name="finish",
-            description="Finalize the soul document. Call this when all sections are complete.",
+            description="Finalize the soul document. Will be REJECTED if any section is missing or below minimum length. Use review_sections first to check.",
             parameters={
                 "type": "object",
                 "properties": {},
@@ -323,8 +415,8 @@ async def run_chief_synthesis(
         for ctx_key, quotes in context_evidence.items():
             label = context_labels.get(ctx_key, ctx_key)
             context_block += f"### {label}\n"
-            for q in quotes[:10]:
-                context_block += f"- {q[:300]}\n"
+            for q in quotes[:30]:
+                context_block += f"- {q[:1000]}\n"
             context_block += "\n"
         user_prompt += context_block
 
@@ -341,7 +433,10 @@ async def run_chief_synthesis(
         system_prompt=SYSTEM_PROMPT,
         user_prompt=user_prompt,
         tools=tools,
-        max_turns=40,
+        max_turns=60,
+        max_output_tokens=65536,
+        tool_choice_strategy="required_until_finish",
+        finish_tool_name="finish",
     )
 
     logger.info(

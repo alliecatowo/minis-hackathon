@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth";
+import { Org, OrgMember as ApiOrgMember, Team } from "@/lib/api";
 import {
   ArrowLeft,
   Building2,
@@ -24,41 +25,15 @@ import {
 
 type Tab = "members" | "teams" | "settings";
 
-interface OrgMember {
-  user_id: string;
-  username: string;
-  display_name: string | null;
-  avatar_url: string | null;
-  role: string;
-  joined_at: string;
-}
-
-interface OrgTeam {
-  id: string;
-  name: string;
-  description: string | null;
-  member_count: number;
-}
-
-interface OrgDetail {
-  id: string;
-  name: string;
-  display_name: string;
-  description: string | null;
-  owner_id: string;
-  created_at: string;
-  members?: OrgMember[];
-}
-
 export default function OrgDetailPage() {
   const params = useParams();
   const router = useRouter();
   const orgId = String(params.id);
   const { user } = useAuth();
 
-  const [org, setOrg] = useState<OrgDetail | null>(null);
-  const [members, setMembers] = useState<OrgMember[]>([]);
-  const [teams, setTeams] = useState<OrgTeam[]>([]);
+  const [org, setOrg] = useState<Org | null>(null);
+  const [members, setMembers] = useState<ApiOrgMember[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("members");
@@ -301,16 +276,16 @@ export default function OrgDetailPage() {
                     <Avatar className="h-10 w-10">
                       <AvatarImage
                         src={member.avatar_url || undefined}
-                        alt={member.username}
+                        alt={member.username ?? "User"}
                       />
                       <AvatarFallback className="font-mono text-xs">
-                        {member.username.slice(0, 2).toUpperCase()}
+                        {(member.username ?? "U").slice(0, 2).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="truncate text-sm font-medium">
-                          {member.display_name || member.username}
+                          {member.display_name || member.username || "Unknown"}
                         </span>
                         <Badge
                           variant="secondary"

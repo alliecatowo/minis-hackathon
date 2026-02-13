@@ -29,17 +29,26 @@ async def lifespan(app: FastAPI):
     logger.info("Database migrations should be run with: alembic upgrade head")
     load_plugins()
     await registry.setup_clients(app)
-    if settings.environment == "production" and settings.jwt_secret == "dev-secret-change-in-production":
+    if (
+        settings.environment == "production"
+        and settings.jwt_secret == "dev-secret-change-in-production"
+    ):
         raise RuntimeError("JWT_SECRET must be changed from default in production!")
     elif settings.jwt_secret == "dev-secret-change-in-production":
         logger.warning("Using default JWT secret! Set JWT_SECRET env var for production.")
 
-    if settings.environment == "production" and settings.service_jwt_secret == "dev-service-secret-change-in-production":
+    if (
+        settings.environment == "production"
+        and settings.service_jwt_secret == "dev-service-secret-change-in-production"
+    ):
         raise RuntimeError("SERVICE_JWT_SECRET must be changed from default in production!")
     elif settings.service_jwt_secret == "dev-service-secret-change-in-production":
-        logger.warning("Using default service JWT secret! Set SERVICE_JWT_SECRET env var for production.")
+        logger.warning(
+            "Using default service JWT secret! Set SERVICE_JWT_SECRET env var for production."
+        )
 
     from app.core.llm import setup_langfuse
+
     setup_langfuse()
 
     yield
@@ -61,7 +70,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+        )
         if not settings.debug:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
