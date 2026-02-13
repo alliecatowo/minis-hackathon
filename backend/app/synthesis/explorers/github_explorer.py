@@ -213,9 +213,21 @@ class GitHubExplorer(Explorer):
                 + "\n\n"
             )
 
+        n_prs = len(raw_data.get("pull_requests_full", []))
+        n_review = len(raw_data.get("review_comments_full", []))
+        n_issue = len(raw_data.get("issue_comments_full", []))
+        n_commits = len(raw_data.get("commits_full", []))
+        data_counts = (
+            f"\nDATA AVAILABLE: {n_prs} PRs, {n_review} review comments, "
+            f"{n_issue} issue comments, {n_commits} commits.\n"
+            f"You MUST page through ALL of these using the list/read tools. "
+            f"Do not skip any data source.\n\n"
+        )
+
         return _USER_PROMPT.format(
             username=username,
             context_block=context_block,
+            data_counts=data_counts,
             evidence=evidence,
         )
 
@@ -881,11 +893,16 @@ Define the persona by what it is NOT.
 
 ## EXECUTION GUIDELINES
 
-### Quality over Quantity
-- One deeply analyzed thread revealing their philosophy on "tech debt" is worth \
-10 superficial "fixed a typo" commits.
-- IGNORE boilerplate. If it looks like a generated message, skip it.
-- FOCUS on "High Entropy" events: Debates, post-mortems, controversial PRs.
+### Exhaustiveness IS Quality
+- You must systematically READ ALL available social data using your tools.
+- Page through ALL review comments using list_review_comments with increasing offsets.
+- Page through ALL issue comments using list_issue_comments with increasing offsets.
+- Read ALL commit messages using read_commit_messages with increasing offsets.
+- Read 10+ individual review comments in full via read_review_comment.
+- Read 5+ PR bodies in full via read_pr.
+- For top 3-5 repos: use lookup_repo then browse source code with browse_repo and read_file.
+- Save findings AS YOU READ, not all at the end.
+- You have 50 turns. Use them ALL. Do not finish early.
 
 ### The "Ghost-Writer" Standard
 You are done when you can answer this: "If I had to ghost-write a rejection \
@@ -958,7 +975,7 @@ Target Identity: {username}
 
 CONTEXT BLOCK:
 {context_block}
-
+{data_counts}
 EVIDENCE STREAM:
 {evidence}
 

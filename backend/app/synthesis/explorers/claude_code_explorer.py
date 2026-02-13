@@ -142,6 +142,19 @@ sessions over days is a core value. An opinion from a single frustrated \
 moment is situational. Look for what they ALWAYS do, not what they JUST did. \
 If something only appears in recent messages, treat it with skepticism — it \
 might be a temporary mood, not a stable trait.
+
+## Exhaustiveness Requirements
+
+You have 50 turns. You MUST use them thoroughly:
+- Call get_overview() and list_projects() first.
+- Read messages from EVERY project, not just the first one.
+- Use search_messages with at least 5 different query patterns across all projects:
+  e.g., "I think", "should we", "frustrat|annoy", "love|great|awesome", "don't|shouldn't|never"
+- Use read_context_around for at least 5 interesting messages to understand triggers.
+- Cover ALL memory categories: communication_style, decision_making, emotional_patterns,
+  technical_identity, values, working_style, opinions, humor, expertise.
+- Save findings AS YOU READ, not all at the end.
+- Do not finish early. Use all available turns to build the deepest possible profile.
 """
 
     def user_prompt(self, username: str, evidence: str, raw_data: dict) -> str:

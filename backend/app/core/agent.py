@@ -30,6 +30,23 @@ def _is_gemini(model: str) -> bool:
     return "gemini" in model.lower()
 
 
+def _resolve_tool_choice(strategy: str, turn: int) -> str:
+    """Resolve tool_choice value based on strategy and current turn.
+
+    Strategies:
+      - "required_until_finish": always "required" (caller exits on finish tool)
+      - "required_for_n:<N>": "required" for the first N turns, then "auto"
+      - "auto_after_first" (default): "required" on turn 0, "auto" after
+    """
+    if strategy == "required_until_finish":
+        return "required"
+    if strategy.startswith("required_for_n:"):
+        n = int(strategy.split(":", 1)[1])
+        return "required" if turn < n else "auto"
+    # default: auto_after_first
+    return "required" if turn == 0 else "auto"
+
+
 @dataclass
 class AgentTool:
     """A tool the agent can call."""
@@ -93,6 +110,9 @@ async def run_agent(
     max_turns: int = 10,
     model: str | None = None,
     api_key: str | None = None,
+    max_output_tokens: int | None = None,
+    tool_choice_strategy: str = "auto_after_first",
+    finish_tool_name: str | None = "finish",
 ) -> AgentResult:
     """Run a ReAct agent loop.
 
@@ -121,9 +141,10 @@ async def run_agent(
                     "model": model,
                     "messages": messages,
                     "tools": openai_tools,
-                    # Force tool use on first turn, auto thereafter
-                    "tool_choice": "required" if turn == 0 else "auto",
+                    "tool_choice": _resolve_tool_choice(tool_choice_strategy, turn),
                 }
+                if max_output_tokens is not None:
+                    kwargs["max_tokens"] = max_output_tokens
                 if api_key:
                     kwargs["api_key"] = api_key
                 # Disable thinking for Gemini to prevent multi-turn failures
@@ -201,6 +222,16 @@ async def run_agent(
                     "tool_call_id": tc.id[:64] if tc.id else "",
                     "content": result_str,
                 }
+            )
+
+        # Check if any tool call was the designated finish tool
+        if finish_tool_name and any(
+            tc.function.name == finish_tool_name for tc in msg.tool_calls
+        ):
+            return AgentResult(
+                final_response=None,
+                tool_outputs=tool_outputs,
+                turns_used=turn + 1,
             )
 
     # Exhausted max turns
@@ -289,6 +320,9 @@ async def run_agent_streaming(
     max_turns: int = 5,
     model: str | None = None,
     api_key: str | None = None,
+    max_output_tokens: int | None = None,
+    tool_choice_strategy: str = "auto_after_first",
+    finish_tool_name: str | None = "finish",
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run a ReAct agent loop with streaming output.
 
@@ -317,8 +351,10 @@ async def run_agent_streaming(
                     "model": model,
                     "messages": messages,
                     "tools": openai_tools,
-                    "tool_choice": "auto",
+                    "tool_choice": _resolve_tool_choice(tool_choice_strategy, turn),
                 }
+                if max_output_tokens is not None:
+                    kwargs["max_tokens"] = max_output_tokens
                 if api_key:
                     kwargs["api_key"] = api_key
                 if gemini:
@@ -409,6 +445,13 @@ async def run_agent_streaming(
                 type="tool_result",
                 data=json.dumps({"tool": fn_name, "summary": result_str[:200]}),
             )
+
+        # Check if any tool call was the designated finish tool
+        if finish_tool_name and any(
+            tc.function.name == finish_tool_name for tc in msg.tool_calls
+        ):
+            yield AgentEvent(type="done", data="")
+            return
 
     # Max turns exhausted — force a final streaming response without tools
     # Strip tool/tool_calls since we're not passing tool definitions
