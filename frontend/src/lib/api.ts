@@ -268,7 +268,7 @@ export async function uploadClaudeCode(files: File[]): Promise<{ files_saved: nu
 // --- Team API functions ---
 
 export interface Team {
-  id: number;
+  id: string;
   name: string;
   description: string | null;
   member_count: number;
@@ -345,18 +345,37 @@ export async function removeTeamMember(teamId: string, miniId: string): Promise<
 
 // --- Org API functions ---
 
-export interface Org {
-  id: number;
+export interface OrgSummary {
+  id: string;
   name: string;
   display_name: string;
   description: string | null;
+  avatar_url: string | null;
+  member_count: number;
+  role: string;
+  created_at: string;
+}
+
+export interface Org {
+  id: string;
+  name: string;
+  display_name: string;
+  description: string | null;
+  avatar_url: string | null;
+  owner_id: string;
+  members?: OrgMember[];
   created_at: string;
 }
 
 export interface OrgMember {
+  id: string;
+  org_id: string;
   user_id: string;
-  username: string;
+  username: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
   role: string;
+  joined_at: string;
 }
 
 export async function createOrg(data: { name: string; display_name: string; description?: string }): Promise<Org> {
@@ -372,7 +391,7 @@ export async function createOrg(data: { name: string; display_name: string; desc
   return res.json();
 }
 
-export async function listOrgs(): Promise<Org[]> {
+export async function listOrgs(): Promise<OrgSummary[]> {
   const res = await fetch(`${API_BASE}/orgs`);
   if (!res.ok) throw new Error("Failed to fetch orgs");
   return res.json();
@@ -409,7 +428,7 @@ export async function generateInvite(orgId: string): Promise<{ invite_code: stri
   return res.json();
 }
 
-export async function joinOrg(code: string): Promise<Org> {
+export async function joinOrg(code: string): Promise<OrgMember> {
   const res = await fetch(`${API_BASE}/orgs/join/${code}`, {
     method: "POST",
   });

@@ -6,19 +6,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { TeamCard } from "@/components/team-card";
 import { AuthGate } from "@/components/auth-gate";
+import { Team } from "@/lib/api";
 import { Users, Plus } from "lucide-react";
 
-interface TeamSummary {
-  id: number;
-  name: string;
-  description: string | null;
-  member_count: number;
-  owner_username: string;
-  created_at: string;
-}
-
 export default function TeamsPage() {
-  const [teams, setTeams] = useState<TeamSummary[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

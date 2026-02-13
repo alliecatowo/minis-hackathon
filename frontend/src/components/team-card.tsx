@@ -3,17 +3,10 @@
 import Link from "next/link";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Team } from "@/lib/api";
 import { Users } from "lucide-react";
 
-interface TeamSummary {
-  id: number;
-  name: string;
-  description: string | null;
-  member_count: number;
-  owner_username: string;
-}
-
-export function TeamCard({ team }: { team: TeamSummary }) {
+export function TeamCard({ team }: { team: Team }) {
   return (
     <Link href={`/teams/${team.id}`}>
       <Card className="group cursor-pointer border-border/50 transition-all duration-200 hover:border-border hover:bg-card/80 hover:shadow-lg hover:shadow-black/5">

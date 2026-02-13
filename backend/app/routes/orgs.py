@@ -55,8 +55,9 @@ class OrgSummaryResponse(BaseModel):
 
 class OrgMemberResponse(BaseModel):
     id: str
+    org_id: str
     user_id: str
-    username: str
+    username: str | None
     display_name: str | None
     avatar_url: str | None
     role: str
@@ -98,7 +99,7 @@ class OrgTeamSummaryResponse(BaseModel):
     name: str
     description: str | None
     member_count: int
-    owner_username: str
+    owner_username: str | None
     created_at: datetime.datetime
 
 
@@ -108,38 +109,28 @@ router = APIRouter(prefix="/orgs", tags=["orgs"])
 # -- Helpers --
 
 
-async def _get_membership(
-    session: AsyncSession, org_id: str, user_id: str
-) -> OrgMember | None:
+async def _get_membership(session: AsyncSession, org_id: str, user_id: str) -> OrgMember | None:
     result = await session.execute(
-        select(OrgMember).where(
-            OrgMember.org_id == org_id, OrgMember.user_id == user_id
-        )
+        select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
     )
     return result.scalar_one_or_none()
 
 
-async def _require_membership(
-    session: AsyncSession, org_id: str, user_id: str
-) -> OrgMember:
+async def _require_membership(session: AsyncSession, org_id: str, user_id: str) -> OrgMember:
     member = await _get_membership(session, org_id, user_id)
     if not member:
         raise HTTPException(status_code=403, detail="Not an org member")
     return member
 
 
-async def _require_admin(
-    session: AsyncSession, org_id: str, user_id: str
-) -> OrgMember:
+async def _require_admin(session: AsyncSession, org_id: str, user_id: str) -> OrgMember:
     member = await _require_membership(session, org_id, user_id)
     if member.role not in ("owner", "admin"):
         raise HTTPException(status_code=403, detail="Admin role required")
     return member
 
 
-async def _require_owner(
-    session: AsyncSession, org_id: str, user_id: str
-) -> OrgMember:
+async def _require_owner(session: AsyncSession, org_id: str, user_id: str) -> OrgMember:
     member = await _require_membership(session, org_id, user_id)
     if member.role != "owner":
         raise HTTPException(status_code=403, detail="Owner role required")
@@ -147,18 +138,14 @@ async def _require_owner(
 
 
 async def _get_org_or_404(session: AsyncSession, org_id: str) -> Organization:
-    result = await session.execute(
-        select(Organization).where(Organization.id == org_id)
-    )
+    result = await session.execute(select(Organization).where(Organization.id == org_id))
     org = result.scalar_one_or_none()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
     return org
 
 
-async def _get_org_members(
-    session: AsyncSession, org_id: str
-) -> list[OrgMemberResponse]:
+async def _get_org_members(session: AsyncSession, org_id: str) -> list[OrgMemberResponse]:
     stmt = (
         select(
             OrgMember.id,
@@ -177,6 +164,7 @@ async def _get_org_members(
     return [
         OrgMemberResponse(
             id=row.id,
+            org_id=org_id,
             user_id=row.user_id,
             username=row.username,
             display_name=row.display_name,
@@ -199,9 +187,7 @@ async def create_org(
 ):
     """Create an organization. The creator is automatically added as owner."""
     # Check name uniqueness
-    existing = await session.execute(
-        select(Organization).where(Organization.name == body.name)
-    )
+    existing = await session.execute(select(Organization).where(Organization.name == body.name))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Organization name already taken")
 
@@ -232,6 +218,7 @@ async def create_org(
         members=[
             OrgMemberResponse(
                 id=owner_member.id,
+                org_id=org.id,
                 user_id=user.id,
                 username=user.github_username,
                 display_name=user.display_name,
@@ -353,12 +340,8 @@ async def delete_org(
     await _require_owner(session, org_id, user.id)
 
     # Delete members and invitations (cascade should handle it, but be explicit)
-    await session.execute(
-        delete(OrgInvitation).where(OrgInvitation.org_id == org_id)
-    )
-    await session.execute(
-        delete(OrgMember).where(OrgMember.org_id == org_id)
-    )
+    await session.execute(delete(OrgInvitation).where(OrgInvitation.org_id == org_id))
+    await session.execute(delete(OrgMember).where(OrgMember.org_id == org_id))
     await session.delete(org)
     await session.commit()
 
@@ -407,9 +390,7 @@ async def join_org(
     session: AsyncSession = Depends(get_session),
 ):
     """Accept an invitation and join an organization."""
-    result = await session.execute(
-        select(OrgInvitation).where(OrgInvitation.invite_code == code)
-    )
+    result = await session.execute(select(OrgInvitation).where(OrgInvitation.invite_code == code))
     invitation = result.scalar_one_or_none()
     if not invitation:
         raise HTTPException(status_code=404, detail="Invalid invite code")
@@ -430,9 +411,7 @@ async def join_org(
         raise HTTPException(status_code=409, detail="Already a member of this organization")
 
     # Add member
-    member = OrgMember(
-        org_id=invitation.org_id, user_id=user.id, role="member"
-    )
+    member = OrgMember(org_id=invitation.org_id, user_id=user.id, role="member")
     session.add(member)
 
     # Increment uses
@@ -443,6 +422,7 @@ async def join_org(
 
     return OrgMemberResponse(
         id=member.id,
+        org_id=invitation.org_id,
         user_id=user.id,
         username=user.github_username,
         display_name=user.display_name,
