@@ -203,7 +203,6 @@ function UsageTab() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
     getUsage()
       .then(setUsage)
       .catch(() => setError("Failed to load usage data"))
