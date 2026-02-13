@@ -52,6 +52,7 @@ async def _request(
             try:
                 detail = resp.json().get("detail", detail)
             except Exception:
+                # JSON parsing failed, use raw detail string
                 pass
             return {"error": True, "status_code": resp.status_code, "detail": detail}
         content_type = resp.headers.get("content-type", "")
@@ -170,6 +171,7 @@ async def chat_with_mini(identifier: str, message: str) -> str:
                     try:
                         detail = json.loads(detail).get("detail", detail)
                     except Exception:
+                        # JSON parsing failed, use raw detail string
                         pass
                     return json.dumps(
                         {"error": True, "status_code": resp.status_code, "detail": detail}
@@ -237,6 +239,7 @@ async def team_chat(team_id: int, message: str, context: str = "") -> str:
                     try:
                         detail = json.loads(detail).get("detail", detail)
                     except Exception:
+                        # JSON parsing failed, use raw detail string
                         pass
                     return json.dumps(
                         {"error": True, "status_code": resp.status_code, "detail": detail}
@@ -252,12 +255,14 @@ async def team_chat(team_id: int, message: str, context: str = "") -> str:
                                 current_member = info.get("display_name") or info.get("username", "unknown")
                                 current_chunks = []
                             except json.JSONDecodeError:
+                                # Malformed JSON in member_start event, skip
                                 pass
                         elif event_type == "member_chunk":
                             try:
                                 chunk_data = json.loads(data)
                                 current_chunks.append(chunk_data.get("chunk", ""))
                             except json.JSONDecodeError:
+                                # Malformed JSON in member_chunk event, skip
                                 pass
                         elif event_type == "member_done":
                             if current_member:

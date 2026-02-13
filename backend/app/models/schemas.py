@@ -119,6 +119,7 @@ class MiniDetail(BaseModel):
                         for v in eng_values
                     ]
             except (KeyError, TypeError):
+                # Invalid values structure, skip parsing
                 pass
         if self.roles_json:
             parsed = self._parse_json(self.roles_json)

@@ -224,6 +224,7 @@ def _extract_pages(urls: list[str]) -> list[dict[str, Any]]:
                     meta_dict = json.loads(metadata)
                     title = meta_dict.get("title", "")
                 except (json.JSONDecodeError, TypeError):
+                    # Invalid metadata JSON, use default title
                     pass
 
             content = content[:_MAX_CONTENT_PER_PAGE]
