@@ -12,6 +12,9 @@ env:
 jobs:
   preview:
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
     if: github.event.action != 'closed'
     outputs:
       fly_url: ${{ steps.deploy-backend.outputs.url }}
