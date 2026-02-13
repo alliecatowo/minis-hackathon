@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from app.synthesis.memory_assembler import (
-    SECTIONS,
     _dedup_key,
     _extract_roles_keyword,
     _extract_skills_keyword,
@@ -324,7 +321,9 @@ class TestExtractValuesJson:
         result_json = extract_values_json([report])
         data = json.loads(result_json)
         for val in data["engineering_values"]:
-            assert val["intensity"] >= 2.0, f"{val['name']} scored below minimum: {val['intensity']}"
+            assert val["intensity"] >= 2.0, (
+                f"{val['name']} scored below minimum: {val['intensity']}"
+            )
 
 
 # ── extract_roles ────────────────────────────────────────────────────
@@ -403,10 +402,12 @@ class TestExtractSkills:
 
     def test_max_15_skills(self):
         # Create evidence with many technology mentions
-        tech_text = " ".join([
-            "Python TypeScript JavaScript Rust Go Java C++ Ruby PHP Swift Kotlin",
-            "React Vue Angular Svelte Next.js Docker Kubernetes Terraform",
-        ])
+        tech_text = " ".join(
+            [
+                "Python TypeScript JavaScript Rust Go Java C++ Ruby PHP Swift Kotlin",
+                "React Vue Angular Svelte Next.js Docker Kubernetes Terraform",
+            ]
+        )
         entries = [
             make_memory(content=tech_text, evidence_quote=tech_text),
         ]
@@ -452,7 +453,9 @@ class TestExtractTraits:
         )
         entries = [
             make_memory(
-                category="voice_patterns", topic="All", content=big_text,
+                category="voice_patterns",
+                topic="All",
+                content=big_text,
                 evidence_quote=big_text,
             ),
         ]

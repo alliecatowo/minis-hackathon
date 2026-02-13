@@ -266,8 +266,8 @@ to convincingly speak in their voice and make decisions the way they do?
                 f"- Decision signals: {decision}",
                 f"- Architecture signals: {architecture}",
                 f"- Tech mention signals: {tech_mention}",
-                f"",
-                f"### Projects",
+                "",
+                "### Projects",
             ]
             for proj, msgs in sorted(messages_by_project.items()):
                 lines.append(f"- {proj}: {len(msgs)} messages")
