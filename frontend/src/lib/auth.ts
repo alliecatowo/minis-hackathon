@@ -1,15 +1,7 @@
 'use client';
 
 import { createAuthClient } from '@neondatabase/auth/next';
-import { useMemo, useCallback } from 'react';
-
-const PRODUCTION_URL = 'https://frontend-red-one-13.vercel.app';
-
-function isPreview(): boolean {
-  if (typeof window === 'undefined') return false;
-  const host = window.location.host;
-  return host.includes('--') && host.includes('.vercel.app') && !host.startsWith('frontend-red-one-13');
-}
+import { useMemo } from 'react';
 
 export const authClient = createAuthClient();
 
@@ -41,28 +33,11 @@ export function useAuth(): AuthContextType {
     };
   }, [session]);
 
-  const login = useCallback(() => {
-    if (isPreview()) {
-      const returnUrl = encodeURIComponent(window.location.origin + window.location.pathname);
-      window.location.href = `${PRODUCTION_URL}/api/auth/signin/social?provider=github&callbackURL=${PRODUCTION_URL}/auth/bridge?return_to=${returnUrl}`;
-    } else {
-      authClient.signIn.social({ provider: 'github', callbackURL: '/' });
-    }
-  }, []);
-
-  const logout = useCallback(() => {
-    if (isPreview()) {
-      window.location.href = `${PRODUCTION_URL}/api/auth/signout?callbackURL=${encodeURIComponent(window.location.origin)}`;
-    } else {
-      authClient.signOut();
-    }
-  }, []);
-
   return {
     user,
     token: null,
     loading: isPending,
-    login,
-    logout,
+    login: () => authClient.signIn.social({ provider: 'github', callbackURL: '/' }),
+    logout: () => authClient.signOut(),
   };
 }
