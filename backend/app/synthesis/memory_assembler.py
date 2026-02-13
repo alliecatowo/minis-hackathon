@@ -355,10 +355,7 @@ def assemble_memory(reports: list[ExplorerReport], username: str = "") -> str:
         for entry in entries:
             line = f"- **{entry.topic}**: {entry.content}"
             if entry.evidence_quote:
-                quote = entry.evidence_quote
-                if len(quote) > 200:
-                    quote = quote[:197] + "..."
-                line += f'\n  > "{quote}"'
+                line += f'\n  > "{entry.evidence_quote}"'
             lines.append(line)
         lines.append("")
 

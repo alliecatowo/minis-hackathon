@@ -440,7 +440,7 @@ class Explorer(ABC):
             system_prompt=self.system_prompt(),
             user_prompt=self.user_prompt(username, evidence, raw_data),
             tools=tools,
-            max_turns=40,
+            max_turns=50,
         )
 
         logger.info(

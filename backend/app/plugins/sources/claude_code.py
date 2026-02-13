@@ -143,9 +143,17 @@ class ClaudeCodeSource(IngestionSource):
         max_files = config.get("max_files", 100)
 
         projects = _discover_projects(path, max_files=max_files)
+        conversations = _discover_conversations(path, max_files=max_files)
         total_raw = sum(len(msgs) for msgs in projects.values())
 
-        # Apply smart filtering
+        # Collect ALL messages grouped by project for raw_data (unfiltered)
+        messages_by_project: dict[str, list[dict[str, Any]]] = {}
+        all_messages: list[dict[str, Any]] = []
+        for proj, messages in projects.items():
+            messages_by_project[proj] = messages
+            all_messages.extend(messages)
+
+        # Apply smart filtering for the evidence summary
         filtered_projects: dict[str, list[dict[str, Any]]] = {}
         personality_count = 0
         decision_count = 0
@@ -168,8 +176,12 @@ class ClaudeCodeSource(IngestionSource):
             identifier=identifier,
             evidence=evidence,
             raw_data={
-                "project_count": len(filtered_projects),
-                "projects": list(filtered_projects.keys()),
+                "project_count": len(projects),
+                "projects": list(projects.keys()),
+                "total_message_count": len(all_messages),
+                "all_messages": all_messages,
+                "messages_by_project": messages_by_project,
+                "conversations_by_project": conversations,
             },
             stats={
                 "projects_discovered": len(projects),
@@ -236,6 +248,54 @@ def _discover_projects(
             logger.warning("Failed to parse %s", filepath, exc_info=True)
 
     return projects
+
+
+def _discover_conversations(
+    path: Path, *, max_files: int = 100
+) -> dict[str, list[dict[str, Any]]]:
+    """Discover and parse JSONL files for full conversations (user + assistant).
+
+    Returns a mapping of project name -> list of chronologically ordered
+    conversation messages with role info.
+    """
+    jsonl_files: list[tuple[str, Path]] = []
+
+    if path.is_file() and path.suffix == ".jsonl":
+        project = _project_name_from_path(path)
+        jsonl_files.append((project, path))
+
+    elif path.is_dir():
+        subdirs = [d for d in path.iterdir() if d.is_dir() and d.name != "memory"]
+        has_jsonl_directly = any(path.glob("*.jsonl"))
+
+        if subdirs and not has_jsonl_directly:
+            for subdir in sorted(subdirs):
+                project = _project_name_from_dir(subdir)
+                for f in sorted(subdir.glob("*.jsonl")):
+                    jsonl_files.append((project, f))
+        else:
+            project = _project_name_from_dir(path)
+            for f in sorted(path.glob("*.jsonl")):
+                jsonl_files.append((project, f))
+    else:
+        return {}
+
+    jsonl_files = jsonl_files[:max_files]
+
+    conversations: dict[str, list[dict[str, Any]]] = {}
+    for project, filepath in jsonl_files:
+        try:
+            messages = _parse_jsonl_conversations(filepath)
+            if messages:
+                conversations.setdefault(project, []).extend(messages)
+        except Exception:
+            logger.warning("Failed to parse conversations from %s", filepath, exc_info=True)
+
+    # Sort each project's conversation by timestamp
+    for msgs in conversations.values():
+        msgs.sort(key=lambda m: m.get("timestamp", ""))
+
+    return conversations
 
 
 def _project_name_from_path(filepath: Path) -> str:
@@ -328,6 +388,59 @@ def _parse_jsonl(filepath: Path) -> list[dict[str, Any]]:
                             "has_tech_mention": bool(_TECH_MENTION_PATTERNS.search(stripped)),
                         }
                     )
+
+    return messages
+
+
+def _parse_jsonl_conversations(filepath: Path) -> list[dict[str, Any]]:
+    """Parse a JSONL transcript and extract ALL messages (user + assistant).
+
+    Returns chronologically ordered messages with role info, giving full
+    conversation context so the explorer can see what the user was reacting to.
+    """
+    messages: list[dict[str, Any]] = []
+
+    with open(filepath) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            entry_type = entry.get("type", "")
+            timestamp = entry.get("timestamp", "")
+
+            if entry_type == "user":
+                msg = entry.get("message", {})
+                if msg.get("role") != "user":
+                    continue
+                texts = _extract_text_content(msg.get("content", ""))
+                for text in texts:
+                    if text:
+                        messages.append({
+                            "role": "user",
+                            "text": _strip_code_blocks(text),
+                            "raw_text": text,
+                            "timestamp": timestamp,
+                        })
+
+            elif entry_type == "assistant":
+                msg = entry.get("message", {})
+                if msg.get("role") != "assistant":
+                    continue
+                texts = _extract_text_content(msg.get("content", ""))
+                for text in texts:
+                    if text:
+                        # Truncate long assistant messages to save memory
+                        truncated = text[:2000] + "..." if len(text) > 2000 else text
+                        messages.append({
+                            "role": "assistant",
+                            "text": truncated,
+                            "timestamp": timestamp,
+                        })
 
     return messages
 

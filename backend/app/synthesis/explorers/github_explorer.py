@@ -423,6 +423,153 @@ class GitHubExplorer(Explorer):
                 except Exception as e:
                     return f"Failed to read {path}: {e}"
 
+        # --- Social data tool closures over raw_data ---
+
+        prs_full: list[dict] = raw_data.get("pull_requests_full", [])
+        review_comments_full: list[dict] = raw_data.get("review_comments_full", [])
+        issue_comments_full: list[dict] = raw_data.get("issue_comments_full", [])
+        commits_full: list[dict] = raw_data.get("commits_full", [])
+
+        async def list_prs() -> str:
+            """List all PRs with title, repo, date, and body preview."""
+            if not prs_full:
+                return "No pull requests available."
+            lines = [f"## Pull Requests ({len(prs_full)} total)"]
+            for i, pr in enumerate(prs_full):
+                title = pr.get("title", "Untitled")
+                repo_url = pr.get("repository_url", "")
+                repo_name = repo_url.rsplit("/", 1)[-1] if "/" in repo_url else "unknown"
+                created = pr.get("created_at", "")[:10]
+                body = (pr.get("body") or "")[:100]
+                body_preview = f" — {body}..." if body else ""
+                lines.append(f"{i}. [{repo_name}] {title} ({created}){body_preview}")
+            return "\n".join(lines)
+
+        async def read_pr(pr_index: int) -> str:
+            """Read full PR body and metadata for a specific PR by index."""
+            if pr_index < 0 or pr_index >= len(prs_full):
+                return f"Invalid PR index {pr_index}. Valid range: 0-{len(prs_full) - 1}"
+            pr = prs_full[pr_index]
+            title = pr.get("title", "Untitled")
+            body = (pr.get("body") or "No body").strip()
+            state = pr.get("state", "unknown")
+            created = pr.get("created_at", "")
+            merged = pr.get("merged_at", "")
+            repo_url = pr.get("repository_url", "")
+            repo_name = repo_url.rsplit("/", 1)[-1] if "/" in repo_url else "unknown"
+            html_url = pr.get("html_url", "")
+            parts = [
+                f"## PR #{pr.get('number', '?')}: {title}",
+                f"- Repo: {repo_name}",
+                f"- State: {state}",
+                f"- Created: {created}",
+            ]
+            if merged:
+                parts.append(f"- Merged: {merged}")
+            if html_url:
+                parts.append(f"- URL: {html_url}")
+            parts.append(f"\n### Body\n{body}")
+            return "\n".join(parts)
+
+        async def list_review_comments(offset: int = 0, limit: int = 50) -> str:
+            """List review comments with body preview, paginated."""
+            if not review_comments_full:
+                return "No review comments available."
+            total = len(review_comments_full)
+            chunk = review_comments_full[offset : offset + limit]
+            lines = [f"## Review Comments (showing {offset}-{offset + len(chunk) - 1} of {total})"]
+            for i, comment in enumerate(chunk):
+                idx = offset + i
+                body = (comment.get("body") or "")[:100]
+                path = comment.get("path", "")
+                path_str = f" [{path}]" if path else ""
+                lines.append(f"{idx}.{path_str} {body}...")
+            if offset + limit < total:
+                lines.append(f"\n(Use offset={offset + limit} to see more)")
+            return "\n".join(lines)
+
+        async def read_review_comment(index: int) -> str:
+            """Read full review comment with diff hunk context."""
+            if index < 0 or index >= len(review_comments_full):
+                return f"Invalid index {index}. Valid range: 0-{len(review_comments_full) - 1}"
+            comment = review_comments_full[index]
+            body = (comment.get("body") or "").strip()
+            path = comment.get("path", "unknown")
+            diff_hunk = comment.get("diff_hunk", "")
+            html_url = comment.get("html_url", "")
+            created = comment.get("created_at", "")
+            parts = [
+                f"## Review Comment #{index}",
+                f"- File: {path}",
+                f"- Created: {created}",
+            ]
+            if html_url:
+                parts.append(f"- URL: {html_url}")
+            if diff_hunk:
+                parts.append(f"\n### Diff Context\n```diff\n{diff_hunk}\n```")
+            parts.append(f"\n### Comment\n{body}")
+            return "\n".join(parts)
+
+        async def list_issue_comments(offset: int = 0, limit: int = 50) -> str:
+            """List issue comments with body preview, paginated."""
+            if not issue_comments_full:
+                return "No issue comments available."
+            total = len(issue_comments_full)
+            chunk = issue_comments_full[offset : offset + limit]
+            lines = [f"## Issue Comments (showing {offset}-{offset + len(chunk) - 1} of {total})"]
+            for i, comment in enumerate(chunk):
+                idx = offset + i
+                body = (comment.get("body") or "")[:100]
+                html_url = comment.get("html_url", "")
+                issue_ref = ""
+                if html_url:
+                    # Extract issue number from URL like .../issues/123#issuecomment-...
+                    parts_url = html_url.split("/")
+                    for j, part in enumerate(parts_url):
+                        if part == "issues" and j + 1 < len(parts_url):
+                            issue_ref = f" [issue #{parts_url[j + 1].split('#')[0]}]"
+                            break
+                lines.append(f"{idx}.{issue_ref} {body}...")
+            if offset + limit < total:
+                lines.append(f"\n(Use offset={offset + limit} to see more)")
+            return "\n".join(lines)
+
+        async def read_issue_comment(index: int) -> str:
+            """Read full issue comment."""
+            if index < 0 or index >= len(issue_comments_full):
+                return f"Invalid index {index}. Valid range: 0-{len(issue_comments_full) - 1}"
+            comment = issue_comments_full[index]
+            body = (comment.get("body") or "").strip()
+            html_url = comment.get("html_url", "")
+            created = comment.get("created_at", "")
+            parts = [
+                f"## Issue Comment #{index}",
+                f"- Created: {created}",
+            ]
+            if html_url:
+                parts.append(f"- URL: {html_url}")
+            parts.append(f"\n### Comment\n{body}")
+            return "\n".join(parts)
+
+        async def read_commit_messages(offset: int = 0, limit: int = 30) -> str:
+            """Read full commit messages with repo context, paginated."""
+            if not commits_full:
+                return "No commits available."
+            total = len(commits_full)
+            chunk = commits_full[offset : offset + limit]
+            lines = [f"## Commit Messages (showing {offset}-{offset + len(chunk) - 1} of {total})"]
+            for i, commit in enumerate(chunk):
+                idx = offset + i
+                commit_data = commit.get("commit", {})
+                message = commit_data.get("message", "")
+                repo_name = commit.get("repository", {}).get("full_name", "unknown")
+                sha = commit.get("sha", "")[:8]
+                lines.append(f"\n### {idx}. [{repo_name}] {sha}")
+                lines.append(message)
+            if offset + limit < total:
+                lines.append(f"\n(Use offset={offset + limit} to see more)")
+            return "\n".join(lines)
+
         # Inject the extra tools into the base explore() flow
         self._extra_tools = [
             AgentTool(
@@ -490,6 +637,140 @@ class GitHubExplorer(Explorer):
                     "required": ["repo_name", "path"],
                 },
                 handler=read_file,
+            ),
+            # Social data tools
+            AgentTool(
+                name="list_prs",
+                description=(
+                    "List all pull requests with titles, repos, dates, and a short body "
+                    "preview. Use this to find interesting PRs to read in full."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {},
+                },
+                handler=list_prs,
+            ),
+            AgentTool(
+                name="read_pr",
+                description=(
+                    "Read the full body and metadata of a specific pull request by index. "
+                    "Use after list_prs to dive into PRs with interesting descriptions."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "pr_index": {
+                            "type": "integer",
+                            "description": "Index of the PR from list_prs output",
+                        },
+                    },
+                    "required": ["pr_index"],
+                },
+                handler=read_pr,
+            ),
+            AgentTool(
+                name="list_review_comments",
+                description=(
+                    "List code review comments with body preview, paginated. These are "
+                    "inline PR review comments — the richest source of personality signal. "
+                    "Use offset/limit to page through all comments."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "offset": {
+                            "type": "integer",
+                            "description": "Starting index (default 0)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Number of comments to return (default 50)",
+                        },
+                    },
+                },
+                handler=list_review_comments,
+            ),
+            AgentTool(
+                name="read_review_comment",
+                description=(
+                    "Read a full code review comment with its diff hunk context. Use "
+                    "after list_review_comments to read comments that look interesting "
+                    "or contentious."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "index": {
+                            "type": "integer",
+                            "description": "Index of the review comment",
+                        },
+                    },
+                    "required": ["index"],
+                },
+                handler=read_review_comment,
+            ),
+            AgentTool(
+                name="list_issue_comments",
+                description=(
+                    "List issue discussion comments with body preview, paginated. "
+                    "Issue comments show how the developer communicates about problems "
+                    "and solutions in open discussion."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "offset": {
+                            "type": "integer",
+                            "description": "Starting index (default 0)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Number of comments to return (default 50)",
+                        },
+                    },
+                },
+                handler=list_issue_comments,
+            ),
+            AgentTool(
+                name="read_issue_comment",
+                description=(
+                    "Read the full text of a specific issue comment. Use after "
+                    "list_issue_comments to read comments that reveal personality."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "index": {
+                            "type": "integer",
+                            "description": "Index of the issue comment",
+                        },
+                    },
+                    "required": ["index"],
+                },
+                handler=read_issue_comment,
+            ),
+            AgentTool(
+                name="read_commit_messages",
+                description=(
+                    "Read full commit messages with repo context, paginated. Commit "
+                    "messages reveal work patterns, naming conventions, and how the "
+                    "developer describes their changes."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "offset": {
+                            "type": "integer",
+                            "description": "Starting index (default 0)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Number of commits to return (default 30)",
+                        },
+                    },
+                },
+                handler=read_commit_messages,
             ),
         ]
 
