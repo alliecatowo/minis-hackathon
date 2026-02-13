@@ -31,6 +31,7 @@ class IngestionSource(ABC):
     """
 
     name: str  # Unique identifier, e.g. "github", "claude_code", "slack"
+    source_type: str = "voice"  # "voice" or "memory"
 
     @abstractmethod
     async def fetch(self, identifier: str, **config: Any) -> IngestionResult:

@@ -44,6 +44,18 @@ signals. You have access to the following tools:
 - analyze_deeper: Make a secondary LLM call to analyze a subset of comments
   in more depth. Use this when you notice a pattern worth investigating.
 
+- save_context_evidence: Classify quotes into communication contexts. HN \
+  comments can be "casual_chat" (short replies, banter, opinions without code) \
+  or "technical_discussion" (comments with code, detailed technical arguments). \
+  Save at least 2-3 quotes per context that you encounter.
+
+- save_knowledge_node: Save a node in the Knowledge Graph for technologies, \
+  concepts, or projects they discuss with authority. Set depth to reflect \
+  expertise level.
+- save_knowledge_edge: Link knowledge nodes (e.g., "Rust" LOVES "Memory Safety").
+- save_principle: Save decision rules or values revealed in debates (e.g., \
+  trigger="new dependency proposed", action="push back", value="minimalism").
+
 - finish: Call when you have thoroughly analyzed all evidence.
 
 IMPORTANT ANALYSIS GUIDELINES:

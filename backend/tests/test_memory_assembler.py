@@ -9,12 +9,12 @@ import pytest
 from app.synthesis.memory_assembler import (
     SECTIONS,
     _dedup_key,
+    _extract_roles_keyword,
+    _extract_skills_keyword,
+    _extract_traits_keyword,
     _merge_entries,
     _normalize_category,
     assemble_memory,
-    extract_roles,
-    extract_skills,
-    extract_traits,
     extract_values_json,
 )
 from tests.conftest import make_memory, make_report
@@ -341,7 +341,7 @@ class TestExtractRoles:
             ),
         ]
         report = make_report(memory_entries=entries)
-        result = json.loads(extract_roles([report]))
+        result = json.loads(_extract_roles_keyword([report]))
         assert "primary" in result
         assert "secondary" in result
         assert isinstance(result["primary"], str)
@@ -349,7 +349,7 @@ class TestExtractRoles:
 
     def test_empty_evidence_returns_developer(self):
         report = make_report()
-        result = json.loads(extract_roles([report]))
+        result = json.loads(_extract_roles_keyword([report]))
         assert result["primary"] == "Developer"
         assert result["secondary"] == []
 
@@ -363,7 +363,7 @@ class TestExtractRoles:
             ),
         ]
         report = make_report(memory_entries=entries)
-        result = json.loads(extract_roles([report]))
+        result = json.loads(_extract_roles_keyword([report]))
         assert result["primary"] == "Frontend Developer"
 
 
@@ -381,7 +381,7 @@ class TestExtractSkills:
             ),
         ]
         report = make_report(memory_entries=entries)
-        result = json.loads(extract_skills([report]))
+        result = json.loads(_extract_skills_keyword([report]))
         assert isinstance(result, list)
         assert all(isinstance(s, str) for s in result)
 
@@ -395,7 +395,7 @@ class TestExtractSkills:
             ),
         ]
         report = make_report(memory_entries=entries)
-        result = json.loads(extract_skills([report]))
+        result = json.loads(_extract_skills_keyword([report]))
         assert "Python" in result
         assert "FastAPI" in result
         assert "PostgreSQL" in result
@@ -411,12 +411,12 @@ class TestExtractSkills:
             make_memory(content=tech_text, evidence_quote=tech_text),
         ]
         report = make_report(memory_entries=entries)
-        result = json.loads(extract_skills([report]))
+        result = json.loads(_extract_skills_keyword([report]))
         assert len(result) <= 15
 
     def test_empty_evidence_returns_empty(self):
         report = make_report()
-        result = json.loads(extract_skills([report]))
+        result = json.loads(_extract_skills_keyword([report]))
         assert result == []
 
 
@@ -434,7 +434,7 @@ class TestExtractTraits:
             ),
         ]
         report = make_report(memory_entries=entries)
-        result = json.loads(extract_traits([report]))
+        result = json.loads(_extract_traits_keyword([report]))
         assert isinstance(result, list)
         assert all(isinstance(t, str) for t in result)
 
@@ -457,12 +457,12 @@ class TestExtractTraits:
             ),
         ]
         report = make_report(memory_entries=entries)
-        result = json.loads(extract_traits([report]))
+        result = json.loads(_extract_traits_keyword([report]))
         assert len(result) <= 8
 
     def test_empty_evidence_returns_empty(self):
         report = make_report()
-        result = json.loads(extract_traits([report]))
+        result = json.loads(_extract_traits_keyword([report]))
         assert result == []
 
     def test_requires_minimum_2_keyword_hits(self):
@@ -476,6 +476,6 @@ class TestExtractTraits:
             ),
         ]
         report = make_report(memory_entries=entries)
-        result = json.loads(extract_traits([report]))
+        result = json.loads(_extract_traits_keyword([report]))
         # "Casual communicator" needs >= 2 keyword hits; only "casual" matches once
         assert "Casual communicator" not in result

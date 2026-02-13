@@ -90,6 +90,17 @@ become part of the personality profile.
 the context of what was happening when they said it.
 - **analyze_deeper**: If you spot an interesting pattern, use this to dig \
 deeper into a subset of the evidence.
+- **save_context_evidence**: Classify quotes into communication contexts. \
+Claude Code conversations are the "agent_chat" context — save representative \
+quotes using context_key "agent_chat" to capture how they talk to AI coding \
+assistants. Save at least 3-5 quotes this way.
+- **save_knowledge_node**: Save a node in the Knowledge Graph for any \
+technology, pattern, or tool they use or discuss. Set depth based on how \
+deeply they engage with it.
+- **save_knowledge_edge**: Link knowledge nodes (e.g., "FastAPI" USED_IN \
+"backend-project", "TypeScript" EXPERT_IN "generics").
+- **save_principle**: Save decision rules revealed by their choices (e.g., \
+trigger="test failure", action="fix before moving on", value="correctness").
 - **finish**: Call when you've thoroughly analyzed all evidence.
 
 ## Critical Instructions
@@ -114,10 +125,19 @@ the personality authentic.
 that's a signal. If they never express uncertainty, that's a signal. Absence \
 is evidence too.
 
-6. SAVE QUOTES LIBERALLY. The exact words someone uses — their idioms, \
-intensifiers, hedges, humor — are irreplaceable for voice cloning. A quote \
-like "that's disgusting, rip it out" tells you more about someone than \
-paragraphs of analysis.
+6. SYNTHESIZE, DON'T PARROT. Your job is to identify PATTERNS across many \
+messages, not to memorize individual quotes. Save quotes only when they \
+crystallize a recurring theme — a single perfect example of something you've \
+seen them do repeatedly. If you save a quote, ask: "Does this represent a \
+PATTERN or just a MOMENT?" Moments are noise. Patterns are personality. \
+A personality clone should generate NEW sentences in someone's voice, not \
+replay old ones verbatim.
+
+7. WEIGHT CONSISTENCY OVER RECENCY. An opinion expressed across multiple \
+sessions over days is a core value. An opinion from a single frustrated \
+moment is situational. Look for what they ALWAYS do, not what they JUST did. \
+If something only appears in recent messages, treat it with skepticism — it \
+might be a temporary mood, not a stable trait.
 """
 
     def user_prompt(self, username: str, evidence: str, raw_data: dict) -> str:

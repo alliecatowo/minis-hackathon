@@ -102,7 +102,7 @@ export function PersonalityRadar({ values }: { values: Value[] }) {
   };
 
   return (
-    <div className="flex flex-col items-center">
+    <div className="relative flex flex-col items-center">
       <svg viewBox={`0 0 ${size} ${size}`} className="w-full max-w-[230px]">
         {/* Grid rings */}
         {rings.map((scale) => {
@@ -158,7 +158,27 @@ export function PersonalityRadar({ values }: { values: Value[] }) {
         {/* Data points */}
         {points.map((p, i) => (
           <g key={i}>
-            {/* Hover target (larger invisible circle) */}
+            {/* Halo on hover (behind dot) */}
+            {hoveredIndex === i && (
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r="7"
+                fill={p.color}
+                opacity="0.15"
+                pointerEvents="none"
+              />
+            )}
+            {/* Visible dot */}
+            <circle
+              cx={p.x}
+              cy={p.y}
+              r={hoveredIndex === i ? "4.5" : "3"}
+              fill={p.color}
+              className="transition-all duration-150"
+              pointerEvents="none"
+            />
+            {/* Hover target (larger invisible circle — sole event receiver) */}
             <circle
               cx={p.x}
               cy={p.y}
@@ -168,66 +188,69 @@ export function PersonalityRadar({ values }: { values: Value[] }) {
               onMouseEnter={() => setHoveredIndex(i)}
               onMouseLeave={() => setHoveredIndex(null)}
             />
-            {/* Visible dot */}
-            <circle
-              cx={p.x}
-              cy={p.y}
-              r={hoveredIndex === i ? "4.5" : "3"}
-              fill={p.color}
-              className="transition-all duration-150"
-            />
-            {/* Halo on hover */}
-            {hoveredIndex === i && (
-              <circle
-                cx={p.x}
-                cy={p.y}
-                r="7"
-                fill={p.color}
-                opacity="0.15"
-              />
-            )}
           </g>
         ))}
 
         {/* Labels */}
-        {points.map((p, i) => (
-          <text
-            key={i}
-            x={p.labelX}
-            y={p.labelY}
-            textAnchor={getTextAnchor(p.angle)}
-            dominantBaseline="middle"
-            className={`text-[7px] cursor-pointer transition-opacity duration-150 ${
-              hoveredIndex === i
-                ? "fill-foreground font-medium"
-                : "fill-muted-foreground"
-            }`}
-            onMouseEnter={() => setHoveredIndex(i)}
-            onMouseLeave={() => setHoveredIndex(null)}
-          >
-            {p.name.length > 12 ? p.name.slice(0, 11) + "..." : p.name}
-            {p.description && <title>{p.name}: {p.description}</title>}
-          </text>
-        ))}
+        {points.map((p, i) => {
+          const anchor = getTextAnchor(p.angle);
+          const label = p.name.length > 12 ? p.name.slice(0, 11) + "..." : p.name;
+          // Approximate text width for hover rect (7px font, ~4px per char)
+          const textW = label.length * 4 + 4;
+          const rectX = anchor === "end" ? p.labelX - textW : anchor === "middle" ? p.labelX - textW / 2 : p.labelX;
+          return (
+            <g
+              key={i}
+              onMouseEnter={() => setHoveredIndex(i)}
+              onMouseLeave={() => setHoveredIndex(null)}
+              className="cursor-pointer"
+            >
+              {/* Transparent hover rect behind label for stable mouse target */}
+              <rect
+                x={rectX - 2}
+                y={p.labelY - 6}
+                width={textW + 4}
+                height={12}
+                fill="transparent"
+              />
+              <text
+                x={p.labelX}
+                y={p.labelY}
+                textAnchor={anchor}
+                dominantBaseline="middle"
+                className={`text-[7px] transition-opacity duration-150 ${
+                  hoveredIndex === i
+                    ? "fill-foreground font-medium"
+                    : "fill-muted-foreground"
+                }`}
+                pointerEvents="none"
+              >
+                {label}
+              </text>
+            </g>
+          );
+        })}
       </svg>
 
-      {/* Tooltip */}
-      {hoveredIndex !== null && points[hoveredIndex] && (
-        <div className="mt-2 rounded-md bg-secondary px-3 py-2 text-center animate-slide-up">
-          <p className="text-[10px] text-muted-foreground/60">
-            {points[hoveredIndex].category}
-          </p>
-          <p className="text-xs font-medium text-foreground">
-            {points[hoveredIndex].name}
-          </p>
-          <p className="mt-0.5 text-[10px] text-muted-foreground">
-            {points[hoveredIndex].description}
-          </p>
-          <p className="mt-1 font-mono text-[10px] text-chart-1">
-            {points[hoveredIndex].intensity}/10
-          </p>
-        </div>
-      )}
+      {/* Tooltip — absolute so it doesn't shift layout */}
+      <div className="h-16">
+        {hoveredIndex !== null && points[hoveredIndex] && (
+          <div className="rounded-md bg-secondary px-3 py-2 text-center animate-slide-up">
+            <p className="text-[10px] text-muted-foreground/60">
+              {points[hoveredIndex].category}
+            </p>
+            <p className="text-xs font-medium text-foreground">
+              {points[hoveredIndex].name}
+            </p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">
+              {points[hoveredIndex].description}
+            </p>
+            <p className="mt-1 font-mono text-[10px] text-chart-1">
+              {points[hoveredIndex].intensity}/10
+            </p>
+          </div>
+        )}
+      </div>
 
       {/* Legend */}
       <div className="mt-3 flex flex-wrap justify-center gap-x-3 gap-y-1">

@@ -2,35 +2,55 @@ from __future__ import annotations
 
 import datetime
 import json
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, model_validator
+import re
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # -- Request schemas --
 
 class CreateMiniRequest(BaseModel):
-    username: str
+    username: str = Field(max_length=39)
     sources: list[str] = ["github"]  # Ingestion sources to use
+    excluded_repos: list[str] = []  # Repo full names to exclude
+    source_identifiers: dict[str, str] = {}  # Per-source identifiers (e.g. {"hackernews": "pg"})
 
-
-class ChatRequest(BaseModel):
-    message: str
-    history: list[ChatMessage] = []
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        if not re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$', v):
+            raise ValueError("Invalid GitHub username format")
+        return v.strip()
 
 
 class ChatMessage(BaseModel):
-    role: str  # "user" or "assistant"
-    content: str
+    role: Literal["user", "assistant"] = Field(max_length=20)
+    content: str = Field(max_length=50000)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(max_length=10000)
+    history: list[ChatMessage] = Field(default=[], max_length=50)
+
+    @model_validator(mode="after")
+    def validate_total_size(self) -> "ChatRequest":
+        total = len(self.message) + sum(len(m.content) for m in self.history)
+        if total > 500_000:
+            raise ValueError("Total message content too large")
+        return self
 
 
 # -- Response schemas --
 
 class MiniSummary(BaseModel):
-    id: int
+    id: str
     username: str
     display_name: str | None
     avatar_url: str | None
+    owner_id: str | None = None
+    visibility: str = "public"
     status: str
     created_at: datetime.datetime
 
@@ -44,20 +64,23 @@ class MiniDetailValue(BaseModel):
 
 
 class MiniDetail(BaseModel):
-    id: int
+    id: str
     username: str
     display_name: str | None
     avatar_url: str | None
+    owner_id: str | None = None
+    visibility: str = "public"
+    org_id: str | None = None
     bio: str | None
     spirit_content: str | None
     memory_content: str | None = None
     system_prompt: str | None
-    values_json: str | None = None
-    roles_json: str | None = None
-    skills_json: str | None = None
-    traits_json: str | None = None
-    metadata_json: str | None = None
-    sources_used: str | None = None
+    values_json: Any = None
+    roles_json: Any = None
+    skills_json: Any = None
+    traits_json: Any = None
+    metadata_json: Any = None
+    sources_used: Any = None
     values: list[MiniDetailValue] = []
     roles: dict = {}
     skills: list[str] = []
@@ -68,37 +91,48 @@ class MiniDetail(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @staticmethod
+    def _parse_json(value: Any) -> Any:
+        """Parse a value that may be a JSON string or already-decoded dict/list."""
+        if value is None:
+            return None
+        if isinstance(value, (dict, list)):
+            return value
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
     @model_validator(mode="after")
     def parse_values(self) -> MiniDetail:
         if self.values_json:
             try:
-                data = json.loads(self.values_json)
-                eng_values = data.get("engineering_values", [])
-                self.values = [
-                    MiniDetailValue(
-                        name=v.get("name", ""),
-                        description=v.get("description", ""),
-                        intensity=v.get("intensity", 0.5),
-                    )
-                    for v in eng_values
-                ]
-            except (json.JSONDecodeError, KeyError, TypeError):
+                data = self._parse_json(self.values_json)
+                if data:
+                    eng_values = data.get("engineering_values", [])
+                    self.values = [
+                        MiniDetailValue(
+                            name=v.get("name", ""),
+                            description=v.get("description", ""),
+                            intensity=v.get("intensity", 0.5),
+                        )
+                        for v in eng_values
+                    ]
+            except (KeyError, TypeError):
+                # Invalid values structure, skip parsing
                 pass
         if self.roles_json:
-            try:
-                self.roles = json.loads(self.roles_json)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            parsed = self._parse_json(self.roles_json)
+            if parsed:
+                self.roles = parsed
         if self.skills_json:
-            try:
-                self.skills = json.loads(self.skills_json)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            parsed = self._parse_json(self.skills_json)
+            if parsed:
+                self.skills = parsed
         if self.traits_json:
-            try:
-                self.traits = json.loads(self.traits_json)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            parsed = self._parse_json(self.traits_json)
+            if parsed:
+                self.traits = parsed
         return self
 
 

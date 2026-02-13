@@ -5,9 +5,8 @@ import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { TeamCard } from "@/components/team-card";
+import { AuthGate } from "@/components/auth-gate";
 import { Users, Plus } from "lucide-react";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 interface TeamSummary {
   id: number;
@@ -32,6 +31,7 @@ export default function TeamsPage() {
   }, []);
 
   return (
+    <AuthGate icon={Users} message="Sign in to manage your teams.">
     <div className="mx-auto max-w-6xl px-4 py-12">
       <div className="mb-8 flex items-center justify-between">
         <div>
@@ -93,5 +93,6 @@ export default function TeamsPage() {
         </div>
       )}
     </div>
+    </AuthGate>
   );
 }

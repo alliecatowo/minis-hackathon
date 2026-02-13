@@ -7,6 +7,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -21,14 +26,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { ChatMessageBubble } from "@/components/chat-message";
 import { PersonalityRadar } from "@/components/personality-radar";
 import {
-  getMini,
+  getMiniByUsername,
   deleteMini,
   fetchChatStream,
   type Mini,
   type ChatMessage,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { Send, ChevronLeft, ChevronRight, Trash2, ArrowLeft, Github, MessageSquare, Sparkles, AlertCircle } from "lucide-react";
+import { Send, ChevronLeft, ChevronRight, Trash2, ArrowLeft, Github, MessageSquare, Sparkles, AlertCircle, Lock, LogIn } from "lucide-react";
+
+const PROMO_MINI = process.env.NEXT_PUBLIC_PROMO_MINI || "alliecatowo";
+const ANON_MESSAGE_LIMIT = 5;
 
 const STARTERS = [
   "What's your strongest engineering opinion?",
@@ -37,8 +45,9 @@ const STARTERS = [
   "What technology are you most passionate about?",
 ];
 
-function parseSourcesUsed(sourcesUsed?: string): string[] {
+function parseSourcesUsed(sourcesUsed?: string | string[]): string[] {
   if (!sourcesUsed) return [];
+  if (Array.isArray(sourcesUsed)) return sourcesUsed;
   try {
     const parsed = JSON.parse(sourcesUsed);
     if (Array.isArray(parsed)) return parsed;
@@ -48,13 +57,38 @@ function parseSourcesUsed(sourcesUsed?: string): string[] {
   return [];
 }
 
+/** Reusable collapsible sidebar section with chevron trigger */
+function SidebarSection({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="flex w-full items-center gap-2 py-1 text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground">
+        <ChevronRight
+          className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+        />
+        {title}
+      </CollapsibleTrigger>
+      <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up">
+        <div className="pt-3">{children}</div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 export default function MiniProfilePage() {
   const params = useParams();
   const router = useRouter();
   const username = params.username as string;
-  const { user } = useAuth();
-
-  const isOwner = user?.github_username === username;
+  const { user, login } = useAuth();
 
   const [mini, setMini] = useState<Mini | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,12 +102,16 @@ export default function MiniProfilePage() {
   const pendingToolCallsRef = useRef<Array<{ tool: string; args: Record<string, string>; result?: string }>>([]);
   const [toolActivity, setToolActivity] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [spiritOpen, setSpiritOpen] = useState(false);
+  const [anonMessageCount, setAnonMessageCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const isOwner = user?.id != null && user.id === mini?.owner_id;
+  const isPromoMini = username.toLowerCase() === PROMO_MINI.toLowerCase();
+  const anonLimitReached = !user && anonMessageCount >= ANON_MESSAGE_LIMIT;
+
   useEffect(() => {
-    getMini(username)
+    getMiniByUsername(username)
       .then(setMini)
       .catch(() => setError("Could not load this mini."))
       .finally(() => setLoading(false));
@@ -92,11 +130,16 @@ export default function MiniProfilePage() {
       setMessages((prev) => [...prev, userMsg]);
       setInput("");
       setIsStreaming(true);
+      if (!user) setAnonMessageCount((c) => c + 1);
 
       const history = [...messages];
 
       try {
-        const res = await fetchChatStream(username, text, history);
+        const res = await fetchChatStream(
+          mini!.id,
+          text,
+          history,
+        );
         if (!res.ok) throw new Error("Chat request failed");
         if (!res.body) throw new Error("No response body");
 
@@ -244,7 +287,7 @@ export default function MiniProfilePage() {
         textareaRef.current?.focus();
       }
     },
-    [username, messages, isStreaming]
+    [mini, messages, isStreaming]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -263,7 +306,7 @@ export default function MiniProfilePage() {
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      await deleteMini(username);
+      await deleteMini(mini!.id);
       router.push("/gallery");
     } catch {
       setDeleting(false);
@@ -295,27 +338,41 @@ export default function MiniProfilePage() {
   }
 
   if (error || !mini || mini.status === "failed") {
+    const isFailed = mini?.status === "failed";
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
-            <AlertCircle className="h-6 w-6 text-destructive" />
+        <div className="w-full max-w-md rounded-xl border border-border/50 bg-card p-8 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-secondary">
+            {isFailed ? (
+              <AlertCircle className="h-6 w-6 text-destructive" />
+            ) : (
+              <Lock className="h-6 w-6 text-muted-foreground" />
+            )}
           </div>
           <h2 className="mb-2 text-lg font-semibold">
-            {mini?.status === "failed" ? "Mini Creation Failed" : "Mini Not Found"}
+            {isFailed ? "Mini Creation Failed" : "Mini Not Available"}
           </h2>
           <p className="mb-6 text-sm text-muted-foreground">
-            {error || (mini?.status === "failed"
+            {isFailed
               ? `Something went wrong while creating @${username}'s mini. You can try creating it again.`
-              : `We couldn't find a mini for @${username}.`)}
+              : `This mini doesn't exist or is private. @${username} may not have been cloned yet, or the owner has restricted access.`}
           </p>
           <div className="flex flex-col items-center gap-3">
-            <Link href={`/create?username=${username}`}>
-              <Button variant="default" className="gap-2">
-                <Sparkles className="h-4 w-4" />
-                Retry Creation
-              </Button>
-            </Link>
+            {isFailed ? (
+              <Link href={`/create?username=${username}`}>
+                <Button variant="default" className="gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  Retry Creation
+                </Button>
+              </Link>
+            ) : (
+              <Link href={`/create?username=${username}`}>
+                <Button variant="default" className="gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  Create This Mini
+                </Button>
+              </Link>
+            )}
             <Link
               href="/gallery"
               className="text-sm text-muted-foreground underline transition-colors hover:text-foreground"
@@ -327,6 +384,12 @@ export default function MiniProfilePage() {
       </div>
     );
   }
+
+  const sources = parseSourcesUsed(mini.sources_used);
+  const hasSkillsOrTraits =
+    (mini.skills && mini.skills.length > 0) ||
+    (mini.traits && mini.traits.length > 0);
+  const hasRadar = mini.values && mini.values.length >= 3;
 
   return (
     <div className="mx-auto flex h-[calc(100vh-3.5rem)] max-w-6xl flex-col lg:flex-row">
@@ -347,7 +410,7 @@ export default function MiniProfilePage() {
           sidebarOpen ? "block" : "hidden"
         } w-full shrink-0 overflow-y-auto border-b p-6 lg:block lg:w-80 lg:border-b-0 lg:border-r`}
       >
-        <div className="space-y-6">
+        <div className="space-y-5">
           {/* Back to gallery */}
           <Link
             href="/gallery"
@@ -402,7 +465,7 @@ export default function MiniProfilePage() {
             </div>
           )}
 
-          {/* Identity */}
+          {/* ---- Section 1: Identity (always visible, NOT collapsible) ---- */}
           <div className="flex items-start gap-4">
             <Avatar className="h-16 w-16 shrink-0">
               <AvatarImage src={mini.avatar_url} alt={mini.username} />
@@ -444,72 +507,85 @@ export default function MiniProfilePage() {
             </p>
           )}
 
-          {/* Source badges */}
-          {parseSourcesUsed(mini.sources_used).length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {parseSourcesUsed(mini.sources_used).map((source) => (
-                <Badge key={source} variant="outline" className="gap-1 text-xs">
-                  {source === "github" ? (
-                    <Github className="h-3 w-3" />
-                  ) : source === "claude_code" ? (
-                    <MessageSquare className="h-3 w-3" />
-                  ) : null}
-                  {source === "github" ? "GitHub" : source === "claude_code" ? "Claude Code" : source}
-                </Badge>
-              ))}
-            </div>
-          )}
-
           <Separator />
 
-          {/* Skills */}
-          {mini.skills && mini.skills.length > 0 && (
-            <div className="space-y-2">
-              <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Skills
-              </h2>
-              <div className="flex flex-wrap gap-1.5">
-                {mini.skills.map((skill) => (
-                  <Badge key={skill} variant="default" className="text-[11px]">
-                    {skill}
-                  </Badge>
-                ))}
-              </div>
-            </div>
+          {/* ---- Section 2: Skills & Traits (collapsible, collapsed by default) ---- */}
+          {hasSkillsOrTraits && (
+            <>
+              <SidebarSection title="Skills & Traits">
+                <div className="space-y-3">
+                  {mini.skills && mini.skills.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {mini.skills.map((skill) => (
+                        <Badge key={skill} variant="default" className="text-[11px]">
+                          {skill}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  {mini.traits && mini.traits.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {mini.traits.map((trait) => (
+                        <Badge key={trait} variant="outline" className="text-[11px]">
+                          {trait}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </SidebarSection>
+              <Separator />
+            </>
           )}
 
-          {/* Traits */}
-          {mini.traits && mini.traits.length > 0 && (
-            <div className="space-y-2">
-              <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Traits
-              </h2>
-              <div className="flex flex-wrap gap-1.5">
-                {mini.traits.map((trait) => (
-                  <Badge key={trait} variant="outline" className="text-[11px]">
-                    {trait}
-                  </Badge>
-                ))}
-              </div>
-            </div>
+          {/* ---- Section 4: Personality Radar (collapsible, collapsed by default) ---- */}
+          {hasRadar && (
+            <>
+              <SidebarSection title="Personality Radar">
+                <PersonalityRadar values={mini.values} />
+              </SidebarSection>
+              <Separator />
+            </>
           )}
 
-          <Separator />
+          {/* ---- Section 5: Sources (collapsible, collapsed by default) ---- */}
+          {sources.length > 0 && (
+            <>
+              <SidebarSection title="Sources">
+                <div className="flex flex-wrap gap-1.5">
+                  {sources.map((source) => (
+                    <Badge key={source} variant="outline" className="gap-1 text-xs">
+                      {source === "github" ? (
+                        <Github className="h-3 w-3" />
+                      ) : source === "claude_code" ? (
+                        <MessageSquare className="h-3 w-3" />
+                      ) : null}
+                      {source === "github"
+                        ? "GitHub"
+                        : source === "claude_code"
+                          ? "Claude Code"
+                          : source}
+                    </Badge>
+                  ))}
+                </div>
+              </SidebarSection>
+              <Separator />
+            </>
+          )}
 
-          {/* Radar chart */}
-          {mini.values && mini.values.length >= 3 && (
-            <div>
-              <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Developer Profile
-              </h2>
-              <PersonalityRadar values={mini.values} />
-            </div>
+          {/* ---- Section 6: Spirit Doc (collapsible, collapsed by default) ---- */}
+          {mini.spirit_content && (
+            <SidebarSection title="Spirit Doc">
+              <div className="rounded-lg bg-secondary/30 p-4 text-sm text-muted-foreground whitespace-pre-wrap max-h-96 overflow-y-auto">
+                {mini.spirit_content}
+              </div>
+            </SidebarSection>
           )}
 
           {/* Enhance with Claude Code CTA */}
-          {isOwner && !parseSourcesUsed(mini.sources_used).includes("claude_code") && (
+          {isOwner && !sources.includes("claude_code") && (
             <Link
-              href={`/create?username=${username}`}
+              href={`/create?username=${username}&regenerate=true`}
               className="flex items-center gap-3 rounded-lg border border-dashed border-border/50 px-4 py-3 text-sm transition-colors hover:border-border hover:bg-secondary/30"
             >
               <MessageSquare className="h-4 w-4 text-muted-foreground" />
@@ -520,24 +596,6 @@ export default function MiniProfilePage() {
                 </p>
               </div>
             </Link>
-          )}
-
-          {mini.spirit_content && (
-            <div>
-              <button
-                type="button"
-                onClick={() => setSpiritOpen(!spiritOpen)}
-                className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <ChevronRight className={`h-4 w-4 transition-transform ${spiritOpen ? "rotate-90" : ""}`} />
-                About this Mini
-              </button>
-              {spiritOpen && (
-                <div className="mt-3 rounded-lg bg-secondary/30 p-4 text-sm text-muted-foreground whitespace-pre-wrap max-h-96 overflow-y-auto">
-                  {mini.spirit_content}
-                </div>
-              )}
-            </div>
           )}
         </div>
       </aside>
@@ -586,17 +644,29 @@ export default function MiniProfilePage() {
                     Ask about their coding philosophy, opinions, and experiences
                   </p>
                 </div>
-                <div className="grid w-full max-w-sm gap-2">
-                  {STARTERS.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => sendMessage(s)}
-                      className="rounded-lg border border-border/50 px-4 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:border-border hover:bg-secondary hover:text-foreground"
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
+                {user || isPromoMini ? (
+                  <div className="grid w-full max-w-sm gap-2">
+                    {STARTERS.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => sendMessage(s)}
+                        className="rounded-lg border border-border/50 px-4 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:border-border hover:bg-secondary hover:text-foreground"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 rounded-xl border border-border/50 bg-secondary/30 px-8 py-6">
+                    <LogIn className="h-5 w-5 text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">
+                      Sign in to chat with <span className="font-mono font-medium text-foreground">@{username}</span>
+                    </p>
+                    <Button onClick={login} size="sm">
+                      Sign In with GitHub
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -636,28 +706,61 @@ export default function MiniProfilePage() {
           </div>
         </div>
 
-        {/* Input */}
-        <div className="border-t p-4">
-          <div className="mx-auto flex max-w-3xl items-end gap-2">
-            <Textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={`Message @${mini.username}... (Shift+Enter for newline)`}
-              className="min-h-[44px] max-h-32 resize-none font-mono text-sm"
-              rows={1}
-              disabled={isStreaming}
-            />
-            <Button
-              size="icon"
-              onClick={() => sendMessage(input)}
-              disabled={!input.trim() || isStreaming}
-              className="h-[44px] w-[44px] shrink-0"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          </div>
+        {/* Input area with context picker */}
+        <div className="border-t">
+          {user || (isPromoMini && !anonLimitReached) ? (
+            <>
+              <div className="p-4">
+                <div className="mx-auto flex max-w-3xl items-end gap-2">
+                  <Textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={`Message @${mini.username}... (Shift+Enter for newline)`}
+                    className="min-h-[44px] max-h-32 resize-none font-mono text-sm"
+                    rows={1}
+                    disabled={isStreaming}
+                  />
+                  <Button
+                    size="icon"
+                    onClick={() => sendMessage(input)}
+                    disabled={!input.trim() || isStreaming}
+                    className="h-[44px] w-[44px] shrink-0"
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </div>
+                {!user && isPromoMini && (
+                  <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-muted-foreground">
+                    {ANON_MESSAGE_LIMIT - anonMessageCount} free message{ANON_MESSAGE_LIMIT - anonMessageCount !== 1 ? "s" : ""} remaining &mdash;{" "}
+                    <button onClick={login} className="underline hover:text-foreground">sign in</button> for unlimited chat
+                  </p>
+                )}
+              </div>
+            </>
+          ) : anonLimitReached ? (
+            <div className="flex flex-col items-center gap-2 p-4">
+              <p className="text-sm font-medium">Sign in to keep chatting!</p>
+              <p className="text-xs text-muted-foreground">
+                You&apos;ve used your {ANON_MESSAGE_LIMIT} free messages
+              </p>
+              <Button onClick={login} size="sm" className="mt-1 gap-1.5">
+                <LogIn className="h-3.5 w-3.5" />
+                Sign In with GitHub
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center gap-3 p-4">
+              <p className="text-sm text-muted-foreground">
+                Sign in to chat with @{mini.username}
+              </p>
+              <Button onClick={login} size="sm" variant="outline" className="gap-1.5">
+                <LogIn className="h-3.5 w-3.5" />
+                Sign In
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </div>

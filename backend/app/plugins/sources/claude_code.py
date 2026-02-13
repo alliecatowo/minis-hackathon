@@ -415,7 +415,8 @@ def _filter_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     - Messages that are just file paths or commands
     - Messages that are just automated content (tool results, hook outputs)
 
-    Prioritizes messages with personality signals.
+    Prioritizes messages with personality signals and samples across time
+    to avoid recency bias.
     """
     kept: list[dict[str, Any]] = []
 
@@ -442,6 +443,19 @@ def _filter_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # Keep if message has any high-value signal
         if has_personality or has_decision or has_architecture or has_tech_mention:
             kept.append(msg)
+
+    # --- Anti-recency-bias: sample evenly across time ---
+    # Split into time-based thirds (early, middle, recent) and take
+    # proportional samples from each so no single period dominates.
+    kept.sort(key=lambda m: m.get("timestamp", ""))
+    if len(kept) > 60:
+        third = len(kept) // 3
+        early = kept[:third]
+        middle = kept[third : 2 * third]
+        recent = kept[2 * third :]
+        # Take up to 30 from each third
+        per_bucket = 30
+        kept = early[:per_bucket] + middle[:per_bucket] + recent[:per_bucket]
 
     # Sort: decision/personality signals first, then architecture, then tech,
     # then by timestamp

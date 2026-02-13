@@ -1,16 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Proxy API requests to backend in production (avoids CORS issues)
-  async rewrites() {
-    const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
-    return [
-      {
-        source: "/api/:path*",
-        destination: `${backendUrl}/api/:path*`,
-      },
-    ];
-  },
+  // BFF proxy at app/api/proxy/[...path]/route.ts handles backend forwarding.
+  // Do NOT add rewrites for /api/proxy/* — on Vercel, edge rewrites run before
+  // serverless functions and would bypass the BFF (which adds the service JWT).
 };
 
 export default nextConfig;

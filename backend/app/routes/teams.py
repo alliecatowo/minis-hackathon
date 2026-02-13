@@ -1,10 +1,11 @@
 import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.access import require_team_access
 from app.core.auth import get_current_user
 from app.db import get_session
 from app.models.mini import Mini
@@ -15,25 +16,25 @@ from app.models.user import User
 
 
 class TeamCreateRequest(BaseModel):
-    name: str
-    description: str | None = None
+    name: str = Field(max_length=100)
+    description: str | None = Field(default=None, max_length=500)
 
 
 class TeamUpdateRequest(BaseModel):
-    name: str | None = None
-    description: str | None = None
+    name: str | None = Field(default=None, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
 
 
 class AddMemberRequest(BaseModel):
-    username: str
-    role: str = "member"
+    mini_id: str
+    role: str = Field(default="member", max_length=20)
 
 
 # -- Response schemas --
 
 
 class TeamSummaryResponse(BaseModel):
-    id: int
+    id: str
     name: str
     description: str | None
     member_count: int
@@ -42,6 +43,7 @@ class TeamSummaryResponse(BaseModel):
 
 
 class TeamMemberResponse(BaseModel):
+    mini_id: str
     username: str
     role: str
     display_name: str | None
@@ -50,7 +52,7 @@ class TeamMemberResponse(BaseModel):
 
 
 class TeamDetailResponse(BaseModel):
-    id: int
+    id: str
     name: str
     description: str | None
     owner_username: str
@@ -122,10 +124,11 @@ async def list_teams(
 
 @router.get("/{team_id}", response_model=TeamDetailResponse)
 async def get_team(
-    team_id: int,
+    team_id: str,
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Get team detail with members (public)."""
+    """Get team detail with members (owner or member only)."""
     # Fetch team with owner username
     stmt = (
         select(Team, User.github_username.label("owner_username"))
@@ -140,23 +143,27 @@ async def get_team(
     team = row[0]
     owner_username = row[1]
 
+    await require_team_access(team, user, session)
+
     # Fetch members with mini details
     members_stmt = (
         select(
-            TeamMember.mini_username,
+            TeamMember.mini_id,
             TeamMember.role,
             TeamMember.added_at,
+            Mini.username,
             Mini.display_name,
             Mini.avatar_url,
         )
-        .outerjoin(Mini, TeamMember.mini_username == Mini.username)
+        .outerjoin(Mini, TeamMember.mini_id == Mini.id)
         .where(TeamMember.team_id == team_id)
         .order_by(TeamMember.added_at)
     )
     members_result = await session.execute(members_stmt)
     members = [
         TeamMemberResponse(
-            username=m.mini_username,
+            mini_id=m.mini_id,
+            username=m.username,
             role=m.role,
             display_name=m.display_name,
             avatar_url=m.avatar_url,
@@ -177,7 +184,7 @@ async def get_team(
 
 @router.put("/{team_id}", response_model=TeamDetailResponse)
 async def update_team(
-    team_id: int,
+    team_id: str,
     body: TeamUpdateRequest,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
@@ -199,12 +206,12 @@ async def update_team(
     await session.refresh(team)
 
     # Re-fetch full detail
-    return await get_team(team_id, session)
+    return await get_team(team_id, user, session)
 
 
 @router.delete("/{team_id}", status_code=204)
 async def delete_team(
-    team_id: int,
+    team_id: str,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -225,7 +232,7 @@ async def delete_team(
 
 @router.post("/{team_id}/members", response_model=TeamMemberResponse, status_code=201)
 async def add_member(
-    team_id: int,
+    team_id: str,
     body: AddMemberRequest,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
@@ -240,7 +247,7 @@ async def add_member(
 
     # Check mini exists
     mini_result = await session.execute(
-        select(Mini).where(Mini.username == body.username.lower())
+        select(Mini).where(Mini.id == body.mini_id)
     )
     mini = mini_result.scalar_one_or_none()
     if not mini:
@@ -250,7 +257,7 @@ async def add_member(
     existing = await session.execute(
         select(TeamMember).where(
             TeamMember.team_id == team_id,
-            TeamMember.mini_username == body.username.lower(),
+            TeamMember.mini_id == body.mini_id,
         )
     )
     if existing.scalar_one_or_none():
@@ -258,7 +265,7 @@ async def add_member(
 
     member = TeamMember(
         team_id=team_id,
-        mini_username=body.username.lower(),
+        mini_id=body.mini_id,
         role=body.role,
     )
     session.add(member)
@@ -266,7 +273,8 @@ async def add_member(
     await session.refresh(member)
 
     return TeamMemberResponse(
-        username=member.mini_username,
+        mini_id=member.mini_id,
+        username=mini.username,
         role=member.role,
         display_name=mini.display_name,
         avatar_url=mini.avatar_url,
@@ -274,10 +282,10 @@ async def add_member(
     )
 
 
-@router.delete("/{team_id}/members/{username}", status_code=204)
+@router.delete("/{team_id}/members/{mini_id}", status_code=204)
 async def remove_member(
-    team_id: int,
-    username: str,
+    team_id: str,
+    mini_id: str,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -292,7 +300,7 @@ async def remove_member(
     member_result = await session.execute(
         select(TeamMember).where(
             TeamMember.team_id == team_id,
-            TeamMember.mini_username == username.lower(),
+            TeamMember.mini_id == mini_id,
         )
     )
     member = member_result.scalar_one_or_none()

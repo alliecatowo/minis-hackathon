@@ -10,6 +10,7 @@ from app.plugins.sources.devblog import DevBlogSource
 from app.plugins.sources.github import GitHubSource
 from app.plugins.sources.hackernews import HackerNewsSource
 from app.plugins.sources.stackoverflow import StackOverflowSource
+from app.plugins.sources.website import WebsiteSource
 
 
 def load_plugins() -> None:
@@ -21,6 +22,7 @@ def load_plugins() -> None:
     registry.register_source(StackOverflowSource())
     registry.register_source(DevBlogSource())
     registry.register_source(HackerNewsSource())
+    registry.register_source(WebsiteSource())
 
     # Client plugins
     registry.register_client(WebClient())

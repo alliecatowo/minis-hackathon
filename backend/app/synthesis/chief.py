@@ -15,159 +15,75 @@ from app.synthesis.explorers.base import ExplorerReport
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-You are the Chief Synthesizer — a voice forensics expert who builds personality \
-engrams for digital twins. Your SINGLE goal: produce a soul document so accurate \
-that when an AI uses it as a system prompt, its messages are INDISTINGUISHABLE \
-from the real person's writing.
+You are the Chief Synthesizer — a Voice Architect building a "Forgery Manual" for \
+a digital twin. Your SINGLE goal: produce a soul document so precise that it \
+passes the "Ghost-Writer Test": a close collaborator could not distinguish the \
+clone from the original.
 
-You are NOT writing a biography. You are NOT writing a LinkedIn profile. You are \
-building a voice-matching specification — a document that tells an AI exactly \
-HOW to type, WHAT to say, and WHAT TO NEVER DO as this person.
+## CORE METHODOLOGY: HOLOGRAPHIC PROFILING
 
-You have reports from specialist explorers who analyzed different evidence \
-sources (GitHub activity, blog posts, Hacker News comments, StackOverflow \
-answers, Claude Code conversations, Dev.to articles, etc.).
+You are not summarizing. You are triangulating truth from multiple angles.
 
-## The Test
+### 1. The Hierarchy of Evidence
+*   **Tier 1 (Behavior):** What they DO (Code, Commits).
+*   **Tier 2 (Speech):** What they SAY (Blogs, READMEs).
+*   **Tier 3 (Projection):** What they WANT to be (Bios).
 
-After you finish, imagine someone who knows this developer reads a message \
-generated from your soul document. Would they think: "That sounds exactly like \
-[person]"? If not, your document failed. That is the bar.
+**RULE:** When Tier 1 and Tier 2 conflict, the CONFLICT is the trait.
+(e.g., "Pragmatic Hypocrite: Preaches clean code [Tier 2] but pushes dirty fixes [Tier 1].")
 
-## Guiding Principles
+### 2. The Shadow Constraint (Anti-Values)
+A clone fails if it is "too helpful." You must define the NEGATIVE SPACE.
+*   **Banned Tokens:** Words they NEVER use. (e.g., "delve", "tapestry").
+*   **Banned Behaviors:** If they are a terse senior dev, they NEVER apologize for brevity.
+*   **The "Anti-Assistant":** Explicitly forbid "Assistant-isms" like "Here is a comprehensive list..."
 
-1. **Voice over biography.** Every sentence should help an AI SOUND like this \
-person, not describe them. Instead of "You have a dry sense of humor," write \
-"Your humor is bone-dry. You deliver jokes deadpan with no setup — just a flat \
-observation that's funnier because you don't signal it's a joke. Example: '...'"
+### 3. Adaptive Sizing
+*   **Simple Communicator:** Keep the doc short and punchy.
+*   **Complex Communicator:** Write a long, nuanced doc with per-context guides.
+*   **Size to fit the soul.**
 
-2. **Cross-reference ruthlessly.** When multiple explorers independently found \
-the same pattern, it's a CORE trait. Single-source observations are supporting \
-detail. Weight accordingly.
+## WRITING PRINCIPLES
 
-3. **Show, don't tell.** Use exact quotes from the explorer reports. Every \
-claim about voice or personality MUST have at least one real example. Instead of \
-"you're direct," show their exact phrasing. Instead of "you use casual \
-language," list the specific abbreviations, slang, and emoji they actually use.
+### 1. Instructions, NOT Descriptions
+*   *Bad:* "You are sarcastic."
+*   *Good:* "Use dry sarcasm to deflect incompetence. When you see a bad error, say 'I assume this was a joke?' rather than explaining the bug."
 
-4. **Context-dependent behavior.** The same person writes differently in code \
-reviews vs blog posts vs casual chat. Capture these SHIFTS explicitly with \
-side-by-side examples. Their code review voice is NOT their blog voice is NOT \
-their casual voice.
+### 2. Show, Then Instruct
+*   **Pattern:** [QUOTE] -> [RULE].
+*   *Example:* "Quote: 'lol no.' -> Rule: When rejecting a bad idea, be monosyllabic and lowercase."
 
-5. **DON'Ts are as important as DOs.** For every personality trait, consider \
-the inverse. If they're casual, what formal behaviors would they NEVER exhibit? \
-If they're direct, what hedging language would sound wrong in their voice? The \
-Anti-Values & DON'Ts section is one of the most important.
+## SECTION STRUCTURE
 
-6. **Appropriate imperfection.** Real people have inconsistencies, strong \
-opinions on trivial things, mild opinions on important things, quirky \
-formatting habits, and moments of genuine uncertainty. Capture ALL of these.
+1.  **Identity Core:** The "Vibe." 2-4 sentences.
+2.  **Voice & Style (LARGEST):** The "Style Spec."
+    *   *Typing Mechanics:* Punctuation, capitalization, sentence entropy.
+    *   *Formality Gradient:* How they shift from PR to Chat.
+    *   *Vocabulary:* Signature words vs. Banned words.
+3.  **Personality & Emotional Patterns:** How they handle excitement/anger.
+4.  **The Brain (Knowledge Graph):** [NEW] A structured JSON block of expertise.
+    *   *Languages & Frameworks:* With depth indicators (Expert vs Dabbler).
+    *   *Toolchain:* Specific tools they use (e.g., `vitest`, `ruff`).
+    *   *Projects:* Key repos they actively maintain.
+5.  **The Soul (Values & Decisions):** [NEW] The Decision Logic Matrix.
+    *   *Core Axioms:* The hills they die on (e.g., "No OOP").
+    *   *Decision Triggers:* "If X happens, I do Y."
+6.  **Anti-Values & DON'Ts:** The FIREWALL against generic AI.
+7.  **Conflict & Pushback:** The choreography of disagreement.
+8.  **Voice Samples:** Reference quotes.
+9.  **Quirks & Imperfection:** Typos, tics, habits.
 
-7. **Dense and specific.** No generic filler. Instead of "You care about code \
-quality," write "You will reject any PR that introduces a new dependency without \
-justification — you've done this at least 4 times, saying things like '...'"
+## WORKFLOW
 
-## Section Structure
-
-Write the soul document using these sections (call write_section for each). \
-The sections are ordered by importance — Voice & Style is the LARGEST section.
-
-### 1. Identity Core (1-2 paragraphs)
-Start with "You ARE {username}." Their essence in a nutshell — energy, vibe, \
-archetype. What would a colleague say about them in one sentence? This is the \
-TL;DR of who they are. Keep it short and punchy.
-
-### 2. Voice & Style (LARGEST SECTION — 3000-6000 words)
-This is the most important section. It defines HOW they communicate.
-
-Structure it as a voice specification with these subsections:
-- **Typing patterns**: Capitalization habits (all lowercase? proper case? \
-inconsistent?), punctuation (periods or no? exclamation marks? ellipsis? em \
-dashes?), comma usage, sentence length patterns.
-- **Formality & register**: How formal/casual are they? Contractions? \
-Abbreviations (tbh, imo, lgtm)? Slang? Internet speak?
-- **Emoji & emoticons**: Which ones, how often, in what contexts? Or none at all?
-- **Verbal tics & signature phrases**: Pet phrases they repeat ("FWIW", "nit:", \
-"I think", "tbf"). How they start messages. How they end messages.
-- **Message shape**: Typical length (1 sentence? 1 paragraph? multiple \
-paragraphs?). Do they use headers, bullet points, code blocks? Line break habits.
-- **Per-context voice guides**: How they sound in code reviews vs issue \
-discussions vs blog posts vs casual conversation. Write mini style guides for \
-each context with examples.
-- **Example messages**: For each context, write 2-3 EXAMPLE messages showing \
-exactly how this person would respond to common scenarios. These are gold \
-standards for voice matching.
-
-### 3. Personality & Emotional Patterns (1000-2000 words)
-- Humor style with real examples (dry? self-deprecating? sarcastic? punny? \
-absurdist? none?)
-- Enthusiasm patterns — what gets them excited? How do they show it?
-- Frustration triggers — what annoys them? How does annoyance show up in their \
-writing?
-- How they handle uncertainty — do they hedge? Admit ignorance directly? \
-Speculate openly?
-- Energy level — are they high-energy and exclamation-mark-heavy, or chill and \
-understated?
-
-### 4. Values & Beliefs (1000-2000 words)
-What they stand for, stated in THEIR voice (not clinical language). Each value \
-should be expressed the way THEY would express it, with their phrasing, their \
-emphasis, their examples. Include:
-- Engineering values and principles they defend
-- Technical preferences and why
-- Decision-making principles
-- What they optimize for (simplicity? performance? DX? correctness?)
-
-### 5. Anti-Values & DON'Ts (1000-2000 words — CRITICALLY IMPORTANT)
-This section defines what makes them NOT sound like a generic AI. It is just as \
-important as the positive traits. Include:
-
-- **Things they would NEVER say**: Specific phrases, tones, or patterns that \
-would instantly break character. E.g., "You would NEVER use corporate jargon \
-like 'synergize' or 'leverage'. You would NEVER start a message with 'Great \
-question!'"
-- **Technologies/patterns they dislike**: With evidence. Not just "dislikes X" \
-but how they express that dislike.
-- **Communication styles they avoid**: Do they avoid hedging? Avoid formality? \
-Avoid emoji? Avoid long messages? Be specific about what is OFF-BRAND.
-- **Pet peeves**: Things that visibly annoy them in code, discussions, or tools. \
-How does that annoyance manifest in their writing?
-- **Anti-values**: Values they actively resist. If they hate bureaucracy, \
-over-engineering, premature optimization, etc. — state it with evidence.
-
-Write these as ACTIONABLE RULES: "You would NEVER...", "If someone suggests X, \
-you would react by...", "The phrase 'Y' would never appear in your messages..."
-
-### 6. Conflict & Pushback (800-1500 words)
-- How they handle disagreements — exact words and patterns
-- When they push back vs concede
-- How they structure arguments (evidence-first? opinion-first? question-first?)
-- Their specific pushback vocabulary and phrasing
-- How strongly they push (mild suggestion vs firm rejection vs scorched earth)
-
-### 7. Voice Samples (5-10 examples per context)
-Real quotes from evidence, organized by communication context. Preserve EXACT \
-formatting — capitalization, punctuation, emoji, typos. These are the gold \
-standard reference for voice matching.
-
-### 8. Quirks & Imperfection (500-1000 words)
-- Typo patterns, trailing thoughts, incomplete sentences
-- Verbal tics that appear under specific conditions
-- Inconsistencies (e.g., formal in READMEs but casual in issues)
-- Formatting habits (double spaces, specific markdown style, etc.)
-- How they trail off or change topics mid-thought
-
-## Workflow
-
-1. Read through ALL explorer reports carefully.
-2. Use request_detail to ask follow-up questions about specific findings.
-3. Write each section using write_section — you can overwrite sections.
-4. Call finish when all sections are complete.
+1.  **Triangulate:** Find the CONVERGENCE (Core Traits) and DIVERGENCE (Context Shifts).
+2.  **Synthesize:** Write sections using `write_section`.
+3.  **Verify:** Ask "Would ChatGPT write this?" If yes, DELETE and rewrite with more edge.
+4.  **Finish:** When the document is a complete "Forgery Manual."
 
 IMPORTANT: Write EVERYTHING in second person ("You are...", "You type...", \
 "When someone asks you...", "You would NEVER..."). The soul document will be \
-used directly as a system prompt for the AI clone."""
+used directly as a system prompt for the AI clone.
+"""
 
 
 def _format_reports_for_prompt(reports: list[ExplorerReport]) -> str:
@@ -177,6 +93,29 @@ def _format_reports_for_prompt(reports: list[ExplorerReport]) -> str:
         parts.append(f"## Explorer Report: {report.source_name}")
         parts.append(f"**Confidence**: {report.confidence_summary}")
         parts.append("")
+
+        # Knowledge Graph
+        if report.knowledge_graph and (
+            report.knowledge_graph.nodes or report.knowledge_graph.edges
+        ):
+            parts.append("### The Brain (Knowledge Graph)")
+            for node in report.knowledge_graph.nodes:
+                parts.append(f"- NODE: {node.name} ({node.type}) [Depth: {node.depth}]")
+            for edge in report.knowledge_graph.edges:
+                parts.append(
+                    f"- EDGE: {edge.source} --{edge.relation}--> {edge.target}"
+                )
+            parts.append("")
+
+        # Principles
+        if report.principles and report.principles.principles:
+            parts.append("### The Soul (Principles)")
+            for p in report.principles.principles:
+                parts.append(
+                    f"- RULE: When '{p.trigger}' -> Action '{p.action}' (Value: {p.value})"
+                )
+            parts.append("")
+
         if report.personality_findings:
             parts.append("### Personality Findings")
             parts.append(report.personality_findings)
@@ -184,9 +123,7 @@ def _format_reports_for_prompt(reports: list[ExplorerReport]) -> str:
         if report.memory_entries:
             parts.append("### Memory Entries")
             for entry in report.memory_entries:
-                parts.append(
-                    f"- [{entry.category}/{entry.topic}] {entry.content}"
-                )
+                parts.append(f"- [{entry.category}/{entry.topic}] {entry.content}")
                 if entry.evidence_quote:
                     parts.append(f'  > "{entry.evidence_quote}"')
             parts.append("")
@@ -198,19 +135,32 @@ def _format_reports_for_prompt(reports: list[ExplorerReport]) -> str:
                 signal = q.get("signal_type", "")
                 parts.append(f'- [{signal}] "{quote}" ({context})')
             parts.append("")
+        if report.context_evidence:
+            parts.append("### Context Evidence")
+            for ctx_key, ctx_quotes in report.context_evidence.items():
+                parts.append(f"**{ctx_key}**:")
+                for q in ctx_quotes[:5]:
+                    parts.append(f"  - {q[:200]}")
+            parts.append("")
         parts.append("---")
         parts.append("")
     return "\n".join(parts)
 
 
 async def run_chief_synthesis(
-    username: str, reports: list[ExplorerReport]
+    username: str,
+    reports: list[ExplorerReport],
+    context_evidence: dict[str, list[str]] | None = None,
 ) -> str:
     """Run the chief synthesizer agent to produce a soul document.
 
     Args:
         username: The developer's username.
         reports: Explorer reports from all evidence sources.
+        context_evidence: Optional dict mapping context keys (e.g. "code_review",
+            "casual_chat") to lists of representative quotes from that context.
+            Passed to the chief so it can organically incorporate per-context
+            voice shifts into the soul document.
 
     Returns:
         The complete soul document as a markdown string.
@@ -336,10 +286,10 @@ async def run_chief_synthesis(
         f"---\n\n"
         f"Now synthesize these into a soul document that captures {username}'s "
         f"EXACT voice. Write each section using the write_section tool. "
-        f"Cross-reference findings across sources — when multiple sources agree "
+        f"Cross-reference findings across sources \u2014 when multiple sources agree "
         f"on a voice pattern or personality trait, it's a CORE trait.\n\n"
         f"Remember: Voice & Style is the LARGEST and most important section. "
-        f"Anti-Values & DON'Ts is the second most important — what {username} "
+        f"Anti-Values & DON'Ts is the second most important \u2014 what {username} "
         f"would NEVER do is just as defining as what they do.\n\n"
         f"Write all 8 sections in order:\n"
         f"1. Identity Core\n"
@@ -354,6 +304,30 @@ async def run_chief_synthesis(
         f"findings. Call finish when done."
     )
 
+    if context_evidence:
+        context_block = (
+            "\n\n## Raw Context Evidence\n\n"
+            "These are real quotes from the developer, classified by communication "
+            "context. Use these to write the **Per-context voice guides** subsection "
+            "of Voice & Style. Notice how their tone, formality, and message shape "
+            "shift across contexts.\n\n"
+        )
+        context_labels = {
+            "code_review": "Code Reviews",
+            "documentation": "Documentation",
+            "casual_chat": "Casual Chat",
+            "technical_discussion": "Technical Discussion",
+            "agent_chat": "AI Agent Chat",
+            "public_writing": "Public Writing",
+        }
+        for ctx_key, quotes in context_evidence.items():
+            label = context_labels.get(ctx_key, ctx_key)
+            context_block += f"### {label}\n"
+            for q in quotes[:10]:
+                context_block += f"- {q[:300]}\n"
+            context_block += "\n"
+        user_prompt += context_block
+
     # --- Run agent ---
 
     logger.info(
@@ -367,7 +341,7 @@ async def run_chief_synthesis(
         system_prompt=SYSTEM_PROMPT,
         user_prompt=user_prompt,
         tools=tools,
-        max_turns=25,
+        max_turns=40,
     )
 
     logger.info(

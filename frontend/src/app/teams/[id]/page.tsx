@@ -11,9 +11,10 @@ import { AddMiniDialog } from "@/components/add-mini-dialog";
 import { useAuth } from "@/lib/auth";
 import { ArrowLeft, Plus, X, Users } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
+const API_BASE = "/api/proxy";
 
 interface TeamMember {
+  mini_id: number;
   username: string;
   role: string;
   display_name: string | null;
@@ -60,11 +61,11 @@ export default function TeamDetailPage() {
 
   const isOwner = !!user && !!team && user.github_username === team.owner_username;
 
-  const handleRemove = async (memberUsername: string) => {
-    setRemoving(memberUsername);
+  const handleRemove = async (member: TeamMember) => {
+    setRemoving(member.username);
     try {
       const { removeTeamMember } = await import("@/lib/api");
-      await removeTeamMember(teamId, memberUsername);
+      await removeTeamMember(String(teamId), String(member.mini_id));
       await fetchTeam();
     } catch {
       // Silently fail, could show toast
@@ -211,7 +212,7 @@ export default function TeamDetailPage() {
                 {isOwner && (
                   <button
                     type="button"
-                    onClick={() => handleRemove(member.username)}
+                    onClick={() => handleRemove(member)}
                     disabled={removing === member.username}
                     className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 disabled:opacity-50"
                     title="Remove member"

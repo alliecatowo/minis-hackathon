@@ -5,11 +5,10 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft } from "lucide-react";
+import { AuthGate } from "@/components/auth-gate";
+import { ArrowLeft, Users } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
-
-export default function NewTeamPage() {
+function NewTeamForm() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -95,5 +94,13 @@ export default function NewTeamPage() {
         </div>
       </form>
     </div>
+  );
+}
+
+export default function NewTeamPage() {
+  return (
+    <AuthGate icon={Users} message="Sign in to create a team.">
+      <NewTeamForm />
+    </AuthGate>
   );
 }

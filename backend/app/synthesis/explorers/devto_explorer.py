@@ -48,6 +48,19 @@ signals. You have access to the following tools:
 - analyze_deeper: Make a secondary LLM call to analyze a subset of articles
   in more depth. Use this when you notice a pattern worth investigating.
 
+- save_context_evidence: Classify quotes into communication contexts. \
+  Dev.to articles are the "public_writing" context — save representative \
+  quotes using context_key "public_writing" to capture how they sound in \
+  published articles. Save at least 3-5 quotes this way.
+
+- save_knowledge_node: Save a node in the Knowledge Graph for technologies \
+  or concepts they write about with expertise. Set depth to reflect their \
+  demonstrated knowledge level.
+- save_knowledge_edge: Link knowledge nodes (e.g., "React" USED_IN \
+  "tutorial-project", "Testing" LOVES "TDD").
+- save_principle: Save decision rules or values from their articles (e.g., \
+  trigger="choosing a framework", action="evaluate DX first", value="developer experience").
+
 - finish: Call when you have thoroughly analyzed all evidence.
 
 IMPORTANT ANALYSIS GUIDELINES:

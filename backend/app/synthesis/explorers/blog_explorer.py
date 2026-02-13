@@ -102,6 +102,17 @@ as if describing a person to someone who will roleplay as them.
 argumentative style. The context should be the blog post title or topic.
 - **analyze_deeper**: If you spot recurring themes or an interesting \
 tension across posts, use this to dig deeper.
+- **save_context_evidence**: Classify quotes into communication contexts. \
+Blog posts are the "public_writing" context — save representative quotes \
+using context_key "public_writing" to capture how they sound in published \
+long-form writing. Save at least 3-5 quotes this way.
+- **save_knowledge_node**: Save a node in the Knowledge Graph for any \
+technology, concept, or project mentioned with authority. Set depth to \
+reflect expertise level.
+- **save_knowledge_edge**: Link knowledge nodes together (e.g., \
+"React" USED_IN "my-blog-engine", or "TypeScript" LOVES "Type Safety").
+- **save_principle**: Save decision rules or values revealed in their \
+writing (e.g., trigger="complexity", action="simplify", value="minimalism").
 - **finish**: Call when you've thoroughly analyzed all evidence.
 
 ## Critical Instructions

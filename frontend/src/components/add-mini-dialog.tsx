@@ -11,9 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { listMinis, type Mini } from "@/lib/api";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
+import { listMinis, addTeamMember, type Mini } from "@/lib/api";
 
 interface AddMiniDialogProps {
   teamId: number;
@@ -51,23 +49,11 @@ export function AddMiniDialog({
       (m.display_name || "").toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleAdd = async (username: string) => {
-    setAdding(username);
+  const handleAdd = async (mini: Mini) => {
+    setAdding(mini.username);
     setError(null);
-    const token = localStorage.getItem("minis_token");
     try {
-      const res = await fetch(`${API_BASE}/teams/${teamId}/members`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ username, role }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: "Failed to add member" }));
-        throw new Error(err.detail || "Failed to add member");
-      }
+      await addTeamMember(String(teamId), mini.id, role);
       onAdded();
       onOpenChange(false);
     } catch (err) {
@@ -136,7 +122,7 @@ export function AddMiniDialog({
                   key={mini.id}
                   type="button"
                   disabled={adding !== null}
-                  onClick={() => handleAdd(mini.username)}
+                  onClick={() => handleAdd(mini)}
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-secondary/80 disabled:opacity-50"
                 >
                   <Avatar className="h-8 w-8">
