@@ -32,3 +32,4 @@ backend/data/
 
 # Log files
 *.log
+.env*.local

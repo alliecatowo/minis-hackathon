@@ -33,11 +33,20 @@ export function useAuth(): AuthContextType {
     };
   }, [session]);
 
+  const login = () => {
+    const currentUrl = window.location.origin + window.location.pathname;
+    const callbackUrl = encodeURIComponent(currentUrl);
+    authClient.signIn.social({ 
+      provider: 'github', 
+      callbackURL: `/?redirect=${callbackUrl}` 
+    });
+  };
+
   return {
     user,
     token: null,
     loading: isPending,
-    login: () => authClient.signIn.social({ provider: 'github', callbackURL: '/' }),
+    login,
     logout: () => authClient.signOut(),
   };
 }
