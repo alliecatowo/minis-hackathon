@@ -17,6 +17,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from app.ingestion.ai_contamination import score_ai_contamination
 from app.ingestion.delta import get_latest_external_ids
 from app.ingestion.hashing import hash_evidence_content
 from app.models.evidence import Evidence, ExplorerProgress
@@ -278,6 +279,20 @@ async def _store_evidence_items_in_db(
                 )
                 existing = (await session.execute(stmt)).scalar_one_or_none()
 
+                # Score AI contamination; default to None on failure so the
+                # pipeline is never blocked by a classifier error.
+                contamination_score: float | None = None
+                try:
+                    contamination_score = await score_ai_contamination(item.content)
+                    contamination_checked_at: datetime | None = now
+                except Exception:
+                    logger.warning(
+                        "AI contamination scoring failed for item (source=%s) — skipping",
+                        item.source_type,
+                        exc_info=True,
+                    )
+                    contamination_checked_at = None
+
                 if existing is None:
                     session.add(
                         Evidence(
@@ -291,6 +306,8 @@ async def _store_evidence_items_in_db(
                             external_id=item.external_id,
                             last_fetched_at=now,
                             content_hash=new_hash,
+                            ai_contamination_score=contamination_score,
+                            ai_contamination_checked_at=contamination_checked_at,
                         )
                     )
                     inserted += 1
@@ -302,6 +319,8 @@ async def _store_evidence_items_in_db(
                     existing.source_privacy = item.privacy
                     existing.metadata_json = item.metadata
                     existing.explored = False  # re-explore mutated items
+                    existing.ai_contamination_score = contamination_score
+                    existing.ai_contamination_checked_at = contamination_checked_at
                     updated += 1
                 else:
                     # Unchanged — just refresh timestamp
