@@ -53,6 +53,11 @@ class Evidence(Base):
         DateTime(timezone=True), nullable=True
     )
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # AI contamination detection (ALLIE-433)
+    ai_contamination_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_contamination_checked_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
         # Partial unique index: prevents duplicate inserts for the same
