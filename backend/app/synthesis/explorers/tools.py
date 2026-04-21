@@ -32,6 +32,10 @@ from app.models.knowledge import NodeType, RelationType
 
 logger = logging.getLogger(__name__)
 
+# Evidence items with contamination score >= this threshold are considered
+# AI-generated and excluded from browse/search when exclude_contaminated=True.
+_CONTAMINATION_THRESHOLD = 0.5
+
 _SIGNAL_SEARCH_CANDIDATE_LIMIT = 200
 
 _CONFLICT_SIGNAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -244,6 +248,7 @@ def build_explorer_tools(
         page: int = 1,
         page_size: int = 20,
         signal_mode: str = "all",
+        exclude_contaminated: bool = True,
     ) -> str:
         if signal_mode not in _SIGNAL_MODE_ENUM:
             return json.dumps(
@@ -255,11 +260,26 @@ def build_explorer_tools(
                 }
             )
 
+        base_conditions = [
+            Evidence.mini_id == mini_id,
+            Evidence.source_type == source_type,
+        ]
+        if exclude_contaminated:
+            # Include rows with NULL score (not yet scored) and rows below threshold
+            from sqlalchemy import or_
+
+            base_conditions.append(
+                or_(
+                    Evidence.ai_contamination_score.is_(None),
+                    Evidence.ai_contamination_score < _CONTAMINATION_THRESHOLD,
+                )
+            )
+
         offset = (page - 1) * page_size
         if signal_mode == "all":
             stmt = (
                 select(Evidence)
-                .where(Evidence.mini_id == mini_id, Evidence.source_type == source_type)
+                .where(*base_conditions)
                 .order_by(Evidence.created_at)
                 .offset(offset)
                 .limit(page_size)
@@ -270,14 +290,11 @@ def build_explorer_tools(
             count_stmt = (
                 select(func.count())
                 .select_from(Evidence)
-                .where(Evidence.mini_id == mini_id, Evidence.source_type == source_type)
+                .where(*base_conditions)
             )
             total = (await db_session.execute(count_stmt)).scalar() or 0
         else:
-            stmt = select(Evidence).where(
-                Evidence.mini_id == mini_id,
-                Evidence.source_type == source_type,
-            )
+            stmt = select(Evidence).where(*base_conditions)
             result = await db_session.execute(stmt)
             prioritized = _prioritize_rows(result.scalars().all(), signal_mode)
             total = len(prioritized)
@@ -291,6 +308,7 @@ def build_explorer_tools(
                 "page_size": page_size,
                 "total": total,
                 "signal_mode": signal_mode,
+                "exclude_contaminated": exclude_contaminated,
             }
         )
 
@@ -300,6 +318,7 @@ def build_explorer_tools(
         query: str,
         source_type: str | None = None,
         signal_mode: str = "all",
+        exclude_contaminated: bool = True,
     ) -> str:
         if signal_mode not in _SIGNAL_MODE_ENUM:
             return json.dumps(
@@ -317,6 +336,15 @@ def build_explorer_tools(
         ]
         if source_type:
             conditions.append(Evidence.source_type == source_type)
+        if exclude_contaminated:
+            from sqlalchemy import or_
+
+            conditions.append(
+                or_(
+                    Evidence.ai_contamination_score.is_(None),
+                    Evidence.ai_contamination_score < _CONTAMINATION_THRESHOLD,
+                )
+            )
 
         stmt = select(Evidence).where(*conditions).limit(
             50 if signal_mode == "all" else _SIGNAL_SEARCH_CANDIDATE_LIMIT
@@ -334,6 +362,7 @@ def build_explorer_tools(
                 "query": query,
                 "count": len(items),
                 "signal_mode": signal_mode,
+                "exclude_contaminated": exclude_contaminated,
             }
         )
 
@@ -413,7 +442,28 @@ def build_explorer_tools(
         quote: str,
         context: str,
         significance: str,
+        evidence_id: str | None = None,
     ) -> str:
+        # Reject quotes sourced from high-contamination evidence (ALLIE-433).
+        if evidence_id is not None:
+            stmt = select(Evidence).where(Evidence.id == evidence_id, Evidence.mini_id == mini_id)
+            ev_result = await db_session.execute(stmt)
+            ev_row = ev_result.scalar_one_or_none()
+            if ev_row is not None:
+                score = ev_row.ai_contamination_score
+                if score is not None and score >= _CONTAMINATION_THRESHOLD:
+                    return json.dumps(
+                        {
+                            "saved": False,
+                            "rejected": True,
+                            "reason": (
+                                f"Evidence item {evidence_id} has high AI contamination "
+                                f"score ({score:.2f} >= {_CONTAMINATION_THRESHOLD}). "
+                                "Quote rejected to protect voice authenticity."
+                            ),
+                        }
+                    )
+
         q = ExplorerQuote(
             mini_id=mini_id,
             source_type=source_type,
@@ -640,6 +690,13 @@ def build_explorer_tools(
                             "to surface higher-signal evidence before chronological browsing."
                         ),
                     },
+                    "exclude_contaminated": {
+                        "type": "boolean",
+                        "description": (
+                            "When true (default), exclude evidence items likely generated by AI "
+                            "(contamination score >= 0.5). Set to false to include all items."
+                        ),
+                    },
                 },
                 "required": ["source_type"],
             },
@@ -666,6 +723,13 @@ def build_explorer_tools(
                             "Optional prioritization mode. Use conflicts_first or approvals_first "
                             "to rank matched evidence by conflict/approval signal; use *_only "
                             "to filter to those signals."
+                        ),
+                    },
+                    "exclude_contaminated": {
+                        "type": "boolean",
+                        "description": (
+                            "When true (default), exclude evidence items likely generated by AI "
+                            "(contamination score >= 0.5). Set to false to include all items."
                         ),
                     },
                 },
@@ -751,6 +815,14 @@ def build_explorer_tools(
                     "significance": {
                         "type": "string",
                         "description": "What this quote reveals about the developer",
+                    },
+                    "evidence_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional ID of the evidence item this quote came from. "
+                            "When provided, quotes from high-contamination evidence "
+                            "(AI-generated prose) are automatically rejected."
+                        ),
                     },
                 },
                 "required": ["quote", "context", "significance"],
