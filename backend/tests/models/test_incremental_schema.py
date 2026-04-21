@@ -37,7 +37,9 @@ CREATE TABLE IF NOT EXISTS evidence (
     external_id TEXT,
     last_fetched_at TEXT,
     content_hash TEXT,
-    context TEXT NOT NULL DEFAULT 'general'
+    context TEXT NOT NULL DEFAULT 'general',
+    ai_contamination_score REAL,
+    ai_contamination_checked_at TEXT
 )
 """
 
