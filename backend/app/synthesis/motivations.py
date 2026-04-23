@@ -13,12 +13,15 @@ Never raises — the pipeline wrapper logs + skips on failure.
 
 from __future__ import annotations
 
+from collections import deque
+from datetime import datetime, timezone
 import logging
+from math import ceil
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.models import ModelTier, get_model
@@ -26,6 +29,36 @@ from app.models.evidence import Evidence, ExplorerFinding, ExplorerQuote
 from app.models.schemas import Motivation, MotivationChain, MotivationsProfile
 
 logger = logging.getLogger(__name__)
+
+_EVIDENCE_CANDIDATE_LIMIT = 200
+_EVIDENCE_SAMPLE_LIMIT = 50
+_TEMPORAL_BUCKET_COUNT = 3
+
+MOTIVATION_EVIDENCE_ITEM_TYPES = (
+    # Current GitHub source item types.
+    "review",
+    "issue_comment",
+    "pr",
+    "commit",
+    # Legacy GitHub aliases retained for existing rows.
+    "pr_review",
+    "review_comment",
+    "discussion_comment",
+    # Current public-writing / Q&A source item types.
+    "post",
+    "article",
+    "answer",
+    "comment",
+    # Legacy aliases retained for existing rows.
+    "blog_post",
+    "stackoverflow_answer",
+    # Closed-loop review learning is high-signal when present.
+    "review_outcome",
+)
+
+_ITEM_TYPE_PRIORITY = {
+    item_type: index for index, item_type in enumerate(MOTIVATION_EVIDENCE_ITEM_TYPES)
+}
 
 
 # ---------------------------------------------------------------------------
@@ -174,8 +207,10 @@ def _build_user_prompt(
     if evidence_sample:
         lines.append(f"### Evidence sample ({len(evidence_sample)} rows, high-signal only)")
         for e in evidence_sample[:30]:
+            date_label = f" / {e['evidence_date']}" if e.get("evidence_date") else ""
             lines.append(
-                f"id={e['id']} [{e['item_type']} / {e['source_type']}]: {e['content'][:200]}"
+                f"id={e['id']} [{e['item_type']} / {e['source_type']}{date_label}]: "
+                f"{e['content'][:200]}"
             )
         lines.append("")
 
@@ -184,6 +219,105 @@ def _build_user_prompt(
         "with inferred goals, values, anti-goals, and motivation chains."
     )
     return "\n".join(lines)
+
+
+def _row_datetime(row: Evidence, attr: str) -> datetime | None:
+    value = getattr(row, attr, None)
+    return value if isinstance(value, datetime) else None
+
+
+def _evidence_event_date(row: Evidence) -> datetime | None:
+    """Prefer source event time; fall back to ingestion time for legacy rows."""
+    return _row_datetime(row, "evidence_date") or _row_datetime(row, "created_at")
+
+
+def _event_timestamp(row: Evidence) -> float:
+    value = _evidence_event_date(row)
+    if value is None:
+        return float("-inf")
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
+
+
+def _format_event_date(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.date().isoformat()
+
+
+def _item_type_priority(row: Evidence) -> tuple[int, str]:
+    item_type = getattr(row, "item_type", "") or ""
+    return (_ITEM_TYPE_PRIORITY.get(item_type, len(_ITEM_TYPE_PRIORITY)), item_type)
+
+
+def _interleave_item_types(rows: list[Evidence]) -> list[Evidence]:
+    grouped: dict[str, deque[Evidence]] = {}
+    for row in sorted(
+        rows,
+        key=lambda r: (
+            _item_type_priority(r),
+            -_event_timestamp(r),
+            str(getattr(r, "id", "")),
+        ),
+    ):
+        item_type = getattr(row, "item_type", "") or ""
+        grouped.setdefault(item_type, deque()).append(row)
+
+    ordered_types = sorted(
+        grouped,
+        key=lambda item_type: (
+            _ITEM_TYPE_PRIORITY.get(item_type, len(_ITEM_TYPE_PRIORITY)),
+            item_type,
+        ),
+    )
+    interleaved: list[Evidence] = []
+    while grouped:
+        for item_type in list(ordered_types):
+            queue = grouped.get(item_type)
+            if not queue:
+                continue
+            interleaved.append(queue.popleft())
+            if not queue:
+                del grouped[item_type]
+        ordered_types = [item_type for item_type in ordered_types if item_type in grouped]
+    return interleaved
+
+
+def _sample_balanced_evidence(
+    rows: list[Evidence],
+    limit: int = _EVIDENCE_SAMPLE_LIMIT,
+    bucket_count: int = _TEMPORAL_BUCKET_COUNT,
+) -> list[Evidence]:
+    """Build a deterministic temporal/type-balanced sample for synthesis prompts."""
+    if limit <= 0 or not rows:
+        return []
+
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            -_event_timestamp(row),
+            _item_type_priority(row),
+            str(getattr(row, "id", "")),
+        ),
+    )
+    bucket_count = max(1, min(bucket_count, len(ordered)))
+    bucket_size = ceil(len(ordered) / bucket_count)
+    buckets = [
+        deque(_interleave_item_types(ordered[start : start + bucket_size]))
+        for start in range(0, len(ordered), bucket_size)
+    ]
+
+    sample: list[Evidence] = []
+    while len(sample) < limit and any(buckets):
+        for bucket in buckets:
+            if bucket:
+                sample.append(bucket.popleft())
+                if len(sample) >= limit:
+                    break
+    return sample
 
 
 # ---------------------------------------------------------------------------
@@ -221,27 +355,19 @@ async def infer_motivations(
     quotes_stmt = select(ExplorerQuote).where(ExplorerQuote.mini_id == mini_id)
     quotes_rows = (await db_session.execute(quotes_stmt)).scalars().all()
 
-    # High-signal evidence items
+    # High-signal evidence items. Pull a wider event-date-ordered candidate set
+    # first, then balance locally so prompt truncation does not become newest-only.
     evidence_stmt = (
         select(Evidence)
         .where(
             Evidence.mini_id == mini_id,
-            Evidence.item_type.in_(
-                [
-                    "pr_review",
-                    "review_comment",
-                    "issue_comment",
-                    "commit",
-                    "blog_post",
-                    "discussion_comment",
-                    "stackoverflow_answer",
-                ]
-            ),
+            Evidence.item_type.in_(MOTIVATION_EVIDENCE_ITEM_TYPES),
         )
-        .order_by(Evidence.created_at.desc())
-        .limit(50)
+        .order_by(func.coalesce(Evidence.evidence_date, Evidence.created_at).desc())
+        .limit(_EVIDENCE_CANDIDATE_LIMIT)
     )
-    evidence_rows = (await db_session.execute(evidence_stmt)).scalars().all()
+    evidence_candidates = list((await db_session.execute(evidence_stmt)).scalars().all())
+    evidence_rows = _sample_balanced_evidence(evidence_candidates)
 
     findings = [
         {
@@ -271,6 +397,7 @@ async def infer_motivations(
             "source_type": e.source_type,
             "item_type": e.item_type,
             "content": e.content,
+            "evidence_date": _format_event_date(_evidence_event_date(e)),
         }
         for e in evidence_rows
     ]

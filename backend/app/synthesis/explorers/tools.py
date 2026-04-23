@@ -67,6 +67,8 @@ _APPROVAL_SIGNAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 _GITHUB_ITEM_TYPE_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
     "review": {"conflict": 3.0, "approval": 2.5, "high_signal": 3.0},
+    "review_comment": {"conflict": 3.0, "approval": 2.5, "high_signal": 3.0},
+    "pr_review": {"conflict": 3.0, "approval": 2.5, "high_signal": 3.0},
     "issue_comment": {"conflict": 2.4, "approval": 1.8, "high_signal": 2.4},
     "pr": {"conflict": 1.7, "approval": 1.9, "high_signal": 1.8},
     "commit": {"conflict": 0.5, "approval": 0.2, "high_signal": 0.4},
@@ -99,10 +101,14 @@ def _github_signal_weight(item_type: str, signal_name: str, source_type: str) ->
 
 def _signal_sort_timestamp(row: Evidence) -> float:
     """Return a sortable timestamp, oldest-first friendly."""
-    created_at = getattr(row, "created_at", None)
-    if created_at is None:
+    event_at = getattr(row, "evidence_date", None)
+    if not isinstance(event_at, datetime.datetime):
+        event_at = getattr(row, "created_at", None)
+    if not isinstance(event_at, datetime.datetime):
         return 0.0
-    return created_at.timestamp()
+    if event_at.tzinfo is None:
+        event_at = event_at.replace(tzinfo=datetime.timezone.utc)
+    return event_at.timestamp()
 
 
 def _build_signal_metadata(row: Evidence) -> dict[str, object]:
@@ -177,6 +183,9 @@ def _serialize_evidence_row(row: Evidence, signal_mode: str) -> dict[str, object
     source_type = getattr(row, "source_type", None)
     if isinstance(source_type, str):
         payload["source_type"] = source_type
+    event_at = getattr(row, "evidence_date", None)
+    if isinstance(event_at, datetime.datetime):
+        payload["evidence_date"] = event_at.isoformat()
     return payload
 
 
@@ -260,7 +269,7 @@ def build_explorer_tools(
             stmt = (
                 select(Evidence)
                 .where(Evidence.mini_id == mini_id, Evidence.source_type == source_type)
-                .order_by(Evidence.created_at)
+                .order_by(func.coalesce(Evidence.evidence_date, Evidence.created_at))
                 .offset(offset)
                 .limit(page_size)
             )

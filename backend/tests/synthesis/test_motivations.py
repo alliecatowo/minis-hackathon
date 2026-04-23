@@ -15,6 +15,7 @@ Covers:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -22,7 +23,9 @@ import pytest
 
 from app.models.schemas import Motivation, MotivationChain, MotivationsProfile
 from app.synthesis.motivations import (
+    MOTIVATION_EVIDENCE_ITEM_TYPES,
     _build_user_prompt,
+    _sample_balanced_evidence,
     build_motivations_block,
     infer_motivations,
 )
@@ -74,12 +77,16 @@ def _make_evidence(
     item_type: str = "review_comment",
     content: str = "Requesting tests for this PR",
     source_type: str = "github",
+    evidence_date: datetime | None = None,
+    created_at: datetime | None = None,
 ) -> MagicMock:
     row = MagicMock()
     row.id = id
     row.item_type = item_type
     row.content = content
     row.source_type = source_type
+    row.evidence_date = evidence_date
+    row.created_at = created_at
     return row
 
 
@@ -223,10 +230,94 @@ class TestBuildUserPrompt:
         )
         assert "unique-evidence-123" in prompt
 
+    def test_includes_evidence_date_when_available(self):
+        prompt = _build_user_prompt(
+            username="torvalds",
+            findings=[],
+            quotes=[],
+            evidence_sample=[
+                {
+                    "id": "e-1",
+                    "source_type": "github",
+                    "item_type": "review",
+                    "content": "Requesting tests for this PR",
+                    "evidence_date": "2025-01-15",
+                }
+            ],
+        )
+        assert "2025-01-15" in prompt
+
     def test_empty_evidence_still_returns_string(self):
         prompt = _build_user_prompt("torvalds", [], [], [])
         assert isinstance(prompt, str)
         assert len(prompt) > 0
+
+
+# ---------------------------------------------------------------------------
+# Evidence sampling — pure functions, no I/O
+# ---------------------------------------------------------------------------
+
+
+class TestEvidenceSampling:
+    def test_current_github_review_type_is_included(self):
+        assert "review" in MOTIVATION_EVIDENCE_ITEM_TYPES
+        assert "pr" in MOTIVATION_EVIDENCE_ITEM_TYPES
+        assert "review_comment" in MOTIVATION_EVIDENCE_ITEM_TYPES
+
+    def test_balanced_sample_uses_evidence_date_not_ingestion_date(self):
+        created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        rows = [
+            _make_evidence(
+                f"new-{i}",
+                item_type="review",
+                evidence_date=datetime(2026, 1, i + 1, tzinfo=timezone.utc),
+                created_at=created_at,
+            )
+            for i in range(9)
+        ]
+        rows += [
+            _make_evidence(
+                f"mid-{i}",
+                item_type="review",
+                evidence_date=datetime(2025, 1, i + 1, tzinfo=timezone.utc),
+                created_at=created_at,
+            )
+            for i in range(9)
+        ]
+        rows += [
+            _make_evidence(
+                f"old-{i}",
+                item_type="review",
+                evidence_date=datetime(2024, 1, i + 1, tzinfo=timezone.utc),
+                created_at=created_at,
+            )
+            for i in range(9)
+        ]
+
+        sample = _sample_balanced_evidence(rows, limit=9)
+
+        sampled_years = {row.evidence_date.year for row in sample}
+        assert sampled_years == {2024, 2025, 2026}
+
+    def test_balanced_sample_interleaves_item_types_within_temporal_buckets(self):
+        evidence_date = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        rows = [
+            _make_evidence(f"review-{i}", item_type="review", evidence_date=evidence_date)
+            for i in range(4)
+        ]
+        rows += [
+            _make_evidence(f"issue-{i}", item_type="issue_comment", evidence_date=evidence_date)
+            for i in range(4)
+        ]
+
+        sample = _sample_balanced_evidence(rows, limit=4, bucket_count=1)
+
+        assert [row.item_type for row in sample] == [
+            "review",
+            "issue_comment",
+            "review",
+            "issue_comment",
+        ]
 
 
 # ---------------------------------------------------------------------------

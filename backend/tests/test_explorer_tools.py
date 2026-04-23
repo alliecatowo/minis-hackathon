@@ -19,7 +19,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.core.agent import AgentTool
-from app.synthesis.explorers.tools import build_explorer_tools
+from app.synthesis.explorers.tools import (
+    _build_signal_metadata,
+    _signal_sort_timestamp,
+    build_explorer_tools,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +427,7 @@ class TestSignalPrioritization:
         explored: bool = False,
         source_privacy: str = "public",
         created_at: datetime.datetime | None = None,
+        evidence_date: datetime.datetime | None = None,
     ):
         row = MagicMock()
         row.id = row_id
@@ -435,6 +440,7 @@ class TestSignalPrioritization:
         row.created_at = created_at or datetime.datetime(
             2026, 4, 20, 12, 0, tzinfo=datetime.timezone.utc
         )
+        row.evidence_date = evidence_date
         return row
 
     @pytest.mark.asyncio
@@ -508,3 +514,30 @@ class TestSignalPrioritization:
         data = json.loads(await tool.handler(source_type="github", signal_mode="wrong"))
         assert "error" in data
         assert "Invalid signal_mode" in data["error"]
+
+    def test_signal_sort_timestamp_prefers_evidence_date(self):
+        row = self._make_evidence_row(
+            row_id="ev-old-event",
+            item_type="review",
+            content="LGTM",
+            created_at=datetime.datetime(2026, 4, 20, 12, 0, tzinfo=datetime.timezone.utc),
+            evidence_date=datetime.datetime(2024, 4, 20, 12, 0, tzinfo=datetime.timezone.utc),
+        )
+
+        assert _signal_sort_timestamp(row) == row.evidence_date.timestamp()
+
+    def test_current_and_legacy_review_types_have_same_signal_weight(self):
+        current = self._make_evidence_row(
+            row_id="ev-current",
+            item_type="review",
+            content="I disagree; blocker until this has tests.",
+        )
+        legacy = self._make_evidence_row(
+            row_id="ev-legacy",
+            item_type="review_comment",
+            content="I disagree; blocker until this has tests.",
+        )
+
+        assert _build_signal_metadata(current)["high_signal_score"] == _build_signal_metadata(
+            legacy
+        )["high_signal_score"]
