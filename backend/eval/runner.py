@@ -20,6 +20,8 @@ from eval.review import HeldOutReviewExpectation, compute_review_agreement
 
 logger = logging.getLogger(__name__)
 
+_SCORECARD_NOT_AVAILABLE = "scorecard_unavailable"
+
 
 # ---------------------------------------------------------------------------
 # Data models
@@ -174,6 +176,70 @@ async def _send_chat_turn(
 
 
 # ---------------------------------------------------------------------------
+# Agreement scorecard fetch
+# ---------------------------------------------------------------------------
+
+
+async def _fetch_agreement_scorecard(
+    client: httpx.AsyncClient,
+    base_url: str,
+    username: str,
+    token: str | None = None,
+) -> dict | None:
+    """Fetch the agreement scorecard summary for a mini by username.
+
+    First resolves the mini's UUID via GET /api/minis/by-username/{username},
+    then calls GET /api/minis/{id}/agreement-scorecard-summary.
+
+    Returns the scorecard dict on success, or None if the mini is not found,
+    has insufficient data, or the request fails for any reason.
+    """
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    # Step 1: resolve mini ID from username
+    try:
+        resp = await client.get(
+            f"{base_url}/api/minis/by-username/{username}",
+            headers=headers,
+            timeout=30.0,
+        )
+        if resp.status_code == 404:
+            logger.debug("Mini not found for username %r — skipping scorecard fetch", username)
+            return None
+        resp.raise_for_status()
+        mini_data = resp.json()
+        mini_id = mini_data.get("id")
+        if not mini_id:
+            logger.warning("No id in mini response for %r", username)
+            return None
+    except Exception as exc:
+        logger.warning("Failed to resolve mini ID for %r: %s", username, exc)
+        return None
+
+    # Step 2: fetch the agreement scorecard summary
+    try:
+        resp = await client.get(
+            f"{base_url}/api/minis/{mini_id}/agreement-scorecard-summary",
+            headers=headers,
+            timeout=30.0,
+        )
+        if resp.status_code in (401, 403, 404):
+            logger.debug(
+                "Agreement scorecard not accessible for mini %r (status %d)",
+                mini_id,
+                resp.status_code,
+            )
+            return None
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        logger.warning("Failed to fetch agreement scorecard for mini %r: %s", mini_id, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Main eval runner
 # ---------------------------------------------------------------------------
 
@@ -316,6 +382,16 @@ async def run_eval(
                         ),
                     )
                 )
+
+            # Fetch agreement scorecard for this subject
+            logger.info("Fetching agreement scorecard for %s ...", username)
+            scorecard_data = await _fetch_agreement_scorecard(
+                client=client,
+                base_url=base_url,
+                username=username,
+                token=token,
+            )
+            summary.agreement_scorecard = scorecard_data
 
             report.summaries.append(summary)
 

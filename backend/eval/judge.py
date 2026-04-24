@@ -229,6 +229,9 @@ class SubjectSummary:
 
     subject: str
     turn_scores: list[TurnScore] = field(default_factory=list)
+    # Agreement scorecard fetched from the API after golden turns are scored.
+    # None if the API call failed or returned no data.
+    agreement_scorecard: dict | None = None
 
     @property
     def avg_overall(self) -> float:

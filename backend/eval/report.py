@@ -104,6 +104,34 @@ def _render_detail_table(summary: SubjectSummary, include_review: bool = False) 
     return _md_table(headers, rows)
 
 
+def _render_agreement_scorecard(scorecard: dict | None) -> str:
+    """Render the agreement scorecard as a compact Markdown block."""
+    if scorecard is None:
+        return "_Agreement scorecard: not available (no completed review cycles or insufficient auth)_\n"
+
+    cycles = scorecard.get("cycles_count", 0)
+    if cycles == 0:
+        return "_Agreement scorecard: no completed review cycles yet_\n"
+
+    def _pct(val: float | None) -> str:
+        return f"{val * 100:.1f}%" if val is not None else "—"
+
+    trend_data = scorecard.get("trend", {})
+    direction = trend_data.get("direction", "insufficient_data")
+    delta = trend_data.get("delta")
+    trend_str = direction
+    if delta is not None:
+        trend_str += f" ({delta:+.2f})"
+
+    return (
+        f"**Agreement Scorecard** ({cycles} cycle{'s' if cycles != 1 else ''}) — "
+        f"Approval accuracy: {_pct(scorecard.get('approval_accuracy'))} | "
+        f"Blocker precision: {_pct(scorecard.get('blocker_precision'))} | "
+        f"Comment overlap: {_pct(scorecard.get('comment_overlap'))} | "
+        f"Trend: {trend_str}\n"
+    )
+
+
 def _render_subject_section(summary: SubjectSummary, include_review: bool = False) -> str:
     lines: list[str] = []
     lines.append(f"## Subject: `{summary.subject}`\n")
@@ -118,6 +146,8 @@ def _render_subject_section(summary: SubjectSummary, include_review: bool = Fals
         lines[-1] += f" | Review: {summary.avg_review_agreement:.2f} (Blocker F1: {summary.avg_blocker_f1:.2f}, Comment F1: {summary.avg_comment_f1:.2f})\n"
     else:
         lines[-1] += "\n"
+
+    lines.append(_render_agreement_scorecard(summary.agreement_scorecard))
 
     weak = summary.weak_rubric_items()
     if weak:
@@ -180,10 +210,41 @@ def _render_summary_table(report: EvalReport) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _scorecard_delta_lines(report: EvalReport, prior_subjects: list[dict]) -> list[str]:
+    """Return lines describing per-subject agreement scorecard movement vs a prior run."""
+    prior_by_subject = {s["subject"]: s for s in prior_subjects}
+    lines: list[str] = []
+    for summary in report.summaries:
+        sc = summary.agreement_scorecard
+        prior_subject = prior_by_subject.get(summary.subject, {})
+        prior_sc = prior_subject.get("agreement_scorecard")
+        if sc is None or prior_sc is None:
+            continue
+        fields = [
+            ("approval_accuracy", "Approval"),
+            ("blocker_precision", "Blocker precision"),
+            ("comment_overlap", "Comment overlap"),
+        ]
+        deltas: list[str] = []
+        for key, label in fields:
+            cur_val = sc.get(key)
+            prev_val = prior_sc.get(key)
+            if cur_val is not None and prev_val is not None:
+                diff = cur_val - prev_val
+                if abs(diff) >= 0.02:  # only surface meaningful movement
+                    deltas.append(f"{label}: {diff:+.2f}")
+        if deltas:
+            lines.append(
+                f"> **Scorecard delta for `{summary.subject}`**: {', '.join(deltas)}"
+            )
+    return lines
+
+
 def _check_regression(report: EvalReport, prior_report_path: Path | None) -> str | None:
     """Compare current report against a prior JSON report.
 
     Returns a warning string if regression detected, None otherwise.
+    Includes agreement scorecard deltas per subject when available.
     """
     if not prior_report_path or not prior_report_path.exists():
         return None
@@ -197,18 +258,25 @@ def _check_regression(report: EvalReport, prior_report_path: Path | None) -> str
     current_avg = report.overall_avg()
     delta = current_avg - prior_avg
 
+    notes: list[str] = []
     if delta < -0.3:
-        return (
+        notes.append(
             f"> **REGRESSION DETECTED** — overall average dropped from "
             f"{prior_avg:.2f} to {current_avg:.2f} (delta: {delta:+.2f}). "
             f"Review changes before merging."
         )
     elif delta > 0.3:
-        return (
+        notes.append(
             f"> **IMPROVEMENT DETECTED** — overall average improved from "
             f"{prior_avg:.2f} to {current_avg:.2f} (delta: {delta:+.2f})."
         )
-    return None
+
+    # Append scorecard movement lines
+    prior_subjects = prior_data.get("subjects", [])
+    scorecard_lines = _scorecard_delta_lines(report, prior_subjects)
+    notes.extend(scorecard_lines)
+
+    return "\n".join(notes) if notes else None
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +382,7 @@ def report_to_json(report: EvalReport) -> dict:
                 "avg_review_agreement": summary.avg_review_agreement,
                 "avg_blocker_f1": summary.avg_blocker_f1,
                 "avg_comment_f1": summary.avg_comment_f1,
+                "agreement_scorecard": summary.agreement_scorecard,
                 "turns": turns,
             }
         )
