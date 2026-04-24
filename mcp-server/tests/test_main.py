@@ -235,5 +235,121 @@ class MinisMcpTests(unittest.IsolatedAsyncioTestCase):
             await main.predict_review.fn("torvalds", title="Refactor auth", author_model="staff")
 
 
+# ---------------------------------------------------------------------------
+# get_decision_frameworks tests
+# ---------------------------------------------------------------------------
+
+_SAMPLE_MINI = {
+    "id": "5f3f7d6d-b362-4ce7-b9da-c1fd67dbd5bd",
+    "username": "torvalds",
+    "principles_json": {
+        "decision_frameworks": {
+            "version": "decision_frameworks_v1",
+            "frameworks": [
+                {
+                    "framework_id": "fw-aaa",
+                    "condition": "When safety-critical code changes",
+                    "block_policy": "Block until tests added",
+                    "value_ids": ["correctness"],
+                    "confidence": 0.85,
+                    "revision": 3,
+                },
+                {
+                    "framework_id": "fw-bbb",
+                    "condition": "When refactoring without tests",
+                    "block_policy": "Request tests",
+                    "value_ids": ["reliability"],
+                    "confidence": 0.20,
+                    "revision": 1,
+                },
+                {
+                    "framework_id": "fw-ccc",
+                    "condition": "When perf regression detected",
+                    "block_policy": "Require benchmark",
+                    "value_ids": ["performance"],
+                    "confidence": 0.55,
+                    "revision": 2,
+                },
+            ],
+        }
+    },
+}
+
+_MINI_NO_PROFILE = {
+    "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    "username": "ghost",
+    "principles_json": None,
+}
+
+
+class GetDecisionFrameworksTests(unittest.IsolatedAsyncioTestCase):
+    async def _call(self, mini_payload, **kwargs):
+        async def fake_fetch_mini(identifier):
+            return mini_payload
+
+        original = main._fetch_mini
+        main._fetch_mini = fake_fetch_mini
+        try:
+            return await main.get_decision_frameworks.fn("torvalds", **kwargs)
+        finally:
+            main._fetch_mini = original
+
+    async def test_frameworks_sorted_by_confidence_desc(self):
+        result = await self._call(_SAMPLE_MINI)
+        confidences = [fw["confidence"] for fw in result["frameworks"]]
+        self.assertEqual(confidences, sorted(confidences, reverse=True))
+
+    async def test_badges_assigned_correctly(self):
+        result = await self._call(_SAMPLE_MINI)
+        badges = {fw["framework_id"]: fw["badge"] for fw in result["frameworks"]}
+        self.assertEqual(badges["fw-aaa"], "high")   # 0.85 > 0.7
+        self.assertIsNone(badges["fw-ccc"])          # 0.55 in middle
+        self.assertEqual(badges["fw-bbb"], "low")    # 0.20 < 0.3
+
+    async def test_min_confidence_filter(self):
+        result = await self._call(_SAMPLE_MINI, min_confidence=0.5)
+        framework_ids = {fw["framework_id"] for fw in result["frameworks"]}
+        # fw-bbb (0.20) should be filtered out
+        self.assertNotIn("fw-bbb", framework_ids)
+        self.assertIn("fw-aaa", framework_ids)
+        self.assertIn("fw-ccc", framework_ids)
+
+    async def test_limit(self):
+        result = await self._call(_SAMPLE_MINI, limit=1)
+        self.assertEqual(len(result["frameworks"]), 1)
+        # Should be the highest confidence one
+        self.assertEqual(result["frameworks"][0]["framework_id"], "fw-aaa")
+
+    async def test_summary_fields(self):
+        result = await self._call(_SAMPLE_MINI)
+        summary = result["summary"]
+        self.assertEqual(summary["total"], 3)
+        self.assertAlmostEqual(summary["mean_confidence"], (0.85 + 0.55 + 0.20) / 3, places=3)
+        self.assertEqual(summary["max_revision"], 3)
+
+    async def test_empty_profile_returns_note(self):
+        result = await self._call(_MINI_NO_PROFILE)
+        self.assertEqual(result["frameworks"], [])
+        self.assertIn("note", result)
+        self.assertEqual(result["summary"]["total"], 0)
+        self.assertEqual(result["summary"]["mean_confidence"], 0.0)
+
+    async def test_bad_username_raises_backend_error(self):
+        async def fake_fetch_mini_error(identifier):
+            raise main.BackendError("404 Mini not found")
+
+        original = main._fetch_mini
+        main._fetch_mini = fake_fetch_mini_error
+        try:
+            with self.assertRaisesRegex(main.BackendError, "404"):
+                await main.get_decision_frameworks.fn("nobody")
+        finally:
+            main._fetch_mini = original
+
+    async def test_username_propagated_to_output(self):
+        result = await self._call(_SAMPLE_MINI)
+        self.assertEqual(result["username"], "torvalds")
+
+
 if __name__ == "__main__":
     unittest.main()

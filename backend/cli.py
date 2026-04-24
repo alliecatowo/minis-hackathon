@@ -609,6 +609,98 @@ def show_agreement(username: str):
         raise typer.Exit(1)
 
 
+@app.command("decision-frameworks")
+def show_decision_frameworks(
+    username: str,
+    limit: int = typer.Option(20, "--limit", "-l", help="Max frameworks to display"),
+    min_confidence: float = typer.Option(
+        0.0, "--min-confidence", "-c", help="Minimum confidence threshold (0.0-1.0)"
+    ),
+):
+    """Show decision frameworks for a mini, sorted by confidence."""
+
+    async def _run():
+        async with async_session() as session:
+            # Get mini
+            stmt = select(Mini).where(Mini.username == username.lower())
+            result = await session.execute(stmt)
+            mini = result.scalar_one_or_none()
+
+            if not mini:
+                console.print(f"[red]Mini '{username}' not found.[/red]")
+                raise typer.Exit(1)
+
+            # Extract decision frameworks from principles_json
+            frameworks = []
+            if mini.principles_json and "decision_frameworks" in mini.principles_json:
+                frameworks = mini.principles_json["decision_frameworks"].get("frameworks", [])
+
+            if not frameworks:
+                console.print(f"[yellow]No decision frameworks found for {username}.[/yellow]")
+                return
+
+            # Filter and sort by confidence (desc), then revision (desc)
+            filtered = [
+                fw for fw in frameworks if fw.get("confidence", 0) >= min_confidence
+            ]
+            filtered.sort(
+                key=lambda x: (-x.get("confidence", 0), -x.get("revision", 0))
+            )
+
+            # Take limit
+            filtered = filtered[:limit]
+
+            if not filtered:
+                console.print(
+                    f"[yellow]No frameworks with confidence >= {min_confidence}.[/yellow]"
+                )
+                return
+
+            # Build table
+            table = Table(
+                title=f"Decision Frameworks: {mini.username}",
+                show_header=True,
+                header_style="bold magenta",
+            )
+            table.add_column("Confidence", justify="right", style="cyan")
+            table.add_column("Rev", justify="right", style="dim")
+            table.add_column("Framework ID", style="dim")
+            table.add_column("Trigger")
+            table.add_column("Action")
+            table.add_column("Value")
+
+            for fw in filtered:
+                conf = fw.get("confidence", 0)
+                rev = fw.get("revision", 0)
+                fw_id = str(fw.get("framework_id", ""))[:8]
+                trigger = str(fw.get("trigger", ""))[:60]
+                action = str(fw.get("action", ""))[:60]
+                value = str(fw.get("value", ""))[:40]
+
+                conf_str = f"{conf:.2f}" if isinstance(conf, (int, float)) else "—"
+                rev_str = str(rev) if isinstance(rev, int) else "—"
+
+                table.add_row(conf_str, rev_str, fw_id, trigger, action, value)
+
+            console.print(table)
+
+            # Summary line
+            mean_conf = sum(fw.get("confidence", 0) for fw in filtered) / len(filtered)
+            max_rev = max((fw.get("revision", 0) for fw in filtered), default=0)
+            console.print(
+                f"\n[dim]{len(filtered)} frameworks, mean confidence {mean_conf:.2f}, "
+                f"max revision {int(max_rev)}[/dim]"
+            )
+
+    import asyncio
+
+    try:
+        asyncio.run(_run())
+    except Exception as e:
+        console.print(f"[red]Error fetching frameworks: {e}[/red]")
+        raise typer.Exit(1)
+
+
 @app.command("delete")
 def delete_mini(username: str):
     """Delete a mini directly from the SQLite database."""
