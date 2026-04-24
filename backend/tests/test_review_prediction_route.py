@@ -100,6 +100,10 @@ async def test_review_prediction_endpoint_returns_structured_payload(app, monkey
     body = response.json()
     assert body["version"] == "review_prediction_v1"
     assert body["reviewer_username"] == "reviewer"
+    assert body["artifact_summary"] == {
+        "artifact_type": "pull_request",
+        "title": "Update auth flow",
+    }
     assert "private_assessment" in body
     assert "delivery_policy" in body
     assert "expressed_feedback" in body
@@ -170,3 +174,58 @@ async def test_review_prediction_endpoint_infers_delivery_context_from_request(a
     body = response.json()
     assert body["delivery_policy"]["context"] == "exploratory"
     assert body["delivery_policy"]["teaching_mode"] is True
+
+
+@pytest.mark.asyncio
+async def test_artifact_review_endpoint_accepts_design_docs(app, monkeypatch):
+    from app.core.auth import get_optional_user
+    from app.db import get_session
+
+    _stub_review_agent(monkeypatch)
+    mini = _mini()
+    app.dependency_overrides[get_optional_user] = lambda: None
+    app.dependency_overrides[get_session] = lambda: _session_with_mini(mini)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            f"/api/minis/{mini.id}/artifact-review",
+            json={
+                "artifact_type": "design_doc",
+                "title": "Design doc for retry isolation",
+                "artifact_summary": "Proposes queue retry isolation, rollback notes, and validation follow-up.",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["artifact_summary"] == {
+        "artifact_type": "design_doc",
+        "title": "Design doc for retry isolation",
+    }
+    assert "merge" not in body["expressed_feedback"]["summary"].lower()
+
+
+@pytest.mark.asyncio
+async def test_trusted_artifact_review_endpoint_accepts_issue_plans(app, monkeypatch):
+    from app.core.config import settings
+    from app.db import get_session
+
+    _stub_review_agent(monkeypatch)
+    mini = _mini(visibility="private", owner_id="someone-else")
+    app.dependency_overrides[get_session] = lambda: _session_with_mini(mini)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            f"/api/minis/trusted/{mini.id}/artifact-review",
+            headers={"X-Trusted-Service-Secret": settings.trusted_service_secret},
+            json={
+                "artifact_type": "issue_plan",
+                "title": "Issue plan for auth hardening",
+                "artifact_summary": "Plans auth boundary checks, tests, and rollback notes.",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["artifact_summary"]["artifact_type"] == "issue_plan"

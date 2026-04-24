@@ -69,6 +69,17 @@ def test_review_prediction_request_requires_some_change_input():
         ReviewPredictionRequestV1()
 
 
+def test_review_prediction_request_accepts_artifact_summary_without_diff():
+    body = ReviewPredictionRequestV1(
+        artifact_type="design_doc",
+        title="Design doc for retry isolation",
+        artifact_summary="Proposes splitting queue retry policy from delivery concerns.",
+    )
+
+    assert body.artifact_type == "design_doc"
+    assert body.artifact_summary == "Proposes splitting queue retry policy from delivery concerns."
+
+
 def test_build_review_prediction_returns_structured_request_changes():
     mini = _mini()
     body = ReviewPredictionRequestV1(
@@ -94,6 +105,45 @@ def test_build_review_prediction_returns_structured_request_changes():
     assert "test-coverage" in blocker_keys
     assert prediction.private_assessment.confidence >= 0.5
     assert prediction.expressed_feedback.comments
+
+
+def test_design_doc_artifact_review_uses_generic_signoff_language():
+    mini = _mini()
+    body = ReviewPredictionRequestV1(
+        artifact_type="design_doc",
+        repo_name="acme/api",
+        title="Design doc for auth token rotation",
+        description="Covers auth boundaries, rollout sequencing, and compatibility expectations.",
+        artifact_summary="Proposes rotation steps, rollback posture, and follow-up validation work.",
+        author_model="senior_peer",
+        delivery_context="normal",
+    )
+
+    prediction = build_review_prediction_v1(mini, body)
+
+    assert prediction.artifact_summary is not None
+    assert prediction.artifact_summary.artifact_type == "design_doc"
+    assert prediction.artifact_summary.title == "Design doc for auth token rotation"
+    assert "merge" not in prediction.expressed_feedback.summary.lower()
+    assert "sign-off" in prediction.expressed_feedback.summary.lower()
+
+
+def test_issue_plan_artifact_review_supports_artifact_summary_input():
+    mini = _mini()
+    body = ReviewPredictionRequestV1(
+        artifact_type="issue_plan",
+        title="Issue plan for retry hardening",
+        artifact_summary="Plan covers queue retries, logging, rollback, and test follow-through.",
+        author_model="trusted_peer",
+        delivery_context="normal",
+    )
+
+    prediction = build_review_prediction_v1(mini, body)
+
+    assert prediction.artifact_summary is not None
+    assert prediction.artifact_summary.artifact_type == "issue_plan"
+    assert prediction.private_assessment.confidence >= 0.4
+    assert prediction.expressed_feedback.summary
 
 
 def test_hotfix_policy_shields_noise_for_trusted_peer():
@@ -275,7 +325,7 @@ def test_expressed_feedback_gets_more_direct_for_high_strictness_senior_peer():
     ]
 
     assert prediction.delivery_policy.strictness == "high"
-    assert "center the review on the main merge-risk issues" in prediction.expressed_feedback.summary
+    assert "center the review on the main sign-off risks" in prediction.expressed_feedback.summary
     assert "pretty direct" in prediction.expressed_feedback.summary
     assert len(blocker_comments) == 2
     assert len(question_comments) == 1

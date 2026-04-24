@@ -17,7 +17,7 @@ async def predict_review(
     body: ReviewPredictionRequestV1,
     session: AsyncSession,
 ) -> ReviewPredictionV1:
-    """Predict a review for a given PR request using an LLM agent."""
+    """Predict a review for a given artifact request using an LLM agent."""
 
     # 1. Build search tools (adapted from chat.py)
     tools = _build_predictor_tools(mini, session)
@@ -25,7 +25,7 @@ async def predict_review(
     # 2. Construct the system prompt using the "Three Layer Model"
     system_prompt = _build_predictor_system_prompt(mini, body)
 
-    # 3. Construct the user prompt (the PR detail)
+    # 3. Construct the user prompt (the artifact detail)
     user_prompt = _build_predictor_user_prompt(body)
 
     # 4. Run the agent
@@ -236,10 +236,10 @@ def _build_predictor_system_prompt(mini: Mini, body: ReviewPredictionRequestV1) 
     
     review_directives = (
         "\n\n# REVIEW PREDICTOR DIRECTIVES\n"
-        "Your task is to predict how you, as the developer described above, would review a specific Pull Request. "
+        "Your task is to predict how you, as the developer described above, would review a specific engineering artifact. "
         "You must use the 'Three Layer Model' for your prediction:\n\n"
         "## 1. Private Assessment (What you think)\n"
-        "- What do you REALLY think about this change?\n"
+        "- What do you REALLY think about this artifact?\n"
         "- What are the blocking risks? What are the positive signs?\n"
         "- Be brutally honest with yourself here. Use your core engineering values and principles.\n\n"
         "## 2. Delivery Policy (How you choose to say it)\n"
@@ -255,9 +255,9 @@ def _build_predictor_system_prompt(mini: Mini, body: ReviewPredictionRequestV1) 
         "- Your expressed feedback MUST follow your delivery policy.\n"
         "- If you think there's a risk but your policy is to 'shield from noise', you might not mention it if it's minor.\n\n"
         "# REQUIRED WORKFLOW\n"
-        "1. **THINK** about the PR and who the author is.\n"
-        "2. **SEARCH** your memories, evidence, and principles for your stance on the technologies or patterns in the PR.\n"
-        "3. **ASSESS** the PR privately.\n"
+        "1. **THINK** about the artifact and who the author is.\n"
+        "2. **SEARCH** your memories, evidence, and principles for your stance on the technologies or patterns in the artifact.\n"
+        "3. **ASSESS** the artifact privately.\n"
         "4. **DETERMINE** your delivery policy.\n"
         "5. **GENERATE** the expressed feedback.\n"
     ).format(
@@ -268,14 +268,16 @@ def _build_predictor_system_prompt(mini: Mini, body: ReviewPredictionRequestV1) 
     return base_prompt + review_directives
 
 def _build_predictor_user_prompt(body: ReviewPredictionRequestV1) -> str:
-    """Build the user prompt containing the PR details."""
-    parts = ["# PULL REQUEST TO REVIEW\n"]
+    """Build the user prompt containing the artifact details."""
+    parts = [f"# {body.artifact_type.replace('_', ' ').upper()} TO REVIEW\n"]
     if body.repo_name:
         parts.append(f"Repo: {body.repo_name}")
     if body.title:
         parts.append(f"Title: {body.title}")
     if body.description:
         parts.append(f"Description:\n{body.description}")
+    if body.artifact_summary:
+        parts.append(f"Artifact Summary:\n{body.artifact_summary}")
     if body.changed_files:
         parts.append(f"Changed Files: {', '.join(body.changed_files)}")
     if body.diff_summary:

@@ -55,11 +55,16 @@ class ChatRequest(BaseModel):
         return self
 
 
+ArtifactTypeV1 = Literal["pull_request", "design_doc", "issue_plan"]
+
+
 class ReviewPredictionRequestV1(BaseModel):
+    artifact_type: ArtifactTypeV1 = "pull_request"
     repo_name: str | None = Field(default=None, max_length=255)
     title: str | None = Field(default=None, max_length=500)
     description: str | None = Field(default=None, max_length=10000)
     diff_summary: str | None = Field(default=None, max_length=50000)
+    artifact_summary: str | None = Field(default=None, max_length=50000)
     changed_files: list[str] = Field(default_factory=list, max_length=200)
     author_model: Literal["junior_peer", "trusted_peer", "senior_peer", "unknown"] = "unknown"
     delivery_context: Literal["hotfix", "normal", "exploratory", "incident"] = "normal"
@@ -71,12 +76,13 @@ class ReviewPredictionRequestV1(BaseModel):
                 self.title and self.title.strip(),
                 self.description and self.description.strip(),
                 self.diff_summary and self.diff_summary.strip(),
+                self.artifact_summary and self.artifact_summary.strip(),
                 self.changed_files,
             ]
         ):
             return self
         raise ValueError(
-            "Provide at least one of title, description, diff_summary, or changed_files"
+            "Provide at least one of title, description, diff_summary, artifact_summary, or changed_files"
         )
 
 
@@ -289,10 +295,16 @@ class ReviewPredictionExpressedFeedbackV1(BaseModel):
     approval_state: Literal["approve", "comment", "request_changes", "uncertain"]
 
 
+class ReviewArtifactSummaryV1(BaseModel):
+    artifact_type: ArtifactTypeV1 = "pull_request"
+    title: str | None = None
+
+
 class ReviewPredictionV1(BaseModel):
     version: Literal["review_prediction_v1"] = "review_prediction_v1"
     reviewer_username: str
     repo_name: str | None = None
+    artifact_summary: ReviewArtifactSummaryV1 | None = None
     private_assessment: ReviewPredictionPrivateAssessmentV1
     delivery_policy: ReviewPredictionDeliveryPolicyV1
     expressed_feedback: ReviewPredictionExpressedFeedbackV1
