@@ -7,6 +7,7 @@ from typing import Any
 from app.models.schemas import (
     BehavioralContext,
     MotivationsProfile,
+    ReviewArtifactSummaryV1,
     ReviewPredictionCommentV1,
     ReviewPredictionDeliveryPolicyV1,
     ReviewPredictionEvidenceV1,
@@ -224,13 +225,25 @@ def _keyword_search_snippets(content: str, query: str, max_results: int = 3) -> 
 
 def _build_request_text(body: ReviewPredictionRequestV1) -> str:
     sections = [
+        _normalize_text(body.artifact_type.replace("_", " ")),
         _normalize_text(body.repo_name),
         _normalize_text(body.title),
         _normalize_text(body.description),
+        _normalize_text(body.artifact_summary),
         _normalize_text(body.diff_summary),
         "\n".join(body.changed_files),
     ]
     return "\n".join(section for section in sections if section)
+
+
+def _artifact_kind_label(body: ReviewPredictionRequestV1) -> str:
+    return body.artifact_type.replace("_", " ")
+
+
+def _artifact_scope_label(body: ReviewPredictionRequestV1) -> str:
+    if body.artifact_type == "pull_request":
+        return "change"
+    return "artifact"
 
 
 def _review_entries(behavioral_context: BehavioralContext | None) -> list[dict[str, str]]:
@@ -394,7 +407,7 @@ def _build_evidence_pool(mini: Any, body: ReviewPredictionRequestV1) -> list[Rev
         evidence.append(
             ReviewPredictionEvidenceV1(
                 source="input",
-                detail=f"PR title: {body.title[:240]}",
+                detail=f"{_artifact_kind_label(body).title()} title: {body.title[:240]}",
             )
         )
 
@@ -646,6 +659,7 @@ def _build_private_assessment(
     request_text = _build_request_text(body)
     request_text_lower = request_text.lower()
     delivery_context = policy.context
+    artifact_scope = _artifact_scope_label(body)
     values = _parse_values(getattr(mini, "values_json", None))
     code_quality = _engineering_value(values, "Code Quality")
     has_tests = _contains_any(request_text_lower, _TEST_KEYWORDS) or _has_matching_file(
@@ -672,7 +686,7 @@ def _build_private_assessment(
         blocking_issues.append(
             _make_signal(
                 key="auth-boundary",
-                summary="Likely to scrutinize auth and permission boundaries before approving.",
+                summary="Likely to scrutinize auth and permission boundaries before signing off.",
                 rationale="Changes touching credentials or authorization usually read as high-severity review territory.",
                 confidence=0.82,
                 evidence_pool=evidence_pool,
@@ -696,7 +710,7 @@ def _build_private_assessment(
             positive_signals.append(
                 _make_signal(
                     key="migration-awareness",
-                    summary="The change already signals migration or compatibility awareness.",
+                    summary=f"The {artifact_scope} already signals migration or compatibility awareness.",
                     rationale="Explicit migration notes reduce ambiguity on risky data-shape changes.",
                     confidence=0.71,
                     evidence_pool=evidence_pool,
@@ -732,7 +746,7 @@ def _build_private_assessment(
         positive_signals.append(
             _make_signal(
                 key="tests-present",
-                summary="The change already mentions tests or coverage work.",
+                summary=f"The {artifact_scope} already mentions tests or coverage work.",
                 rationale="Explicit test coverage lowers the probability of a hard block.",
                 confidence=0.72,
                 evidence_pool=evidence_pool,
@@ -755,7 +769,7 @@ def _build_private_assessment(
         positive_signals.append(
             _make_signal(
                 key="rollout-awareness",
-                summary="The change already mentions rollout or observability guardrails.",
+                summary=f"The {artifact_scope} already mentions rollout or observability guardrails.",
                 rationale="Feature flags, logging, or rollback notes usually read as good review hygiene.",
                 confidence=0.67,
                 evidence_pool=evidence_pool,
@@ -768,7 +782,7 @@ def _build_private_assessment(
             _make_signal(
                 key="clarity-pass",
                 summary="Could leave a non-blocking note on naming or boundary clarity.",
-                rationale="Refactors and cleanup diffs often trigger clarity comments even when the core change is sound.",
+                rationale="Refactors and cleanup work often trigger clarity comments even when the core idea is sound.",
                 confidence=0.58,
                 evidence_pool=evidence_pool,
                 keywords={"clarity", "naming", "readability", "refactor"},
@@ -779,7 +793,7 @@ def _build_private_assessment(
         positive_signals.append(
             _make_signal(
                 key="docs-present",
-                summary="Documentation or inline explanation is already part of the change.",
+                summary=f"Documentation or inline explanation is already part of the {artifact_scope}.",
                 rationale="Clear written context usually improves review throughput and reduces back-and-forth.",
                 confidence=0.61,
                 evidence_pool=evidence_pool,
@@ -813,19 +827,21 @@ def _append_sentence(text: str, sentence: str | None) -> str:
 def _feedback_summary(
     approval_state: str,
     policy: ReviewPredictionDeliveryPolicyV1,
+    body: ReviewPredictionRequestV1,
 ) -> str:
+    artifact_scope = _artifact_scope_label(body)
     if approval_state == "request_changes":
         if policy.strictness == "high":
-            summary = "Would likely request changes directly and center the review on the main merge-risk issues."
+            summary = "Would likely request changes directly and center the review on the main sign-off risks."
         elif policy.strictness == "low":
-            summary = "Would likely ask for a narrow set of changes before merge."
+            summary = "Would likely ask for a narrow set of changes before sign-off."
         else:
             summary = "Would likely ask for changes, but keep the feedback focused on the main risks."
     elif approval_state == "comment":
         if policy.shield_author_from_noise:
-            summary = "Would likely leave a narrow set of high-signal comments without blocking the change."
+            summary = f"Would likely leave a narrow set of high-signal comments without blocking the {artifact_scope}."
         else:
-            summary = "Would likely leave a small set of comments or questions without blocking the change."
+            summary = f"Would likely leave a small set of comments or questions without blocking the {artifact_scope}."
     elif approval_state == "approve":
         if policy.shield_author_from_noise:
             summary = "Would likely approve without piling on extra nits."
@@ -933,12 +949,13 @@ def _make_expressed_comment(
 def _build_expressed_feedback(
     assessment: ReviewPredictionPrivateAssessmentV1,
     policy: ReviewPredictionDeliveryPolicyV1,
+    body: ReviewPredictionRequestV1,
 ) -> ReviewPredictionExpressedFeedbackV1:
     comments: list[ReviewPredictionCommentV1] = []
 
     if assessment.blocking_issues:
         approval_state = "request_changes"
-        summary = _feedback_summary(approval_state, policy)
+        summary = _feedback_summary(approval_state, policy, body)
 
         surfaced_blockers = assessment.blocking_issues[: _comment_limit(policy, "blocking")]
         surfaced_non_blocking = assessment.non_blocking_issues[: _comment_limit(policy, "non_blocking")]
@@ -985,7 +1002,7 @@ def _build_expressed_feedback(
                 )
     elif assessment.non_blocking_issues or assessment.open_questions:
         approval_state = "comment"
-        summary = _feedback_summary(approval_state, policy)
+        summary = _feedback_summary(approval_state, policy, body)
         for signal in assessment.open_questions[: _comment_limit(policy, "questions")]:
             comments.append(
                 _make_expressed_comment(
@@ -1006,7 +1023,7 @@ def _build_expressed_feedback(
             )
     elif assessment.positive_signals:
         approval_state = "approve"
-        summary = _feedback_summary(approval_state, policy)
+        summary = _feedback_summary(approval_state, policy, body)
         for signal in assessment.positive_signals[: _comment_limit(policy, "positive")]:
             comments.append(
                 _make_expressed_comment(
@@ -1018,7 +1035,7 @@ def _build_expressed_feedback(
             )
     else:
         approval_state = "uncertain"
-        summary = _feedback_summary(approval_state, policy)
+        summary = _feedback_summary(approval_state, policy, body)
 
     return ReviewPredictionExpressedFeedbackV1(
         summary=summary,
@@ -1031,11 +1048,15 @@ def build_review_prediction_v1(mini: Any, body: ReviewPredictionRequestV1) -> Re
     evidence_pool = _build_evidence_pool(mini, body)
     policy = _derive_delivery_policy(mini, body, evidence_pool)
     assessment = _build_private_assessment(mini, body, policy, evidence_pool)
-    expressed_feedback = _build_expressed_feedback(assessment, policy)
+    expressed_feedback = _build_expressed_feedback(assessment, policy, body)
 
     return ReviewPredictionV1(
         reviewer_username=getattr(mini, "username", "unknown"),
         repo_name=body.repo_name,
+        artifact_summary=ReviewArtifactSummaryV1(
+            artifact_type=body.artifact_type,
+            title=body.title,
+        ),
         private_assessment=assessment,
         delivery_policy=policy,
         expressed_feedback=expressed_feedback,

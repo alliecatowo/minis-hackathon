@@ -46,6 +46,16 @@ _DATASET_RATE_LIMIT_SECONDS = 600  # 10 minutes
 router = APIRouter(prefix="/minis", tags=["minis"])
 
 
+async def _build_artifact_review_response(
+    mini: Mini,
+    body: ReviewPredictionRequestV1,
+    session: AsyncSession,
+) -> ReviewPredictionV1:
+    if FLAGS["REVIEW_PREDICTOR_LLM_ENABLED"].is_enabled():
+        return await predict_review(mini, body, session)
+    return build_review_prediction_v1(mini, body)
+
+
 @router.get("/sources")
 async def list_sources():
     """List available ingestion sources."""
@@ -292,14 +302,23 @@ async def get_trusted_review_prediction(
     _: None = Depends(require_trusted_service),
 ):
     """Build a structured review prediction for trusted service integrations."""
+    return await get_trusted_artifact_review(mini_id, body, session, _)
+
+
+@router.post("/trusted/{mini_id}/artifact-review", response_model=ReviewPredictionV1)
+async def get_trusted_artifact_review(
+    mini_id: str,
+    body: ReviewPredictionRequestV1,
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_trusted_service),
+):
+    """Build a structured artifact review for trusted service integrations."""
     result = await session.execute(select(Mini).where(Mini.id == mini_id))
     mini = result.scalar_one_or_none()
     if not mini:
         raise HTTPException(status_code=404, detail="Mini not found")
 
-    if FLAGS["REVIEW_PREDICTOR_LLM_ENABLED"].is_enabled():
-        return await predict_review(mini, body, session)
-    return build_review_prediction_v1(mini, body)
+    return await _build_artifact_review_response(mini, body, session)
 
 
 @router.get("/{id}")
@@ -333,15 +352,24 @@ async def get_review_prediction(
     user: User | None = Depends(get_optional_user),
 ):
     """Build a lightweight structured review prediction for a mini."""
+    return await get_artifact_review(id, body, session, user)
+
+
+@router.post("/{id}/artifact-review", response_model=ReviewPredictionV1)
+async def get_artifact_review(
+    id: str,
+    body: ReviewPredictionRequestV1,
+    session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(get_optional_user),
+):
+    """Build a lightweight structured artifact review for a mini."""
     result = await session.execute(select(Mini).where(Mini.id == id))
     mini = result.scalar_one_or_none()
     if not mini:
         raise HTTPException(status_code=404, detail="Mini not found")
 
     require_mini_access(mini, user)
-    if FLAGS["REVIEW_PREDICTOR_LLM_ENABLED"].is_enabled():
-        return await predict_review(mini, body, session)
-    return build_review_prediction_v1(mini, body)
+    return await _build_artifact_review_response(mini, body, session)
 
 
 @router.delete("/{id}", status_code=204)
