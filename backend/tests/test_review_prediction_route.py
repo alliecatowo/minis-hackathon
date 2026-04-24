@@ -7,11 +7,21 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 
-def _session_with_mini(mini):
+def _session_with_mini(mini, review_cycles=None):
     session = AsyncMock()
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = mini
-    session.execute = AsyncMock(return_value=result)
+    mini_result = MagicMock()
+    mini_result.scalar_one_or_none.return_value = mini
+    cycles_result = MagicMock()
+    cycles_result.scalars.return_value = review_cycles or []
+    call_count = {"value": 0}
+
+    async def _execute(*args, **kwargs):
+        call_count["value"] += 1
+        if call_count["value"] == 1:
+            return mini_result
+        return cycles_result
+
+    session.execute = AsyncMock(side_effect=_execute)
     return session
 
 

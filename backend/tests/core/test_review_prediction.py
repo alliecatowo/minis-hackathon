@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
 
-from app.core.review_prediction import build_review_prediction_v1
+from app.core.review_prediction import build_review_prediction_v1, load_same_repo_precedent
 from app.models.schemas import ReviewPredictionRequestV1
 
 
@@ -320,3 +321,107 @@ def test_recent_contradictory_snippet_does_not_dominate_stable_principles_eviden
     )
     assert auth_signal.evidence
     assert auth_signal.evidence[0].source == "principles"
+
+
+def test_same_repo_precedent_escalates_test_gap_and_strictness():
+    mini = _mini(
+        behavioral_context_json=None,
+        motivations_json=None,
+        memory_content=None,
+        evidence_cache=None,
+        values_json={
+            "engineering_values": [
+                {"name": "Code Quality", "description": "", "intensity": 6.1},
+                {"name": "Directness", "description": "", "intensity": 6.2},
+                {"name": "Pragmatism", "description": "", "intensity": 4.2},
+            ]
+        }
+    )
+    body = ReviewPredictionRequestV1(
+        repo_name="acme/api",
+        title="Refactor queue retry timeout handling",
+        description="Touches async worker retries and timeout behavior with no explicit validation plan.",
+        changed_files=["backend/app/workers/token_queue.py"],
+        author_model="unknown",
+        delivery_context="normal",
+    )
+
+    baseline = build_review_prediction_v1(mini, body)
+    with_precedent = build_review_prediction_v1(
+        mini,
+        body,
+        same_repo_precedent={
+            "repo_name": "acme/api",
+            "cycle_count": 3,
+            "focus_counts": {"tests": 3, "rollout": 1},
+            "focuses": ["tests", "rollout"],
+            "approval_counts": {
+                "approve": 0,
+                "comment": 1,
+                "request_changes": 2,
+                "uncertain": 0,
+            },
+            "detail": "same-repo precedent for acme/api: 3 recent review cycles; recurring focus on tests, rollout; outcomes skewed request_changes",
+        },
+    )
+
+    assert "test-coverage" in {item.key for item in baseline.private_assessment.open_questions}
+    assert "test-coverage" not in {item.key for item in baseline.private_assessment.blocking_issues}
+    assert with_precedent.delivery_policy.strictness == "medium"
+    assert "same-repo review precedent reinforces focus on rollout, tests" in with_precedent.delivery_policy.rationale
+    precedent_test_gap = next(
+        item for item in with_precedent.private_assessment.blocking_issues if item.key == "test-coverage"
+    )
+    assert "same-repo review cycles repeatedly centered tests before merge" in precedent_test_gap.rationale
+
+
+@pytest.mark.asyncio
+async def test_load_same_repo_precedent_filters_to_matching_repo():
+    session = AsyncMock()
+    cycles = [
+        SimpleNamespace(
+            metadata_json={"repo_full_name": "acme/api"},
+            predicted_state={
+                "private_assessment": {"blocking_issues": [{"id": "missing-tests"}]},
+                "expressed_feedback": {
+                    "summary": "Please add tests before merge.",
+                    "approval_state": "request_changes",
+                    "comments": [{"body": "Need tests before merge."}],
+                },
+            },
+            human_review_outcome=None,
+        ),
+        SimpleNamespace(
+            metadata_json={"repo_full_name": "acme/api"},
+            predicted_state={
+                "private_assessment": {"blocking_issues": []},
+                "expressed_feedback": {
+                    "summary": "What is the rollback plan?",
+                    "approval_state": "comment",
+                    "comments": [{"body": "Please include rollback posture."}],
+                },
+            },
+            human_review_outcome=None,
+        ),
+        SimpleNamespace(
+            metadata_json={"repo_full_name": "other/repo"},
+            predicted_state={
+                "private_assessment": {"blocking_issues": []},
+                "expressed_feedback": {
+                    "summary": "Unrelated repo history",
+                    "approval_state": "approve",
+                    "comments": [],
+                },
+            },
+            human_review_outcome=None,
+        ),
+    ]
+    session.execute.return_value = SimpleNamespace(scalars=lambda: cycles)
+
+    precedent = await load_same_repo_precedent(session, "mini-123", "acme/api")
+
+    assert precedent is not None
+    assert precedent["cycle_count"] == 2
+    assert precedent["focus_counts"]["tests"] == 1
+    assert precedent["focus_counts"]["rollout"] == 1
+    assert "acme/api" in precedent["detail"]

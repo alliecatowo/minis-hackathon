@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -10,6 +11,18 @@ import httpx
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+_REVIEW_COMMENT_PATTERN = re.compile(
+    r"^-?\s*\*\*(?P<label>[^*]+)\*\*"
+    r"(?:\s+`(?P<issue_key>[a-z0-9][a-z0-9_-]*)`)?"
+    r"\s*:?\s*(?P<content>.+)$",
+    re.IGNORECASE,
+)
+_LABEL_TO_COMMENT_TYPE = {
+    "blocker": ("blocker", "request_changes"),
+    "note": ("note", "comment"),
+    "question": ("question", "comment"),
+    "praise": ("praise", "approve"),
+}
 
 
 def normalize_review_verdict(value: str | None) -> str:
@@ -94,13 +107,50 @@ def _human_review_summary(review: dict[str, Any]) -> str:
     return mapping[verdict]
 
 
+def _extract_structured_review_comments(review: dict[str, Any]) -> list[dict[str, Any]]:
+    body = str(review.get("body") or "").strip()
+    if not body:
+        return []
+
+    comments: list[dict[str, Any]] = []
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        match = _REVIEW_COMMENT_PATTERN.match(line)
+        if not match:
+            continue
+
+        label = match.group("label").strip().lower()
+        issue_key = match.group("issue_key")
+        content = match.group("content").strip()
+        comment_shape = _LABEL_TO_COMMENT_TYPE.get(label)
+        if not issue_key or comment_shape is None:
+            continue
+
+        summary, separator, rationale = content.partition("Why:")
+        comment_type, disposition = comment_shape
+        comments.append(
+            {
+                "type": comment_type,
+                "disposition": disposition,
+                "issue_key": issue_key.lower(),
+                "summary": summary.strip(),
+                "rationale": rationale.strip() if separator else "",
+            }
+        )
+
+    return comments
+
+
 def _human_review_to_review_state(review: dict[str, Any]) -> dict[str, Any]:
     return {
         "private_assessment": _default_private_assessment(),
         "delivery_policy": None,
         "expressed_feedback": {
             "summary": _human_review_summary(review),
-            "comments": [],
+            "comments": _extract_structured_review_comments(review),
             "approval_state": normalize_review_verdict(review.get("state")),
         },
     }

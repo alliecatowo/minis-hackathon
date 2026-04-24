@@ -4,6 +4,11 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.agent import AgentTool, run_agent
+from app.core.review_prediction import (
+    build_review_prediction_v1_with_precedent,
+    load_same_repo_precedent,
+    render_same_repo_precedent_text,
+)
 from app.models.mini import Mini
 from app.models.schemas import (
     ReviewPredictionV1,
@@ -18,15 +23,20 @@ async def predict_review(
     session: AsyncSession,
 ) -> ReviewPredictionV1:
     """Predict a review for a given PR request using an LLM agent."""
+    same_repo_precedent = await load_same_repo_precedent(
+        session,
+        getattr(mini, "id", None),
+        body.repo_name,
+    )
 
     # 1. Build search tools (adapted from chat.py)
     tools = _build_predictor_tools(mini, session)
 
     # 2. Construct the system prompt using the "Three Layer Model"
-    system_prompt = _build_predictor_system_prompt(mini, body)
+    system_prompt = _build_predictor_system_prompt(mini, body, same_repo_precedent)
 
     # 3. Construct the user prompt (the PR detail)
-    user_prompt = _build_predictor_user_prompt(body)
+    user_prompt = _build_predictor_user_prompt(body, same_repo_precedent)
 
     # 4. Run the agent
     # We ask for a structured JSON response
@@ -71,9 +81,8 @@ async def predict_review(
 
     if not result.final_response:
         # Fallback to heuristic-based if agent fails
-        from app.core.review_prediction import build_review_prediction_v1
         logger.warning("Review predictor agent failed to return a response; falling back to heuristic.")
-        return build_review_prediction_v1(mini, body)
+        return await build_review_prediction_v1_with_precedent(mini, body, session)
 
     try:
         # Try to find JSON in the response if there's fluff
@@ -87,8 +96,7 @@ async def predict_review(
             raise ValueError("No JSON found in agent response")
     except Exception as e:
         logger.error("Failed to parse agent review prediction: %s", e)
-        from app.core.review_prediction import build_review_prediction_v1
-        return build_review_prediction_v1(mini, body)
+        return await build_review_prediction_v1_with_precedent(mini, body, session)
 
 def _build_predictor_tools(mini: Mini, session: AsyncSession) -> list[AgentTool]:
     """Build the tools available to the predictor agent."""
@@ -228,7 +236,11 @@ def _build_predictor_tools(mini: Mini, session: AsyncSession) -> list[AgentTool]
         ),
     ]
 
-def _build_predictor_system_prompt(mini: Mini, body: ReviewPredictionRequestV1) -> str:
+def _build_predictor_system_prompt(
+    mini: Mini,
+    body: ReviewPredictionRequestV1,
+    same_repo_precedent: dict | None = None,
+) -> str:
     """Build the system prompt for the review predictor agent."""
     
     # Start with the mini's core identity prompt
@@ -260,14 +272,21 @@ def _build_predictor_system_prompt(mini: Mini, body: ReviewPredictionRequestV1) 
         "3. **ASSESS** the PR privately.\n"
         "4. **DETERMINE** your delivery policy.\n"
         "5. **GENERATE** the expressed feedback.\n"
+        "6. **CALIBRATE** the private assessment and delivery policy with any relevant same-repo review precedent before writing expressed feedback.\n"
     ).format(
         author_model=body.author_model,
         delivery_context=body.delivery_context,
     )
-    
+    precedent_text = render_same_repo_precedent_text(same_repo_precedent)
+    if precedent_text:
+        review_directives += f"\nSame-repo review precedent: {precedent_text}\n"
+
     return base_prompt + review_directives
 
-def _build_predictor_user_prompt(body: ReviewPredictionRequestV1) -> str:
+def _build_predictor_user_prompt(
+    body: ReviewPredictionRequestV1,
+    same_repo_precedent: dict | None = None,
+) -> str:
     """Build the user prompt containing the PR details."""
     parts = ["# PULL REQUEST TO REVIEW\n"]
     if body.repo_name:
@@ -280,6 +299,9 @@ def _build_predictor_user_prompt(body: ReviewPredictionRequestV1) -> str:
         parts.append(f"Changed Files: {', '.join(body.changed_files)}")
     if body.diff_summary:
         parts.append(f"Diff Summary:\n{body.diff_summary}")
+    precedent_text = render_same_repo_precedent_text(same_repo_precedent)
+    if precedent_text:
+        parts.append(f"Same-Repo Precedent:\n{precedent_text}")
         
     parts.append(f"\nAuthor Relationship: {body.author_model}")
     parts.append(f"Delivery Context: {body.delivery_context}")

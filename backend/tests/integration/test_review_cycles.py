@@ -93,11 +93,41 @@ CREATE TABLE IF NOT EXISTS explorer_quotes (
 """
 
 
-def _review_state(summary: str, approval_state: str) -> StructuredReviewState:
+def _issue_comment(
+    issue_key: str,
+    *,
+    comment_type: str,
+    disposition: str,
+    summary: str,
+    rationale: str | None = None,
+) -> dict[str, str]:
+    return {
+        "type": comment_type,
+        "disposition": disposition,
+        "issue_key": issue_key,
+        "summary": summary,
+        "rationale": rationale or f"Tracks {issue_key}.",
+    }
+
+
+def _review_state(
+    summary: str,
+    approval_state: str,
+    *,
+    blocking_issue_keys: list[str] | None = None,
+    comments: list[dict] | None = None,
+) -> StructuredReviewState:
     return StructuredReviewState.model_validate(
         {
             "private_assessment": {
-                "blocking_issues": [{"id": "missing-tests"}],
+                "blocking_issues": [
+                    {
+                        "key": issue_key,
+                        "summary": f"Predicted concern for {issue_key}.",
+                        "rationale": f"Reason about {issue_key}.",
+                    }
+                    for issue_key in (blocking_issue_keys or [])
+                ],
                 "non_blocking_issues": [],
                 "open_questions": [],
                 "positive_signals": [],
@@ -112,7 +142,7 @@ def _review_state(summary: str, approval_state: str) -> StructuredReviewState:
             },
             "expressed_feedback": {
                 "summary": summary,
-                "comments": [{"path": "app.py", "body": summary}],
+                "comments": comments or [],
                 "approval_state": approval_state,
             },
         }
@@ -181,7 +211,19 @@ class TestReviewCyclePersistence:
                 external_id=external_id,
                 source_type="github",
                 metadata_json={"repo_full_name": "acme/widgets", "pr_number": 123},
-                predicted_state=_review_state("Please add tests.", "request_changes"),
+                predicted_state=_review_state(
+                    "Please add tests.",
+                    "request_changes",
+                    blocking_issue_keys=["missing-tests"],
+                    comments=[
+                        _issue_comment(
+                            "missing-tests",
+                            comment_type="blocker",
+                            disposition="request_changes",
+                            summary="Please add tests.",
+                        )
+                    ],
+                ),
             ),
         )
 
@@ -195,7 +237,18 @@ class TestReviewCyclePersistence:
             ReviewCycleOutcomeUpdateRequest(
                 external_id=external_id,
                 source_type="github",
-                human_review_outcome=_review_state("Nit only, otherwise fine.", "comment"),
+                human_review_outcome=_review_state(
+                    "Nit only, otherwise fine.",
+                    "comment",
+                    comments=[
+                        _issue_comment(
+                            "missing-tests",
+                            comment_type="note",
+                            disposition="comment",
+                            summary="Tests can land in a quick follow-up.",
+                        )
+                    ],
+                ),
                 delta_metrics={
                     "github_review_state": "COMMENTED",
                     "github_review_id": 987,
@@ -210,6 +263,22 @@ class TestReviewCyclePersistence:
         assert finalized.delta_metrics["predicted_approval_state"] == "request_changes"
         assert finalized.delta_metrics["actual_approval_state"] == "comment"
         assert finalized.delta_metrics["github_review_id"] == 987
+        assert finalized.delta_metrics["terminal_resolution"] == "downgraded"
+        assert finalized.delta_metrics["issue_outcomes"] == [
+            {
+                "issue_key": "missing-tests",
+                "outcome": "downgraded",
+                "predicted_type": "blocker",
+                "predicted_disposition": "request_changes",
+                "predicted_summary": "Please add tests.",
+                "actual_type": "note",
+                "actual_disposition": "comment",
+                "actual_summary": "Tests can land in a quick follow-up.",
+            }
+        ]
+        assert finalized.delta_metrics["predicted_issue_count"] == 1
+        assert finalized.delta_metrics["matched_issue_count"] == 1
+        assert finalized.delta_metrics["actual_issue_count"] == 1
         assert finalized.human_reviewed_at is not None
 
         count_result = await db.execute(select(func.count()).select_from(ReviewCycle))
@@ -238,7 +307,19 @@ class TestReviewCyclePersistence:
                 external_id=external_id,
                 source_type="github",
                 metadata_json={"repo_full_name": "acme/widgets", "pr_number": 456},
-                predicted_state=_review_state("Block on test gap.", "request_changes"),
+                predicted_state=_review_state(
+                    "Block on test gap.",
+                    "request_changes",
+                    blocking_issue_keys=["missing-tests"],
+                    comments=[
+                        _issue_comment(
+                            "missing-tests",
+                            comment_type="blocker",
+                            disposition="request_changes",
+                            summary="Block on test gap.",
+                        )
+                    ],
+                ),
             ),
         )
 
@@ -248,7 +329,18 @@ class TestReviewCyclePersistence:
             ReviewCycleOutcomeUpdateRequest(
                 external_id=external_id,
                 source_type="github",
-                human_review_outcome=_review_state("Nit only, otherwise fine.", "comment"),
+                human_review_outcome=_review_state(
+                    "Nit only, otherwise fine.",
+                    "comment",
+                    comments=[
+                        _issue_comment(
+                            "missing-tests",
+                            comment_type="note",
+                            disposition="comment",
+                            summary="Coverage can follow after merge.",
+                        )
+                    ],
+                ),
                 delta_metrics={},
             ),
         )
@@ -265,6 +357,8 @@ class TestReviewCyclePersistence:
         assert "predicted approval_state=request_changes" in findings[0].content
         assert "actual approval_state=comment" in findings[0].content
         assert "approval_state_changed=yes" in findings[0].content
+        assert "terminal_resolution=downgraded" in findings[0].content
+        assert "issue_outcomes=missing-tests=downgraded" in findings[0].content
         assert "Nit only, otherwise fine." in findings[0].content
 
         quotes_result = await db.execute(
@@ -289,6 +383,60 @@ class TestReviewCyclePersistence:
         )
 
     @pytest.mark.asyncio
+    async def test_finalize_marks_issue_resolved_before_submit_when_review_approves(self, session):
+        db, mini_id = session
+        external_id = "acme/widgets#457:allie:facefeed"
+
+        await upsert_review_cycle_prediction(
+            db,
+            mini_id,
+            ReviewCyclePredictionUpsertRequest(
+                external_id=external_id,
+                source_type="github",
+                metadata_json={"repo_full_name": "acme/widgets", "pr_number": 457},
+                predicted_state=_review_state(
+                    "Please add tests before merge.",
+                    "request_changes",
+                    blocking_issue_keys=["missing-tests"],
+                    comments=[
+                        _issue_comment(
+                            "missing-tests",
+                            comment_type="blocker",
+                            disposition="request_changes",
+                            summary="Please add tests before merge.",
+                        )
+                    ],
+                ),
+            ),
+        )
+
+        finalized = await finalize_review_cycle(
+            db,
+            mini_id,
+            ReviewCycleOutcomeUpdateRequest(
+                external_id=external_id,
+                source_type="github",
+                human_review_outcome=_review_state("Looks good now.", "approve"),
+                delta_metrics={},
+            ),
+        )
+
+        assert finalized is not None
+        assert finalized.delta_metrics["terminal_resolution"] == "resolved_before_submit"
+        assert finalized.delta_metrics["issue_outcomes"] == [
+            {
+                "issue_key": "missing-tests",
+                "outcome": "resolved_before_submit",
+                "predicted_type": "blocker",
+                "predicted_disposition": "request_changes",
+                "predicted_summary": "Please add tests before merge.",
+                "actual_type": None,
+                "actual_disposition": None,
+                "actual_summary": None,
+            }
+        ]
+
+    @pytest.mark.asyncio
     async def test_finalize_replaces_prior_writeback_for_same_cycle(self, session):
         db, mini_id = session
         external_id = "acme/widgets#789:allie:cafebabe"
@@ -300,7 +448,19 @@ class TestReviewCyclePersistence:
                 external_id=external_id,
                 source_type="github",
                 metadata_json={"repo_full_name": "acme/widgets", "pr_number": 789},
-                predicted_state=_review_state("Still blocked on tests.", "request_changes"),
+                predicted_state=_review_state(
+                    "Still blocked on tests.",
+                    "request_changes",
+                    blocking_issue_keys=["missing-tests"],
+                    comments=[
+                        _issue_comment(
+                            "missing-tests",
+                            comment_type="blocker",
+                            disposition="request_changes",
+                            summary="Still blocked on tests.",
+                        )
+                    ],
+                ),
             ),
         )
 
@@ -310,7 +470,18 @@ class TestReviewCyclePersistence:
             ReviewCycleOutcomeUpdateRequest(
                 external_id=external_id,
                 source_type="github",
-                human_review_outcome=_review_state("Need coverage before merge.", "request_changes"),
+                human_review_outcome=_review_state(
+                    "Need coverage before merge.",
+                    "request_changes",
+                    comments=[
+                        _issue_comment(
+                            "missing-tests",
+                            comment_type="blocker",
+                            disposition="request_changes",
+                            summary="Need coverage before merge.",
+                        )
+                    ],
+                ),
                 delta_metrics={},
             ),
         )
@@ -321,7 +492,10 @@ class TestReviewCyclePersistence:
             ReviewCycleOutcomeUpdateRequest(
                 external_id=external_id,
                 source_type="github",
-                human_review_outcome=_review_state("Actually fine with a follow-up test.", "comment"),
+                human_review_outcome=_review_state(
+                    "Actually fine with a follow-up test.",
+                    "comment",
+                ),
                 delta_metrics={},
             ),
         )
@@ -335,6 +509,7 @@ class TestReviewCyclePersistence:
         findings = findings_result.scalars().all()
         assert len(findings) == 1
         assert "actual approval_state=comment" in findings[0].content
+        assert "terminal_resolution=not_raised" in findings[0].content
         assert "Actually fine with a follow-up test." in findings[0].content
 
         quotes_result = await db.execute(

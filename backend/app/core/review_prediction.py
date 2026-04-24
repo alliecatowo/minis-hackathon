@@ -4,6 +4,10 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.evidence import ReviewCycle
 from app.models.schemas import (
     BehavioralContext,
     MotivationsProfile,
@@ -135,6 +139,14 @@ _RECENCY_HINT_KEYWORDS = {
     "this week",
     "last week",
 }
+_PRECEDENT_THEME_KEYWORDS = {
+    "tests": _TEST_KEYWORDS,
+    "rollout": _ROLLOUT_KEYWORDS | {"rollback", "compatibility", "backward compatibility"},
+    "auth": {"auth", "authorization", "permission", "token", "oauth", "jwt", "security"},
+    "migration": {"migration", "schema", "database", "sql", "contract", "backfill"},
+    "runtime": {"cache", "async", "queue", "worker", "concurrency", "retry", "timeout"},
+    "docs": _DOC_KEYWORDS,
+}
 
 
 def _normalize_text(value: str | None) -> str:
@@ -231,6 +243,152 @@ def _build_request_text(body: ReviewPredictionRequestV1) -> str:
         "\n".join(body.changed_files),
     ]
     return "\n".join(section for section in sections if section)
+
+
+def _normalize_repo_name(repo_name: str | None) -> str:
+    return _normalize_text(repo_name).lower()
+
+
+def _iter_review_items(items: Any) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def _review_state_text(review_state: dict[str, Any] | None) -> str:
+    if not isinstance(review_state, dict):
+        return ""
+
+    parts: list[str] = []
+    private_assessment = review_state.get("private_assessment")
+    if isinstance(private_assessment, dict):
+        for field in (
+            "blocking_issues",
+            "non_blocking_issues",
+            "open_questions",
+            "positive_signals",
+        ):
+            for item in _iter_review_items(private_assessment.get(field)):
+                for key in ("key", "id", "summary", "rationale", "body"):
+                    value = _normalize_text(str(item.get(key, "")))
+                    if value:
+                        parts.append(value)
+
+    expressed_feedback = review_state.get("expressed_feedback")
+    if isinstance(expressed_feedback, dict):
+        summary = _normalize_text(str(expressed_feedback.get("summary", "")))
+        if summary:
+            parts.append(summary)
+        for item in _iter_review_items(expressed_feedback.get("comments")):
+            for key in ("summary", "rationale", "body"):
+                value = _normalize_text(str(item.get(key, "")))
+                if value:
+                    parts.append(value)
+
+    return " ".join(parts).lower()
+
+
+def _extract_approval_state(review_state: dict[str, Any] | None) -> str | None:
+    if not isinstance(review_state, dict):
+        return None
+    expressed_feedback = review_state.get("expressed_feedback")
+    if not isinstance(expressed_feedback, dict):
+        return None
+    approval_state = _normalize_text(str(expressed_feedback.get("approval_state", "")))
+    return approval_state or None
+
+
+def _summarize_same_repo_precedent(
+    repo_name: str,
+    cycles: list[ReviewCycle],
+) -> dict[str, Any] | None:
+    if not cycles:
+        return None
+
+    focus_counts: dict[str, int] = {}
+    approval_counts = {
+        "approve": 0,
+        "comment": 0,
+        "request_changes": 0,
+        "uncertain": 0,
+    }
+
+    for cycle in cycles:
+        human_state = cycle.human_review_outcome if isinstance(cycle.human_review_outcome, dict) else None
+        predicted_state = cycle.predicted_state if isinstance(cycle.predicted_state, dict) else None
+        signal_text = _review_state_text(human_state) or _review_state_text(predicted_state)
+        for theme, keywords in _PRECEDENT_THEME_KEYWORDS.items():
+            if signal_text and _contains_any(signal_text, keywords):
+                focus_counts[theme] = focus_counts.get(theme, 0) + 1
+
+        approval_state = _extract_approval_state(human_state) or _extract_approval_state(predicted_state)
+        if approval_state in approval_counts:
+            approval_counts[approval_state] += 1
+
+    focuses = [
+        theme
+        for theme, _count in sorted(
+            focus_counts.items(),
+            key=lambda item: (item[1], item[0]),
+            reverse=True,
+        )
+    ][:3]
+    dominant_approval = max(
+        approval_counts.items(),
+        key=lambda item: item[1],
+    )[0]
+
+    detail_parts = [f"same-repo precedent for {repo_name}: {len(cycles)} recent review cycles"]
+    if focuses:
+        detail_parts.append(f"recurring focus on {', '.join(focuses)}")
+    if approval_counts[dominant_approval] > 0:
+        detail_parts.append(f"outcomes skewed {dominant_approval}")
+
+    return {
+        "repo_name": repo_name,
+        "cycle_count": len(cycles),
+        "focus_counts": focus_counts,
+        "focuses": focuses,
+        "approval_counts": approval_counts,
+        "detail": "; ".join(detail_parts),
+    }
+
+
+async def load_same_repo_precedent(
+    session: AsyncSession,
+    mini_id: str | None,
+    repo_name: str | None,
+    limit: int = 6,
+) -> dict[str, Any] | None:
+    normalized_repo = _normalize_repo_name(repo_name)
+    if not mini_id or not normalized_repo:
+        return None
+
+    result = await session.execute(
+        select(ReviewCycle)
+        .where(ReviewCycle.mini_id == mini_id)
+        .order_by(ReviewCycle.updated_at.desc(), ReviewCycle.predicted_at.desc())
+        .limit(limit * 4)
+    )
+    cycles = list(result.scalars())
+
+    matched_cycles: list[ReviewCycle] = []
+    for cycle in cycles:
+        metadata = cycle.metadata_json if isinstance(cycle.metadata_json, dict) else {}
+        cycle_repo = _normalize_repo_name(metadata.get("repo_full_name"))
+        if cycle_repo != normalized_repo:
+            continue
+        matched_cycles.append(cycle)
+        if len(matched_cycles) >= limit:
+            break
+
+    return _summarize_same_repo_precedent(repo_name or normalized_repo, matched_cycles)
+
+
+def render_same_repo_precedent_text(same_repo_precedent: dict[str, Any] | None) -> str:
+    if not same_repo_precedent:
+        return ""
+    return _normalize_text(str(same_repo_precedent.get("detail", "")))
 
 
 def _review_entries(behavioral_context: BehavioralContext | None) -> list[dict[str, str]]:
@@ -351,7 +509,11 @@ def _resolve_delivery_context(body: ReviewPredictionRequestV1) -> tuple[str, str
     return "normal", None
 
 
-def _build_evidence_pool(mini: Any, body: ReviewPredictionRequestV1) -> list[ReviewPredictionEvidenceV1]:
+def _build_evidence_pool(
+    mini: Any,
+    body: ReviewPredictionRequestV1,
+    same_repo_precedent: dict[str, Any] | None = None,
+) -> list[ReviewPredictionEvidenceV1]:
     request_text = _build_request_text(body)
     behavioral_context = _parse_behavioral_context(getattr(mini, "behavioral_context_json", None))
     motivations = _parse_motivations(getattr(mini, "motivations_json", None))
@@ -363,6 +525,15 @@ def _build_evidence_pool(mini: Any, body: ReviewPredictionRequestV1) -> list[Rev
             ReviewPredictionEvidenceV1(
                 source="behavioral_context",
                 detail=f'{entry["context"]}: {entry["detail"][:240]}',
+            )
+        )
+
+    precedent_text = render_same_repo_precedent_text(same_repo_precedent)
+    if precedent_text:
+        evidence.append(
+            ReviewPredictionEvidenceV1(
+                source="evidence",
+                detail=precedent_text[:240],
             )
         )
 
@@ -526,6 +697,7 @@ def _derive_delivery_policy(
     mini: Any,
     body: ReviewPredictionRequestV1,
     evidence_pool: list[ReviewPredictionEvidenceV1],
+    same_repo_precedent: dict[str, Any] | None = None,
 ) -> ReviewPredictionDeliveryPolicyV1:
     behavioral_context = _parse_behavioral_context(getattr(mini, "behavioral_context_json", None))
     values = _parse_values(getattr(mini, "values_json", None))
@@ -547,6 +719,11 @@ def _derive_delivery_policy(
 
     score = 1
     rationale_parts: list[str] = []
+    precedent_focuses = set((same_repo_precedent or {}).get("focuses", []))
+    request_change_precedent_count = (
+        (same_repo_precedent or {}).get("approval_counts", {}).get("request_changes", 0)
+    )
+    same_repo_precedent_count = (same_repo_precedent or {}).get("cycle_count", 0)
 
     if inferred_context_rationale:
         rationale_parts.append(inferred_context_rationale)
@@ -580,6 +757,13 @@ def _derive_delivery_policy(
     elif body.author_model == "trusted_peer" and (has_noise_shield_signal or pragmatism >= 7.0):
         score -= 1
         rationale_parts.append("trusted-peer relationship narrows feedback to high-signal issues")
+    if precedent_focuses:
+        rationale_parts.append(
+            f"same-repo review precedent reinforces focus on {', '.join(sorted(precedent_focuses))}"
+        )
+    if same_repo_precedent_count and request_change_precedent_count >= max(2, same_repo_precedent_count // 2):
+        score += 1
+        rationale_parts.append("recent same-repo review cycles often landed as request-changes")
 
     strictness = "medium"
     if score <= 0:
@@ -642,6 +826,7 @@ def _build_private_assessment(
     body: ReviewPredictionRequestV1,
     policy: ReviewPredictionDeliveryPolicyV1,
     evidence_pool: list[ReviewPredictionEvidenceV1],
+    same_repo_precedent: dict[str, Any] | None = None,
 ) -> ReviewPredictionPrivateAssessmentV1:
     request_text = _build_request_text(body)
     request_text_lower = request_text.lower()
@@ -658,6 +843,10 @@ def _build_private_assessment(
     has_migration = _contains_any(request_text_lower, {"migration", "backfill", "alembic"}) or (
         _has_matching_file(body.changed_files, ("migration", "alembic"))
     )
+    precedent_focus_counts = (same_repo_precedent or {}).get("focus_counts", {})
+    precedent_focuses = set((same_repo_precedent or {}).get("focuses", []))
+    precedent_requires_tests = precedent_focus_counts.get("tests", 0) >= 2
+    precedent_requires_rollout = precedent_focus_counts.get("rollout", 0) >= 2
 
     blocking_issues: list[ReviewPredictionSignalV1] = []
     non_blocking_issues: list[ReviewPredictionSignalV1] = []
@@ -717,12 +906,24 @@ def _build_private_assessment(
         )
 
     if risk_keywords_present and not has_tests:
-        target = blocking_issues if policy.strictness == "high" or code_quality >= 7.0 else open_questions
+        target = (
+            blocking_issues
+            if policy.strictness == "high" or code_quality >= 7.0 or precedent_requires_tests
+            else open_questions
+        )
+        rationale = (
+            "Risky behavior changes without explicit tests are a recurring review trigger for quality-focused reviewers."
+        )
+        if precedent_requires_tests:
+            rationale = _append_sentence(
+                rationale,
+                "Recent same-repo review cycles repeatedly centered tests before merge.",
+            )
         target.append(
             _make_signal(
                 key="test-coverage",
                 summary="Would likely ask for stronger test coverage around the risky path.",
-                rationale="Risky behavior changes without explicit tests are a recurring review trigger for quality-focused reviewers.",
+                rationale=rationale,
                 confidence=0.78 if target is blocking_issues else 0.68,
                 evidence_pool=evidence_pool,
                 keywords={"test", "coverage", "review", "quality"},
@@ -741,11 +942,19 @@ def _build_private_assessment(
         )
 
     if risk_keywords_present and not has_rollout and delivery_context != "exploratory":
+        rollout_rationale = (
+            "Risky changes are easier to ship when the blast radius and recovery path are explicit."
+        )
+        if precedent_requires_rollout:
+            rollout_rationale = _append_sentence(
+                rollout_rationale,
+                "Recent same-repo review cycles repeatedly asked for rollout or rollback posture.",
+            )
         open_questions.append(
             _make_signal(
                 key="rollout-safety",
                 summary="Would likely ask about rollout safety, monitoring, or rollback posture.",
-                rationale="Risky changes are easier to ship when the blast radius and recovery path are explicit.",
+                rationale=rollout_rationale,
                 confidence=0.66,
                 evidence_pool=evidence_pool,
                 keywords={"rollback", "metrics", "logging", "flag", "monitor"},
@@ -784,6 +993,17 @@ def _build_private_assessment(
                 confidence=0.61,
                 evidence_pool=evidence_pool,
                 keywords={"docs", "documentation", "readme", "comment"},
+            )
+        )
+    if has_tests and "tests" in precedent_focuses:
+        positive_signals.append(
+            _make_signal(
+                key="repo-precedent-addressed",
+                summary="The change already covers a recurring same-repo review ask.",
+                rationale="Recent same-repo review cycles repeatedly focused on tests, and this change already includes them.",
+                confidence=0.63,
+                evidence_pool=evidence_pool,
+                keywords={"test", "coverage", "review"},
             )
         )
 
@@ -1027,10 +1247,26 @@ def _build_expressed_feedback(
     )
 
 
-def build_review_prediction_v1(mini: Any, body: ReviewPredictionRequestV1) -> ReviewPredictionV1:
-    evidence_pool = _build_evidence_pool(mini, body)
-    policy = _derive_delivery_policy(mini, body, evidence_pool)
-    assessment = _build_private_assessment(mini, body, policy, evidence_pool)
+def build_review_prediction_v1(
+    mini: Any,
+    body: ReviewPredictionRequestV1,
+    *,
+    same_repo_precedent: dict[str, Any] | None = None,
+) -> ReviewPredictionV1:
+    evidence_pool = _build_evidence_pool(mini, body, same_repo_precedent=same_repo_precedent)
+    policy = _derive_delivery_policy(
+        mini,
+        body,
+        evidence_pool,
+        same_repo_precedent=same_repo_precedent,
+    )
+    assessment = _build_private_assessment(
+        mini,
+        body,
+        policy,
+        evidence_pool,
+        same_repo_precedent=same_repo_precedent,
+    )
     expressed_feedback = _build_expressed_feedback(assessment, policy)
 
     return ReviewPredictionV1(
@@ -1039,4 +1275,21 @@ def build_review_prediction_v1(mini: Any, body: ReviewPredictionRequestV1) -> Re
         private_assessment=assessment,
         delivery_policy=policy,
         expressed_feedback=expressed_feedback,
+    )
+
+
+async def build_review_prediction_v1_with_precedent(
+    mini: Any,
+    body: ReviewPredictionRequestV1,
+    session: AsyncSession,
+) -> ReviewPredictionV1:
+    same_repo_precedent = await load_same_repo_precedent(
+        session,
+        getattr(mini, "id", None),
+        body.repo_name,
+    )
+    return build_review_prediction_v1(
+        mini,
+        body,
+        same_repo_precedent=same_repo_precedent,
     )

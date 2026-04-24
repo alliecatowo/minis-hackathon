@@ -394,6 +394,8 @@ class ReviewPrivateAssessment(BaseModel):
     positive_signals: list[Any] = Field(default_factory=list)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
+    model_config = {"extra": "allow"}
+
 
 class ReviewDeliveryPolicy(BaseModel):
     author_model: str | None = None
@@ -402,17 +404,23 @@ class ReviewDeliveryPolicy(BaseModel):
     teaching_mode: bool | None = None
     shield_author_from_noise: bool | None = None
 
+    model_config = {"extra": "allow"}
+
 
 class ReviewExpressedFeedback(BaseModel):
     summary: str = ""
     comments: list[Any] = Field(default_factory=list)
     approval_state: Literal["approve", "comment", "request_changes", "uncertain"] | None = None
 
+    model_config = {"extra": "allow"}
+
 
 class StructuredReviewState(BaseModel):
     private_assessment: ReviewPrivateAssessment
     delivery_policy: ReviewDeliveryPolicy | None = None
     expressed_feedback: ReviewExpressedFeedback
+
+    model_config = {"extra": "allow"}
 
 
 class ReviewCyclePredictionUpsertRequest(BaseModel):

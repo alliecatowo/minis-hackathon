@@ -140,7 +140,11 @@ async def test_record_human_review_outcome_uses_reconciled_review_cycle_endpoint
                 review={
                     "id": 987,
                     "state": "CHANGES_REQUESTED",
-                    "body": "Please separate transport retries from auth retries.",
+                    "body": (
+                        "- **Blocker** `auth-boundary`: Please separate transport retries "
+                        "from auth retries. Why: These failures have different rollback paths.\n"
+                        "- **Note** `retry-coverage`: Add regression coverage for the retry split."
+                    ),
                 },
             )
 
@@ -155,6 +159,22 @@ async def test_record_human_review_outcome_uses_reconciled_review_cycle_endpoint
     assert call["json"]["human_review_outcome"]["expressed_feedback"]["approval_state"] == (
         "request_changes"
     )
+    assert call["json"]["human_review_outcome"]["expressed_feedback"]["comments"] == [
+        {
+            "type": "blocker",
+            "disposition": "request_changes",
+            "issue_key": "auth-boundary",
+            "summary": "Please separate transport retries from auth retries.",
+            "rationale": "These failures have different rollback paths.",
+        },
+        {
+            "type": "note",
+            "disposition": "comment",
+            "issue_key": "retry-coverage",
+            "summary": "Add regression coverage for the retry split.",
+            "rationale": "",
+        },
+    ]
     assert call["json"]["delta_metrics"] == {
         "github_review_action": "submitted",
         "github_review_id": 987,
