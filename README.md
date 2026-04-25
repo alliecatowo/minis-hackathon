@@ -150,6 +150,18 @@ Pass `--context hotfix|normal|exploratory|incident` when the delivery context ma
 
 ## Claude Code Integration
 
+Two plugin modes are available:
+
+```bash
+# Local/demo: generate a repo-grounded mini with no hosted dependency
+/mini-local-demo
+
+# Remote account: use hosted minis through authenticated API/MCP setup
+/mini-remote-account check
+```
+
+See `docs/CLAUDE_CODE_PLUGIN_MODES.md` for setup and smoke tests.
+
 ```bash
 # Chat with a mini
 /mini-chat torvalds "What's your opinion on Rust?"

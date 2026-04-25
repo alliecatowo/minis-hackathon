@@ -1,10 +1,21 @@
 # mini-create-local
 
-Create an AI personality clone ("mini") from a GitHub user locally — no backend server needed.
+Create a local/demo AI personality clone ("mini") from repository context. No hosted Minis backend is required.
 
 ## Overview
 
-Interviews you about the target developer, gathers evidence via `gh` CLI, analyzes patterns, and generates a `.claude/agents/{username}-mini.md` agent definition usable as a Claude Code subagent.
+For the concrete local demo slice, use the repository helper first:
+
+```bash
+python scripts/minis_claude_plugin_modes.py local-demo --force
+```
+
+This gathers local git metadata plus allowlisted repo docs and generates:
+
+- `.claude/agents/<name>-local-mini.md`
+- `.claude/minis/<name>-local-mini.evidence.json`
+
+Use the manual/interview flow below only when the user explicitly wants to clone someone else from public GitHub data with `gh`.
 
 ## Phase 1: Interview
 
@@ -78,5 +89,8 @@ When asked to review code or give opinions, first gather relevant context:
 ## Usage
 
 ```
+/mini-local-demo [display_name]
 /mini-create-local <github_username>
 ```
+
+If the user asks for hosted account evidence, private review history, or account minis, stop local mode and direct them to `/mini-remote-account`. Do not synthesize fake hosted evidence.

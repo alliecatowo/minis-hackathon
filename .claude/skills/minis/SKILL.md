@@ -74,6 +74,33 @@ SSE stream of pipeline progress events during mini creation.
 GET http://localhost:8000/api/health
 ```
 
+## Plugin Modes
+
+### Local/demo mode
+
+Use local/demo mode when the user wants to make their own mini from the current repository without hosted Minis:
+
+```bash
+python scripts/minis_claude_plugin_modes.py local-demo --force
+```
+
+Claude Code command: `/mini-local-demo [display_name]`
+
+This mode is grounded only in local git metadata and allowlisted repository docs. It must not claim hosted account evidence or private review history.
+
+### Remote account mode
+
+Use remote account mode when the user wants minis from their hosted account via API or MCP auth:
+
+```bash
+python scripts/minis_claude_plugin_modes.py remote-check --json
+python scripts/minis_claude_plugin_modes.py remote-list
+```
+
+Claude Code command: `/mini-remote-account <check|list|chat|review> [...]`
+
+Remote account mode requires `MINIS_TOKEN` or `MINIS_AUTH_TOKEN`. If auth is missing, stop with setup instructions; do not fall back to public minis or local demo mode.
+
 ## Working with Minis
 
 ### Fetching Mini Personality
