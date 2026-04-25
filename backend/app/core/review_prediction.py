@@ -15,10 +15,13 @@ from app.models.schemas import (
     BehavioralContext,
     MotivationsProfile,
     ReviewPredictionFrameworkSignalV1,
+    ReviewFrameworkConflictDecisionV1,
+    ReviewFrameworkConflictResolutionV1,
     ReviewPredictionCommentV1,
     ReviewPredictionDeliveryPolicyV1,
     ReviewPredictionEvidenceV1,
     ReviewPredictionExpressedFeedbackV1,
+    ReviewFrameworkTemporalBalanceV1,
     ReviewPredictionPrivateAssessmentV1,
     ReviewPredictionRequestV1,
     ReviewPredictionSignalV1,
@@ -196,6 +199,63 @@ _FRAMEWORK_SIGNAL_STOPWORDS = {
     "should",
     "would",
 }
+_FRAMEWORK_ARCHITECTURE_TERMS = {
+    "architecture",
+    "architectural",
+    "abstraction",
+    "boundary",
+    "boundaries",
+    "contract",
+    "correctness",
+    "durable",
+    "long-term",
+    "migration",
+    "schema",
+    "interface",
+    "api",
+    "seam",
+}
+_FRAMEWORK_SHIPPING_TERMS = {
+    "ship",
+    "shipping",
+    "speed",
+    "velocity",
+    "hotfix",
+    "incident",
+    "patch",
+    "restore",
+    "mitigate",
+    "mitigation",
+    "quick",
+    "quickly",
+    "pragmatic",
+    "pragmatism",
+}
+_FRAMEWORK_MENTORSHIP_TERMS = {
+    "mentor",
+    "mentorship",
+    "teach",
+    "teaching",
+    "coach",
+    "coaching",
+    "guide",
+    "guidance",
+    "junior",
+}
+_FRAMEWORK_LOCAL_NORM_TERMS = {
+    "repo",
+    "local",
+    "precedent",
+    "pattern",
+    "existing",
+    "convention",
+    "norm",
+}
+_TEMPORAL_STABILITY_WINDOW_SHORT_DAYS = 365
+_TEMPORAL_STABILITY_WINDOW_LONG_DAYS = 730
+_TEMPORAL_DURABILITY_SHORT_BONUS = 0.10
+_TEMPORAL_DURABILITY_LONG_BONUS = 0.20
+_SCOPE_LOCAL_BOOST = 0.15
 
 
 def _normalize_text(value: str | None) -> str:
@@ -243,6 +303,20 @@ def _string_list(raw: Any) -> list[str]:
     return out
 
 
+def _dedupe(values: Any) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        value = item.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
 def _coerce_confidence(raw: Any, default: float = 0.5) -> float:
     try:
         value = float(raw)
@@ -260,6 +334,65 @@ def _coerce_int(raw: Any, default: int = 0) -> int:
         return int(raw)
     except (TypeError, ValueError):
         return default
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    cleaned = value.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(cleaned)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
+
+
+def _temporal_stability_bonus(raw_framework: dict[str, Any]) -> float:
+    temporal_span = raw_framework.get("temporal_span")
+    if not isinstance(temporal_span, dict):
+        return 0.0
+
+    source_dates = temporal_span.get("source_dates")
+    if not isinstance(source_dates, list) or len(source_dates) < 2:
+        return 0.0
+
+    parsed_dates = [
+        value
+        for value in (_parse_iso_datetime(raw_date) for raw_date in source_dates if isinstance(raw_date, str))
+        if value is not None
+    ]
+    if len(parsed_dates) < 2:
+        return 0.0
+
+    span_days = (max(parsed_dates) - min(parsed_dates)).days
+    if span_days >= _TEMPORAL_STABILITY_WINDOW_LONG_DAYS:
+        return _TEMPORAL_DURABILITY_LONG_BONUS
+    if span_days >= _TEMPORAL_STABILITY_WINDOW_SHORT_DAYS:
+        return _TEMPORAL_DURABILITY_SHORT_BONUS
+    return 0.0
+
+
+def _coerce_scope_tokens(value: Any) -> set[str]:
+    if not value:
+        return set()
+    tokens = {token for token in _tokenize(str(value))}
+    return {token for token in tokens if len(token) > 2}
+
+
+def _request_scope_tokens(body: ArtifactReviewRequestBaseV1) -> set[str]:
+    tokens = _coerce_scope_tokens(body.repo_name)
+    for changed_file in body.changed_files:
+        tokens.update(_coerce_scope_tokens(changed_file))
+    return tokens
+
+
+def _framework_scope_match(raw_framework: dict[str, Any], scope_tokens: set[str]) -> bool:
+    if not scope_tokens:
+        return False
+    framework_tokens = _tokenise_text(_framework_signal_text(raw_framework))
+    return bool(framework_tokens.intersection(scope_tokens))
 
 
 def _tokenise_text(value: str | None) -> set[str]:
@@ -321,20 +454,92 @@ def _cohere_framework_signal_reason(
     return "This high-confidence framework is one of the top learned rules in this mini."
 
 
+def _build_visible_framework_signals(
+    ordered: list[tuple[int, float, int, float, float, ReviewPredictionFrameworkSignalV1]],
+    limit: int,
+) -> list[tuple[int, float, int, float, float, ReviewPredictionFrameworkSignalV1]]:
+    if not ordered or limit <= 0:
+        return []
+
+    selected = ordered[: min(limit, len(ordered))]
+
+    # If a stable framework is already visible in the top-N, keep the normal order.
+    if any(item[3] > 0.0 for item in selected):
+        return selected
+
+    # Otherwise ensure at least one durable framework remains visible by replacing the
+    # lowest-ranked local signal with the best durable candidate.
+    durable_candidates = [item for item in ordered if item[3] > 0.0]
+    if not durable_candidates:
+        return selected
+
+    durable_best = durable_candidates[0]
+    if durable_best in selected:
+        return selected
+    selected[-1] = durable_best
+    return selected
+
+
+def _build_temporal_balance_metadata(
+    ordered: list[tuple[int, float, int, float, float, ReviewPredictionFrameworkSignalV1]],
+    visible: list[tuple[int, float, int, float, float, ReviewPredictionFrameworkSignalV1]],
+    limit: int,
+) -> ReviewFrameworkTemporalBalanceV1 | None:
+    if not ordered or limit <= 0:
+        return None
+
+    baseline = ordered[: min(limit, len(ordered))]
+    baseline_ids = {entry[5].framework_id for entry in baseline}
+    visible_ids = {entry[5].framework_id for entry in visible}
+    stable_ids = {entry[5].framework_id for entry in ordered if entry[3] > 0.0}
+    local_ids = {
+        entry[5].framework_id for entry in ordered if entry[4] > 0.0 and entry[0] > 0
+    }
+
+    visible_stable = sorted(stable_ids.intersection(visible_ids))
+    visible_local = sorted(local_ids.intersection(visible_ids))
+    if not visible_stable and not visible_local:
+        return None
+
+    rationale = "temporal-balance routing applied"
+    if stable_ids and not (stable_ids.intersection(baseline_ids)):
+        rationale = "durable framework preserved despite local bias"
+    elif stable_ids and visible_stable == stable_ids.intersection(visible_ids):
+        rationale = "durable and local signals co-exist in visible set"
+
+    confidence = 0.85 if visible_stable and stable_ids else 0.0
+    if baseline_ids == visible_ids:
+        confidence = min(0.95, 0.75 + (0.15 if visible_stable else 0.0))
+
+    return ReviewFrameworkTemporalBalanceV1(
+        visible_stable_framework_ids=visible_stable,
+        visible_project_preference_ids=visible_local,
+        stable_frameworks_preserved=bool(stable_ids.intersection(visible_ids)),
+        rationale=rationale,
+        confidence=confidence,
+    )
+
+
 def _build_framework_signals(
     mini: Any,
     body: ArtifactReviewRequestBaseV1,
-) -> list[ReviewPredictionFrameworkSignalV1]:
+) -> tuple[
+    list[ReviewPredictionFrameworkSignalV1],
+    ReviewFrameworkTemporalBalanceV1 | None,
+]:
     request_text = _build_request_text(body)
     request_tokens = _tokenise_text(request_text)
     if not request_tokens:
         request_tokens = set()
+    scope_tokens = _request_scope_tokens(body)
 
     frameworks = _extract_decision_frameworks(getattr(mini, "principles_json", None))
     if not frameworks:
-        return []
+        return [], None
 
-    scored: list[tuple[int, float, int, ReviewPredictionFrameworkSignalV1]] = []
+    scored: list[
+        tuple[int, float, int, float, float, ReviewPredictionFrameworkSignalV1]
+    ] = []
     fallback: list[tuple[float, int, ReviewPredictionFrameworkSignalV1]] = []
     for raw in frameworks:
         framework_id = str(raw.get("framework_id", "")).strip()
@@ -346,6 +551,12 @@ def _build_framework_signals(
         matched_count = len(matched_terms)
 
         confidence = _coerce_confidence(raw.get("confidence"), default=0.5)
+        stability_bonus = _temporal_stability_bonus(raw)
+        scope_boost = 0.0
+        if matched_count > 0 and _framework_scope_match(raw, scope_tokens):
+            if raw.get("specificity_level") == "scope_local":
+                scope_boost = _SCOPE_LOCAL_BOOST
+        adjusted_confidence = min(1.0, confidence + stability_bonus + scope_boost)
         raw_revision = raw.get("revision")
         revision_count = _coerce_int(raw_revision, default=0)
         revision = revision_count if raw_revision is not None else None
@@ -382,39 +593,50 @@ def _build_framework_signals(
             name=name,
             summary=summary[:240],
             reason=reason,
-            confidence=confidence,
+            confidence=adjusted_confidence,
             revision=revision,
             revision_count=revision_count,
             evidence_ids=evidence_ids,
             evidence_provenance=evidence_provenance,
             provenance_ids=provenance_ids,
+            temporal_stability_bonus=stability_bonus,
+            scope_match_boost=scope_boost,
         )
 
-        scored.append((matched_count, confidence, revision_count, framework_signal))
+        scored.append(
+            (matched_count, adjusted_confidence, revision_count, stability_bonus, scope_boost, framework_signal)
+        )
         if matched_count == 0:
-            fallback.append((confidence, revision_count, framework_signal))
+            fallback.append((adjusted_confidence, revision_count, framework_signal))
 
     matched = [entry for entry in scored if entry[0] > 0]
     ranked_fallback = sorted(fallback, key=lambda item: (item[0], item[1]), reverse=True)
 
     ordered = sorted(
         matched,
-        key=lambda item: (item[0], item[1], item[2]),
+        key=lambda item: (item[0], item[1], item[2], item[3], item[4]),
         reverse=True,
     )
     if ordered:
-        return [entry[3] for entry in ordered[:_FRAMEWORK_SIGNAL_COUNT]]
+        visible = _build_visible_framework_signals(ordered, _FRAMEWORK_SIGNAL_COUNT)
+        balance = _build_temporal_balance_metadata(
+            ordered=ordered,
+            visible=visible,
+            limit=_FRAMEWORK_SIGNAL_COUNT,
+        )
+        return [entry[5] for entry in visible], balance
 
     ordered_fallback = sorted(
         ranked_fallback,
         key=lambda item: (item[0], item[1]),
         reverse=True,
     )
-    return [
+    fallback_signals = [
         entry[2]
         for entry in ordered_fallback
         if entry[0] >= 0.7 or entry[1] >= 1
     ][:_FRAMEWORK_SIGNAL_COUNT]
+    return fallback_signals, None
 
 def _engineering_value(values: dict[str, Any], name: str) -> float:
     engineering_values = values.get("engineering_values", [])
@@ -1639,7 +1861,7 @@ def _build_artifact_review_fields(
         evidence_pool,
         same_repo_precedent=same_repo_precedent,
     )
-    framework_signals = _build_framework_signals(mini, body)
+    framework_signals, temporal_balance = _build_framework_signals(mini, body)
     assessment = _build_private_assessment(
         mini,
         body,
@@ -1657,6 +1879,7 @@ def _build_artifact_review_fields(
             title=body.title,
         ),
         "framework_signals": framework_signals,
+        "framework_temporal_balance": temporal_balance,
         "private_assessment": assessment,
         "delivery_policy": policy,
         "expressed_feedback": expressed_feedback,

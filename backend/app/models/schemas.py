@@ -294,6 +294,32 @@ class ReviewPredictionFrameworkSignalV1(BaseModel):
         default_factory=list
     )
     provenance_ids: list[str] = Field(default_factory=list)
+    temporal_stability_bonus: float = Field(default=0.0, ge=0.0, le=1.0)
+    scope_match_boost: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class ReviewFrameworkTemporalBalanceV1(BaseModel):
+    visible_stable_framework_ids: list[str] = Field(default_factory=list)
+    visible_project_preference_ids: list[str] = Field(default_factory=list)
+    stable_frameworks_preserved: bool = False
+    rationale: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class ReviewFrameworkConflictDecisionV1(BaseModel):
+    framework_id: str
+    disposition: Literal["win", "defer", "suppress"]
+
+
+class ReviewFrameworkConflictResolutionV1(BaseModel):
+    winning_framework_ids: list[str] = Field(default_factory=list)
+    deferred_framework_ids: list[str] = Field(default_factory=list)
+    suppressed_framework_ids: list[str] = Field(default_factory=list)
+    tradeoff_rationale: str = ""
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    evidence_ids: list[str] = Field(default_factory=list)
+    provenance_ids: list[str] = Field(default_factory=list)
+    decisions: list[ReviewFrameworkConflictDecisionV1] = Field(default_factory=list)
 
 
 class ReviewPredictionSignalV1(BaseModel):
@@ -365,11 +391,13 @@ class ArtifactReviewV1(BaseModel):
     private_assessment: ReviewPredictionPrivateAssessmentV1
     delivery_policy: ReviewPredictionDeliveryPolicyV1
     expressed_feedback: ReviewPredictionExpressedFeedbackV1
+    framework_temporal_balance: ReviewFrameworkTemporalBalanceV1 | None = None
 
 
 class ReviewPredictionV1(ArtifactReviewV1):
     version: Literal["review_prediction_v1"] = "review_prediction_v1"
     framework_signals: list[ReviewPredictionFrameworkSignalV1] = Field(default_factory=list)
+    framework_conflict_resolution: ReviewFrameworkConflictResolutionV1 | None = None
 
 
 ReviewArtifactSummaryV1 = ArtifactSummaryV1

@@ -149,6 +149,76 @@ def _decision_framework_payload() -> dict[str, Any]:
     }
 
 
+def _temporal_balance_payload() -> dict[str, Any]:
+    local_frameworks = []
+    for index in range(5):
+        local_frameworks.append(
+            {
+                "framework_id": f"fw-local-{index}",
+                "name": f"Project scoped preference {index}",
+                "condition": "Changes to auth flow in backend/app should move quickly",
+                "priority": "medium",
+                "tradeoff": "speed vs strict global controls",
+                "escalation_threshold": "medium",
+                "counterexamples": [],
+                "evidence_ids": [f"ev-local-{index}"],
+                "evidence_provenance": [],
+                "counter_evidence_ids": [],
+                "confidence": 0.95,
+                "specificity_level": "scope_local",
+                "value_ids": ["velocity"],
+                "motivation_ids": ["pragmatism"],
+                "decision_order": ["if local request changes", "prefer project-specific pattern"],
+                "revision": 2,
+            }
+        )
+
+    return {
+        "decision_frameworks": {
+            "version": "decision_frameworks_v1",
+            "source": "principles_motivations_normalizer",
+            "frameworks": [
+                {
+                    "framework_id": "fw-stable-global",
+                    "name": "Durable reliability boundary",
+                    "condition": "API boundary and rollout protections should remain stable over time",
+                    "priority": "critical",
+                    "tradeoff": "durability vs local drift",
+                    "escalation_threshold": "high",
+                    "counterexamples": [],
+                    "evidence_ids": ["ev-stable-1"],
+                    "evidence_provenance": [
+                        {
+                            "id": "prov-stable-1",
+                            "source_type": "review",
+                            "item_type": "comment",
+                        }
+                    ],
+                    "counter_evidence_ids": [],
+                    "confidence": 0.72,
+                    "specificity_level": "global",
+                    "temporal_span": {
+                        "first_seen_at": "2021-03-01T00:00:00Z",
+                        "last_reinforced_at": "2024-08-01T00:00:00Z",
+                        "source_dates": [
+                            "2021-03-01T00:00:00Z",
+                            "2024-08-01T00:00:00Z",
+                        ],
+                    },
+                    "value_ids": ["reliability"],
+                    "motivation_ids": ["craftsmanship"],
+                    "decision_order": [
+                        "if API boundary changes",
+                        "preserve rollback and test requirements",
+                    ],
+                    "revision": 8,
+                },
+                *local_frameworks,
+            ],
+        }
+    }
+
+
 def test_review_prediction_request_requires_some_change_input():
     with pytest.raises(ValidationError):
         ReviewPredictionRequestV1()
@@ -217,6 +287,37 @@ def test_build_review_prediction_includes_framework_signals_from_decision_framew
     assert signal.revision == 3
     assert signal.evidence_ids == ["ev-framework-tests-1"]
     assert any(item.id == "prov-tests-1" for item in signal.evidence_provenance)
+
+
+def test_temporal_balance_prefers_local_scope_but_keeps_stable_framework_visible():
+    mini = _mini(principles_json=_temporal_balance_payload())
+    body = ReviewPredictionRequestV1(
+        title="Refactor auth request handling",
+        description=(
+            "Updated auth flow in backend/app/auth.py with a temporary bypass in this repo."
+        ),
+        changed_files=["backend/app/auth.py", "backend/app/session.py"],
+        author_model="senior_peer",
+        delivery_context="normal",
+    )
+
+    prediction = build_review_prediction_v1(mini, body)
+
+    assert len(prediction.framework_signals) == 5
+    signal_ids = [signal.framework_id for signal in prediction.framework_signals]
+    assert "fw-stable-global" in signal_ids
+    assert signal_ids[0].startswith("fw-local-")
+    assert any(
+        signal.framework_id in {f"fw-local-{idx}" for idx in range(5)}
+        and signal.scope_match_boost > 0
+        for signal in prediction.framework_signals
+    )
+    assert any(signal.framework_id == "fw-stable-global" for signal in prediction.framework_signals)
+
+    balance = prediction.framework_temporal_balance
+    assert balance is not None
+    assert balance.stable_frameworks_preserved is True
+    assert "fw-stable-global" in balance.visible_stable_framework_ids
 
 
 def test_design_doc_artifact_review_uses_generic_signoff_language():
