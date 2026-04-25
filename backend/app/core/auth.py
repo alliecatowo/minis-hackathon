@@ -1,5 +1,7 @@
 import logging
 import secrets
+import time
+from datetime import timedelta
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -14,6 +16,19 @@ from app.models.user import User
 ALGORITHM = "HS256"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
+
+
+def issue_service_jwt(user_id: str, *, expires_delta: timedelta | None = None) -> str:
+    """Issue a user-scoped service JWT accepted by backend auth dependencies."""
+    now = int(time.time())
+    expires_in = int((expires_delta or timedelta(days=30)).total_seconds())
+    payload = {
+        "sub": user_id,
+        "iss": "minis-bff",
+        "iat": now,
+        "exp": now + expires_in,
+    }
+    return jwt.encode(payload, settings.service_jwt_secret, algorithm=ALGORITHM)
 
 
 def _validate_service_jwt(token: str) -> str | None:
