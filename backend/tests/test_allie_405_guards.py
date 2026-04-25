@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -133,6 +133,73 @@ class TestLLMKillSwitch:
         for val in ("", "false", "0", "no"):
             s = Settings(disable_llm_calls=val)
             assert s.llm_disabled is False, f"Expected False for {val!r}"
+
+
+class TestLLMUsageLimits:
+    @pytest.mark.asyncio
+    async def test_run_agent_applies_explicit_token_caps(self):
+        """run_agent forwards per-call token caps to PydanticAI UsageLimits."""
+        from app.core import agent as agent_module
+        from app.core.agent import run_agent
+
+        mock_result = MagicMock()
+        mock_result.output = "ok"
+        mock_result.usage.return_value = SimpleNamespace(
+            requests=1,
+            request_tokens=10,
+            response_tokens=5,
+        )
+        mock_agent = MagicMock()
+        mock_agent.run = AsyncMock(return_value=mock_result)
+        mock_agent_class = MagicMock(return_value=mock_agent)
+
+        with patch.object(agent_module, "Agent", mock_agent_class):
+            await run_agent(
+                system_prompt="Return ok.",
+                user_prompt="ok",
+                tools=[],
+                max_turns=2,
+                max_input_tokens=123,
+                max_output_tokens=45,
+                max_total_tokens=160,
+            )
+
+        _, kwargs = mock_agent.run.call_args
+        limits = kwargs["usage_limits"]
+        assert limits.request_limit == 2
+        assert limits.input_tokens_limit == 123
+        assert limits.output_tokens_limit == 45
+        assert limits.total_tokens_limit == 160
+
+    @pytest.mark.asyncio
+    async def test_run_agent_applies_env_token_caps(self, monkeypatch):
+        """Env caps let CI bound live LLM tests without changing call sites."""
+        from app.core import agent as agent_module
+        from app.core.agent import run_agent
+
+        monkeypatch.setenv("LLM_REQUEST_TOKEN_LIMIT", "100")
+        monkeypatch.setenv("LLM_RESPONSE_TOKEN_LIMIT", "50")
+        monkeypatch.setenv("LLM_TOTAL_TOKEN_LIMIT", "125")
+
+        mock_result = MagicMock()
+        mock_result.output = "ok"
+        mock_result.usage.return_value = SimpleNamespace(
+            requests=1,
+            request_tokens=10,
+            response_tokens=5,
+        )
+        mock_agent = MagicMock()
+        mock_agent.run = AsyncMock(return_value=mock_result)
+        mock_agent_class = MagicMock(return_value=mock_agent)
+
+        with patch.object(agent_module, "Agent", mock_agent_class):
+            await run_agent(system_prompt="Return ok.", user_prompt="ok", tools=[])
+
+        _, kwargs = mock_agent.run.call_args
+        limits = kwargs["usage_limits"]
+        assert limits.input_tokens_limit == 100
+        assert limits.output_tokens_limit == 50
+        assert limits.total_tokens_limit == 125
 
 
 # ---------------------------------------------------------------------------

@@ -49,6 +49,24 @@ The script writes two files side-by-side:
 
 Exit code `2` means a regression > 0.3 overall average points was detected when `--prior` is provided.
 
+## Live Review Predictor Contract
+
+`backend/tests/test_live_review_predictor_contract.py` is a gated live LLM contract for the review predictor no-fallback path. It is skipped unless explicitly enabled and a provider key is present:
+
+```bash
+cd backend
+RUN_LIVE_LLM_CONTRACT_TESTS=true \
+DEFAULT_PROVIDER=gemini \
+GEMINI_API_KEY=... \
+REVIEW_PREDICTOR_LLM_MAX_TURNS=2 \
+REVIEW_PREDICTOR_LLM_REQUEST_TOKEN_LIMIT=12000 \
+REVIEW_PREDICTOR_LLM_RESPONSE_TOKEN_LIMIT=2048 \
+REVIEW_PREDICTOR_LLM_TOTAL_TOKEN_LIMIT=14000 \
+uv run pytest tests/test_live_review_predictor_contract.py -m live_llm -vv -rs
+```
+
+Without `RUN_LIVE_LLM_CONTRACT_TESTS=true`, pytest reports the skip reason. With the gate enabled, the contract accepts either a valid `review_prediction_v1` artifact from the real LLM path or an explicit `mode="gated"` unavailable artifact. It rejects the deterministic `local_smoke` fallback path.
+
 ## Required secrets (CI)
 
 Configure these in **Settings → Secrets and variables → Actions**:
@@ -61,6 +79,8 @@ Configure these in **Settings → Secrets and variables → Actions**:
 | `FLY_EVAL_URL` | Hosted backend URL; skips local backend startup | Optional |
 
 `GITHUB_TOKEN` is injected automatically by Actions and needs no manual configuration.
+
+The separate `Live LLM Contract` workflow is manual by default. Nightly runs require `ENABLE_NIGHTLY_LIVE_LLM_CONTRACTS=true` as an Actions variable plus one provider key (`GEMINI_API_KEY` or `GOOGLE_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`). The workflow prints gate diagnostics before running pytest and applies the same small predictor token caps shown above.
 
 ## Baseline caching strategy
 

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +37,18 @@ def _availability_contract_error(data: dict) -> str | None:
     if data.get("unavailable_reason") is not None:
         return "LLM review predictor returned unavailable_reason for available output"
     return None
+
+
+def _positive_env_int(name: str) -> int | None:
+    value = os.environ.get(name)
+    if value is None or value.strip() == "":
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        logger.warning("Ignoring invalid integer env var %s=%r", name, value)
+        return None
+    return parsed if parsed > 0 else None
 
 
 async def _predict_artifact_review(
@@ -126,7 +139,10 @@ async def _predict_artifact_review(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         tools=tools,
-        max_turns=10,
+        max_turns=_positive_env_int("REVIEW_PREDICTOR_LLM_MAX_TURNS") or 10,
+        max_input_tokens=_positive_env_int("REVIEW_PREDICTOR_LLM_REQUEST_TOKEN_LIMIT"),
+        max_output_tokens=_positive_env_int("REVIEW_PREDICTOR_LLM_RESPONSE_TOKEN_LIMIT"),
+        max_total_tokens=_positive_env_int("REVIEW_PREDICTOR_LLM_TOTAL_TOKEN_LIMIT"),
     )
 
     if not result.final_response:

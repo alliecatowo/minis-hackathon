@@ -37,6 +37,7 @@ dev = [
 markers = [
     "integration: marks tests as integration tests (require DB)",
     "e2e: marks tests as end-to-end tests (require running server)",
+    "live_llm: marks tests as live LLM contract tests (require explicit env and secrets)",
 ]
 
 [tool.ruff]

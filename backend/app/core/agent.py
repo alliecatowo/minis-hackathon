@@ -173,6 +173,36 @@ def _build_agent(
     return agent
 
 
+def _env_int(name: str) -> int | None:
+    value = os.environ.get(name)
+    if value is None or value.strip() == "":
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        logger.warning("Ignoring invalid integer env var %s=%r", name, value)
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _build_usage_limits(
+    *,
+    max_turns: int,
+    max_input_tokens: int | None = None,
+    max_output_tokens: int | None = None,
+    max_total_tokens: int | None = None,
+):
+    """Build PydanticAI usage limits with env-backed token caps."""
+    from pydantic_ai.usage import UsageLimits
+
+    return UsageLimits(
+        request_limit=max_turns,
+        input_tokens_limit=max_input_tokens or _env_int("LLM_REQUEST_TOKEN_LIMIT"),
+        output_tokens_limit=max_output_tokens or _env_int("LLM_RESPONSE_TOKEN_LIMIT"),
+        total_tokens_limit=max_total_tokens or _env_int("LLM_TOTAL_TOKEN_LIMIT"),
+    )
+
+
 async def run_agent(
     system_prompt: str,
     user_prompt: str,
@@ -181,6 +211,9 @@ async def run_agent(
     max_turns: int = 20,
     model: str | None = None,
     api_key: str | None = None,
+    max_input_tokens: int | None = None,
+    max_output_tokens: int | None = None,
+    max_total_tokens: int | None = None,
 ) -> AgentResult:
     """Run an agent loop using PydanticAI.
 
@@ -249,7 +282,12 @@ async def run_agent(
     try:
         result = await agent.run(
             user_prompt,
-            usage_limits=__import__("pydantic_ai.usage").usage.UsageLimits(request_limit=max_turns)
+            usage_limits=_build_usage_limits(
+                max_turns=max_turns,
+                max_input_tokens=max_input_tokens,
+                max_output_tokens=max_output_tokens,
+                max_total_tokens=max_total_tokens,
+            )
         )
         usage = result.usage()
         return AgentResult(
@@ -282,7 +320,9 @@ async def run_agent_streaming(
     max_turns: int = 20,
     model: str | None = None,
     api_key: str | None = None,
+    max_input_tokens: int | None = None,
     max_output_tokens: int | None = None,
+    max_total_tokens: int | None = None,
     tool_choice_strategy: str = "auto_after_first",
     finish_tool_name: str | None = "finish",
 ) -> AsyncGenerator[AgentEvent, None]:
@@ -363,7 +403,12 @@ async def run_agent_streaming(
         async for event in agent.run_stream_events(
             user_prompt,
             message_history=message_history,
-            usage_limits=__import__("pydantic_ai.usage").usage.UsageLimits(request_limit=max_turns)
+            usage_limits=_build_usage_limits(
+                max_turns=max_turns,
+                max_input_tokens=max_input_tokens,
+                max_output_tokens=max_output_tokens,
+                max_total_tokens=max_total_tokens,
+            )
         ):
             if isinstance(event, AgentRunResultEvent):
                 # Final result — we already streamed the text via deltas

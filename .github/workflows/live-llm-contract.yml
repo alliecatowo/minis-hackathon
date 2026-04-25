@@ -1,0 +1,82 @@
+name: Live LLM Contract
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_live_llm:
+        description: "Run live LLM contract tests and spend provider credits"
+        required: true
+        type: boolean
+        default: false
+      provider:
+        description: "Provider for DEFAULT_PROVIDER"
+        required: true
+        type: choice
+        default: gemini
+        options:
+          - gemini
+          - openai
+          - anthropic
+  schedule:
+    - cron: "20 10 * * *"
+
+jobs:
+  review-predictor:
+    name: Review Predictor Live Contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' && vars.ENABLE_NIGHTLY_LIVE_LLM_CONTRACTS == 'true')
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DEFAULT_PROVIDER: ${{ github.event.inputs.provider || vars.LIVE_LLM_CONTRACT_PROVIDER || 'gemini' }}
+      RUN_LIVE_LLM_CONTRACT_TESTS: ${{ github.event.inputs.run_live_llm || vars.ENABLE_NIGHTLY_LIVE_LLM_CONTRACTS || 'false' }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      REVIEW_PREDICTOR_LLM_MAX_TURNS: "2"
+      REVIEW_PREDICTOR_LLM_REQUEST_TOKEN_LIMIT: "12000"
+      REVIEW_PREDICTOR_LLM_RESPONSE_TOKEN_LIMIT: "2048"
+      REVIEW_PREDICTOR_LLM_TOTAL_TOKEN_LIMIT: "14000"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install backend dependencies
+        run: uv sync
+
+      - name: Show gate diagnostics
+        run: |
+          echo "event=${GITHUB_EVENT_NAME}"
+          echo "DEFAULT_PROVIDER=${DEFAULT_PROVIDER}"
+          echo "RUN_LIVE_LLM_CONTRACT_TESTS=${RUN_LIVE_LLM_CONTRACT_TESTS}"
+          case "${DEFAULT_PROVIDER}" in
+            openai)
+              [ -n "${OPENAI_API_KEY}" ] && echo "secret_status=present" || echo "secret_status=missing OPENAI_API_KEY"
+              ;;
+            anthropic)
+              [ -n "${ANTHROPIC_API_KEY}" ] && echo "secret_status=present" || echo "secret_status=missing ANTHROPIC_API_KEY"
+              ;;
+            *)
+              if [ -n "${GOOGLE_API_KEY}${GEMINI_API_KEY}" ]; then
+                echo "secret_status=present"
+              else
+                echo "secret_status=missing GOOGLE_API_KEY or GEMINI_API_KEY"
+              fi
+              ;;
+          esac
+
+      - name: Run live review predictor contract
+        run: uv run pytest tests/test_live_review_predictor_contract.py -m live_llm -vv -rs --tb=short
