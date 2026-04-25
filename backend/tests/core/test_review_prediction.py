@@ -148,6 +148,7 @@ def _decision_framework_payload() -> dict[str, Any]:
         }
     }
 
+
 def _conflicting_framework_payload() -> dict[str, Any]:
     return {
         "decision_frameworks": {
@@ -202,6 +203,87 @@ def _conflicting_framework_payload() -> dict[str, Any]:
                     "decision_order": ["if hotfix pressure", "keep scope shippable"],
                     "revision": 2,
                 },
+            ],
+        }
+    }
+
+
+def _temporal_scope_balance_payload() -> dict[str, Any]:
+    local_frameworks = []
+    for index in range(5):
+        local_frameworks.append(
+            {
+                "framework_id": f"fw-local-{index}",
+                "name": f"Scoped local preference {index}",
+                "condition": "Recent refactor in backend/app/auth.py changed local behavior",
+                "priority": "medium",
+                "tradeoff": "local speed vs global consistency",
+                "escalation_threshold": "medium",
+                "counterexamples": [],
+                "evidence_ids": [f"ev-local-{index}"],
+                "evidence_provenance": [
+                    {
+                        "id": f"prov-local-{index}",
+                        "source_type": "review",
+                        "item_type": "comment",
+                    }
+                ],
+                "counter_evidence_ids": [],
+                "confidence": 0.92,
+                "specificity_level": "scope_local",
+                "temporal_span": {
+                    "first_seen_at": "2026-03-01T00:00:00Z",
+                    "last_reinforced_at": "2026-04-05T00:00:00Z",
+                    "source_dates": ["2026-03-01T00:00:00Z", "2026-04-05T00:00:00Z"],
+                },
+                "value_ids": ["velocity"],
+                "motivation_ids": ["shipping"],
+                "decision_order": ["if local repo drift appears", "favor project pattern now"],
+                "revision": 1,
+            }
+        )
+
+    return {
+        "decision_frameworks": {
+            "version": "decision_frameworks_v1",
+            "source": "principles_motivations_normalizer",
+            "frameworks": [
+                {
+                    "framework_id": "fw-stable-global",
+                    "name": "Durable reliability envelope",
+                    "condition": "Long-term API boundary and rollback rules should remain stable",
+                    "priority": "critical",
+                    "tradeoff": "durability vs short-term convenience",
+                    "escalation_threshold": "high",
+                    "counterexamples": [],
+                    "evidence_ids": ["ev-stable-1"],
+                    "evidence_provenance": [
+                        {
+                            "id": "prov-stable-1",
+                            "source_type": "review",
+                            "item_type": "comment",
+                        }
+                    ],
+                    "counter_evidence_ids": [],
+                    "confidence": 0.78,
+                    "specificity_level": "global",
+                    "temporal_span": {
+                        "first_seen_at": "2021-04-01T00:00:00Z",
+                        "last_reinforced_at": "2024-06-01T00:00:00Z",
+                        "source_dates": [
+                            "2021-04-01T00:00:00Z",
+                            "2024-06-01T00:00:00Z",
+                        ],
+                    },
+                    "value_ids": ["reliability"],
+                    "motivation_ids": ["craftsmanship"],
+                    "decision_order": [
+                        "if API boundary changes",
+                        "require rollback and test strategy",
+                    ],
+                    "revision": 7,
+                },
+                *local_frameworks,
             ],
         }
     }
@@ -277,13 +359,6 @@ def test_build_review_prediction_includes_framework_signals_from_decision_framew
     assert any(item.id == "prov-tests-1" for item in signal.evidence_provenance)
 
 
-def test_design_doc_artifact_review_uses_generic_signoff_language():
-    mini = _mini()
-    body = ArtifactReviewRequestV1(
-        artifact_type="design_doc",
-        repo_name="acme/api",
-        title="Design doc for auth token rotation",
-
 def test_framework_conflict_resolution_favors_shipping_speed_for_hotfix_context():
     mini = _mini(principles_json=_conflicting_framework_payload())
     body = ReviewPredictionRequestV1(
@@ -330,6 +405,44 @@ def test_framework_conflict_resolution_favors_architecture_for_architectural_cha
         "fw-architecture-correctness": "win",
         "fw-shipping-speed": "defer",
     }
+
+
+def test_temporal_scope_balance_preserves_stable_framework_in_visible_signals():
+    mini = _mini(principles_json=_temporal_scope_balance_payload())
+    body = ReviewPredictionRequestV1(
+        title="Refactor auth request handlers in backend/app/auth.py",
+        description=(
+            "The auth handler changed recently in this repo; should this be treated as a "
+            "local exception despite global rollout rules?"
+        ),
+        changed_files=["backend/app/auth.py", "backend/app/session.py"],
+        author_model="senior_peer",
+        delivery_context="normal",
+    )
+
+    prediction = build_review_prediction_v1(mini, body)
+    signal_ids = {signal.framework_id for signal in prediction.framework_signals}
+
+    local_ids = {f"fw-local-{index}" for index in range(5)}
+    stable_and_locals = local_ids | {"fw-stable-global"}
+    assert signal_ids <= stable_and_locals
+    assert len(prediction.framework_signals) == 5
+    assert "fw-stable-global" in signal_ids
+    assert signal_ids & local_ids
+    assert any(
+        signal.framework_id.startswith("fw-local-")
+        and signal.confidence > 0.9
+        for signal in prediction.framework_signals
+    )
+    assert prediction.framework_signals[0].framework_id.startswith("fw-local-")
+
+
+def test_design_doc_artifact_review_uses_generic_signoff_language():
+    mini = _mini()
+    body = ArtifactReviewRequestV1(
+        artifact_type="design_doc",
+        repo_name="acme/api",
+        title="Design doc for auth token rotation",
         description="Outlines auth boundaries, queue retry handling, and rollout notes.",
         artifact_summary="Proposes rotation steps, rollback posture, and follow-up validation work.",
         author_model="senior_peer",
