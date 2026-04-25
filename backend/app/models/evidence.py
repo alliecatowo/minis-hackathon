@@ -44,6 +44,16 @@ class Evidence(Base):
     context: Mapped[str] = mapped_column(String(64), nullable=False, default="general", index=True)
     metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     source_privacy: Mapped[str] = mapped_column(String(16), nullable=False, default="public")
+    retention_policy: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    retention_expires_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    source_authorization: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    authorization_revoked_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    access_classification: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    lifecycle_audit_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     source_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     author_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     audience_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -105,6 +115,12 @@ class Evidence(Base):
             "audience_id": self.audience_id,
             "target_id": self.target_id,
             "visibility": self.source_privacy,
+            "retention_policy": self.retention_policy,
+            "retention_expires_at": self.retention_expires_at,
+            "source_authorization": self.source_authorization,
+            "authorization_revoked_at": self.authorization_revoked_at,
+            "access_classification": self.access_classification,
+            "lifecycle_audit": self.lifecycle_audit_json,
             "content_hash": self.content_hash,
             "raw_excerpt": self.raw_body if self.raw_body is not None else self.content,
             "raw_body_ref": self.raw_body_ref,

@@ -5,8 +5,9 @@ requiring a database connection.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from app.core.evidence_access import evidence_export_block_reason, evidence_is_exportable
 from app.models.evidence import (
     Evidence,
     ExplorerFinding,
@@ -120,6 +121,10 @@ class TestEvidenceModel:
                 "diff_hunk": "@@ -1,3 +1,5 @@",
             },
             provenance_json={"collector": "github", "confidence": 1.0},
+            retention_policy="standard",
+            source_authorization="authorized",
+            access_classification="company",
+            lifecycle_audit_json={"granted_by": "github_oauth", "ticket": "MINI-223"},
             evidence_date=source_time,
         )
 
@@ -132,6 +137,10 @@ class TestEvidenceModel:
         assert envelope["raw_excerpt"] == "Please keep this scoped to the retry path."
         assert envelope["surrounding_context_ref"] == "github:pull/7/thread/1"
         assert envelope["provenance_confidence"] == 1.0
+        assert envelope["retention_policy"] == "standard"
+        assert envelope["source_authorization"] == "authorized"
+        assert envelope["access_classification"] == "company"
+        assert envelope["lifecycle_audit"] == {"granted_by": "github_oauth", "ticket": "MINI-223"}
 
     def test_minimal_legacy_evidence_has_explicit_missing_envelope_values(self):
         ev = Evidence(
@@ -150,6 +159,66 @@ class TestEvidenceModel:
         assert envelope["timestamp"] is None
         assert envelope["raw_excerpt"] == "fix: preserve existing behavior"
         assert envelope["provenance_confidence"] is None
+        assert envelope["retention_policy"] is None
+        assert envelope["source_authorization"] is None
+        assert envelope["access_classification"] is None
+
+    def test_source_authorized_company_evidence_is_exportable(self):
+        ev = Evidence(
+            id=str(uuid.uuid4()),
+            mini_id=str(uuid.uuid4()),
+            source_type="github",
+            item_type="review",
+            content="Please keep auth boundaries explicit.",
+            source_privacy="public",
+            retention_policy="standard",
+            source_authorization="authorized",
+            access_classification="company",
+            retention_expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+
+        assert evidence_is_exportable(ev)
+        assert evidence_export_block_reason(ev) is None
+
+    def test_private_evidence_fails_closed_for_export(self):
+        ev = Evidence(
+            id=str(uuid.uuid4()),
+            mini_id=str(uuid.uuid4()),
+            source_type="claude_code",
+            item_type="conversation",
+            content="Private local session",
+            source_privacy="private",
+            retention_policy="standard",
+            source_authorization="authorized",
+            access_classification="private",
+        )
+
+        assert not evidence_is_exportable(ev)
+        assert evidence_export_block_reason(ev) == "private_source"
+
+    def test_missing_or_revoked_policy_fails_closed_for_export(self):
+        missing = Evidence(
+            id=str(uuid.uuid4()),
+            mini_id=str(uuid.uuid4()),
+            source_type="github",
+            item_type="review",
+            content="Legacy evidence",
+            source_privacy="public",
+        )
+        revoked = Evidence(
+            id=str(uuid.uuid4()),
+            mini_id=str(uuid.uuid4()),
+            source_type="github",
+            item_type="review",
+            content="Revoked evidence",
+            source_privacy="public",
+            retention_policy="standard",
+            source_authorization="revoked",
+            access_classification="company",
+        )
+
+        assert evidence_export_block_reason(missing) == "missing_retention_policy"
+        assert evidence_export_block_reason(revoked) == "source_not_authorized"
 
 
 class TestExplorerFindingModel:

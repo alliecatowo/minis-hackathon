@@ -82,6 +82,12 @@ class EvidenceItem:
     raw_body_ref: str | None = None
     raw_context: dict[str, Any] | None = None
     provenance: dict[str, Any] | None = None
+    retention_policy: str = "standard"
+    retention_expires_at: datetime | None = None
+    source_authorization: str = "authorized"
+    authorization_revoked_at: datetime | None = None
+    access_classification: Literal["public", "company", "private"] | None = None
+    lifecycle_audit: dict[str, Any] | None = None
     metadata: dict | None = None
     privacy: Literal["public", "private"] = "public"
 

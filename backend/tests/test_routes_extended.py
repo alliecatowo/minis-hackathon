@@ -177,6 +177,12 @@ def _make_result_with(value):
     return result
 
 
+def _make_count_result(value: int):
+    result = MagicMock()
+    result.scalar_one.return_value = value
+    return result
+
+
 async def _client_with(user=None, session=None):
     """Return an (app, transport, overrides) tuple with dependencies applied."""
     from app.main import app
@@ -1362,6 +1368,66 @@ async def test_export_subagent_owner_success():
     assert r.status_code == 200
     assert "text/markdown" in r.headers["content-type"]
     assert mini.username in r.text
+
+
+@pytest.mark.asyncio
+async def test_export_subagent_source_authorized_company_evidence_visible():
+    """Company-classified, source-authorized evidence keeps owner export visible."""
+    from app.main import app
+    from app.core.auth import get_optional_user
+    from app.db import get_session
+
+    owner = _make_user()
+    mini = _make_mini(status="ready", visibility="public", owner_id=owner.id)
+
+    session = _make_session()
+    session.execute = AsyncMock(
+        side_effect=[
+            _make_result_with(mini),
+            _make_count_result(0),
+        ]
+    )
+
+    app.dependency_overrides[get_optional_user] = lambda: owner
+    app.dependency_overrides[get_session] = lambda: session
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/api/export/minis/{mini.id}/subagent")
+
+    app.dependency_overrides.clear()
+    assert r.status_code == 200
+    assert mini.username in r.text
+
+
+@pytest.mark.asyncio
+async def test_export_subagent_blocks_private_or_missing_policy_evidence():
+    """Private, missing-policy, or revoked evidence makes export fail closed."""
+    from app.main import app
+    from app.core.auth import get_optional_user
+    from app.db import get_session
+
+    owner = _make_user()
+    mini = _make_mini(status="ready", visibility="public", owner_id=owner.id)
+
+    session = _make_session()
+    session.execute = AsyncMock(
+        side_effect=[
+            _make_result_with(mini),
+            _make_count_result(3),
+        ]
+    )
+
+    app.dependency_overrides[get_optional_user] = lambda: owner
+    app.dependency_overrides[get_session] = lambda: session
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/api/export/minis/{mini.id}/subagent")
+
+    app.dependency_overrides.clear()
+    assert r.status_code == 409
+    assert r.json()["detail"] == "Mini export blocked by evidence lifecycle policy"
 
 
 @pytest.mark.asyncio

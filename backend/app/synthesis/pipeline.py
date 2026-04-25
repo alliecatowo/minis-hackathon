@@ -313,6 +313,12 @@ async def _store_evidence_items_in_db(
                             context=item.context,
                             metadata_json=item.metadata,
                             source_privacy=item.privacy,
+                            retention_policy=item.retention_policy,
+                            retention_expires_at=item.retention_expires_at,
+                            source_authorization=item.source_authorization,
+                            authorization_revoked_at=item.authorization_revoked_at,
+                            access_classification=item.access_classification or item.privacy,
+                            lifecycle_audit_json=item.lifecycle_audit,
                             source_uri=item.source_uri,
                             author_id=item.author_id,
                             audience_id=item.audience_id,
@@ -336,6 +342,12 @@ async def _store_evidence_items_in_db(
                     existing.evidence_date = item.evidence_date
                     existing.last_fetched_at = now
                     existing.source_privacy = item.privacy
+                    existing.retention_policy = item.retention_policy
+                    existing.retention_expires_at = item.retention_expires_at
+                    existing.source_authorization = item.source_authorization
+                    existing.authorization_revoked_at = item.authorization_revoked_at
+                    existing.access_classification = item.access_classification or item.privacy
+                    existing.lifecycle_audit_json = item.lifecycle_audit
                     existing.metadata_json = item.metadata
                     existing.source_uri = item.source_uri
                     existing.author_id = item.author_id

@@ -4,7 +4,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.access import require_team_access
+from app.core.audit import log_security_event
 from app.core.auth import get_current_user, get_optional_user, is_trusted_service_secret
+from app.core.evidence_access import count_export_blocking_evidence
 from app.db import get_session
 from app.models.mini import Mini
 from app.models.team import Team, TeamMember
@@ -24,6 +26,35 @@ def _require_clone_export_access(
     if is_trusted_service_secret(trusted_service_secret):
         return
     raise HTTPException(status_code=404, detail="Mini not found")
+
+
+async def _require_evidence_lifecycle_exportable(
+    mini: Mini,
+    session: AsyncSession,
+    user: User | None,
+    *,
+    export_type: str,
+) -> None:
+    blocking_count = await count_export_blocking_evidence(session, mini.id)
+    if blocking_count == 0:
+        log_security_event(
+            "mini_export_allowed",
+            user_id=user.id if user is not None else None,
+            detail=f"mini_id={mini.id} export_type={export_type}",
+            severity="info",
+        )
+        return
+
+    log_security_event(
+        "mini_export_blocked_by_evidence_lifecycle",
+        user_id=user.id if user is not None else None,
+        detail=f"mini_id={mini.id} export_type={export_type} blocking_evidence={blocking_count}",
+        severity="warning",
+    )
+    raise HTTPException(
+        status_code=409,
+        detail="Mini export blocked by evidence lifecycle policy",
+    )
 
 
 def _generate_subagent_md(mini: Mini) -> str:
@@ -72,6 +103,10 @@ async def export_subagent(
     if mini.status != "ready":
         raise HTTPException(status_code=409, detail=f"Mini not ready (status: {mini.status})")
 
+    await _require_evidence_lifecycle_exportable(
+        mini, session, user, export_type="subagent"
+    )
+
     content = _generate_subagent_md(mini)
     return PlainTextResponse(content, media_type="text/markdown")
 
@@ -93,6 +128,10 @@ async def export_soul_doc(
 
     if not mini.spirit_content:
         raise HTTPException(status_code=404, detail="No spirit content available")
+
+    await _require_evidence_lifecycle_exportable(
+        mini, session, user, export_type="soul_doc"
+    )
 
     return PlainTextResponse(mini.spirit_content, media_type="text/markdown")
 
@@ -129,6 +168,9 @@ async def export_team_agents(
     for mini in minis:
         if mini.status != "ready":
             continue
+        await _require_evidence_lifecycle_exportable(
+            mini, session, user, export_type="team_agent"
+        )
         md_content = _generate_subagent_md(mini)
         filename = f"{mini.username}-mini.md"
         agents.append({"filename": filename, "content": md_content})

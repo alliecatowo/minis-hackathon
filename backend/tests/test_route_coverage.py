@@ -708,6 +708,8 @@ class TestExportRouteTeamAgents:
         result1.scalar_one_or_none.return_value = team
         result2 = MagicMock()
         result2.scalars.return_value.all.return_value = [mini]
+        result3 = MagicMock()
+        result3.scalar_one.return_value = 0
 
         call_n = [0]
 
@@ -715,7 +717,9 @@ class TestExportRouteTeamAgents:
             call_n[0] += 1
             if call_n[0] == 1:
                 return result1
-            return result2
+            if call_n[0] == 2:
+                return result2
+            return result3
 
         session = _session()
         session.execute = mock_execute
