@@ -14,7 +14,10 @@ from app.core.auth import get_current_user, get_optional_user, require_trusted_s
 from app.core.config import settings
 from app.core.feature_flags import FLAGS
 from app.core.rate_limit import check_rate_limit
-from app.core.review_prediction import build_artifact_review_v1, build_review_prediction_v1_with_precedent
+from app.core.review_prediction import (
+    build_artifact_review_v1,
+    build_review_prediction_v1_with_precedent,
+)
 from app.core.review_predictor_agent import predict_artifact_review, predict_review
 from app.db import async_session, get_session
 from app.models.evidence import ReviewCycle
@@ -335,8 +338,13 @@ async def get_decision_frameworks_by_username(
 
     # Filter, sort, slice
     filtered = [
-        fw for fw in raw_frameworks
-        if isinstance(fw, dict) and fw.get("confidence", 0.0) >= min_confidence
+        fw
+        for fw in raw_frameworks
+        if (
+            isinstance(fw, dict)
+            and not fw.get("retired", False)
+            and fw.get("confidence", 0.0) >= min_confidence
+        )
     ]
     filtered.sort(key=lambda fw: (-fw.get("confidence", 0.0), -fw.get("revision", 0)))
     filtered = filtered[:limit]
@@ -344,19 +352,19 @@ async def get_decision_frameworks_by_username(
     out: list[dict] = []
     for fw in filtered:
         conf: float = fw.get("confidence", 0.0)
-        out.append({
-            "framework_id": fw.get("framework_id"),
-            "confidence": conf,
-            "revision": fw.get("revision", 0),
-            "trigger": fw.get("condition") or fw.get("trigger"),
-            "action": fw.get("block_policy") or fw.get("approval_policy") or fw.get("action"),
-            "value": (
-                fw.get("value_ids", [None])[0]
-                if fw.get("value_ids")
-                else fw.get("value")
-            ),
-            "badge": _badge(conf),
-        })
+        out.append(
+            {
+                "framework_id": fw.get("framework_id"),
+                "confidence": conf,
+                "revision": fw.get("revision", 0),
+                "trigger": fw.get("condition") or fw.get("trigger"),
+                "action": fw.get("block_policy") or fw.get("approval_policy") or fw.get("action"),
+                "value": (
+                    fw.get("value_ids", [None])[0] if fw.get("value_ids") else fw.get("value")
+                ),
+                "badge": _badge(conf),
+            }
+        )
 
     total = len(out)
     mean_conf = sum(fw["confidence"] for fw in out) / total if total else 0.0
@@ -857,56 +865,6 @@ async def get_mini_revision(
 
 
 # ---------------------------------------------------------------------------
-# By-username: public decision-frameworks route
-# ---------------------------------------------------------------------------
-
-
-@router.get("/by-username/{username}/decision-frameworks")
-async def get_decision_frameworks_by_username(
-    username: str,
-    session: AsyncSession = Depends(get_session),
-    user: User | None = Depends(get_optional_user),
-):
-    """Return the formatted decision frameworks for a mini (public-facing).
-
-    Retired frameworks are excluded. Used by the public mini profile.
-    """
-    from app.synthesis.framework_views import format_decision_frameworks
-
-    username_lower = username.lower()
-
-    # Prefer the user's own mini when logged in
-    mini = None
-    if user is not None:
-        result = await session.execute(
-            select(Mini).where(Mini.username == username_lower, Mini.owner_id == user.id)
-        )
-        mini = result.scalar_one_or_none()
-
-    if mini is None:
-        result = await session.execute(
-            select(Mini)
-            .where(Mini.username == username_lower, Mini.visibility == "public")
-            .order_by(Mini.owner_id.is_(None), Mini.created_at.desc())
-        )
-        mini = result.scalars().first()
-
-    if not mini:
-        raise HTTPException(status_code=404, detail="Mini not found")
-
-    p_json = mini.principles_json
-    if isinstance(p_json, str):
-        import json as _json
-        try:
-            p_json = _json.loads(p_json)
-        except Exception:
-            p_json = None
-
-    frameworks = format_decision_frameworks(p_json, include_retired=False)
-    return {"username": mini.username, "frameworks": frameworks}
-
-
-# ---------------------------------------------------------------------------
 # Owner-only: frameworks-at-risk
 # ---------------------------------------------------------------------------
 
@@ -966,10 +924,7 @@ def _build_at_risk_frameworks(
         # Reason 2: declining_trend (3+ consecutive negative deltas)
         if reason is None and len(history) >= _DECLINING_TREND_MIN_CONSECUTIVE:
             recent = history[-_DECLINING_TREND_MIN_CONSECUTIVE:]
-            all_negative = all(
-                isinstance(e, dict) and float(e.get("delta", 0)) < 0
-                for e in recent
-            )
+            all_negative = all(isinstance(e, dict) and float(e.get("delta", 0)) < 0 for e in recent)
             if all_negative:
                 reason = "declining_trend"
                 total_delta = sum(float(e.get("delta", 0)) for e in recent)
