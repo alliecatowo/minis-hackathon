@@ -379,6 +379,12 @@ class ReviewPredictionSignalV1(BaseModel):
     summary: str
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
+    specificity: Literal[
+        "framework_specific",
+        "evidence_backed",
+        "request_context_only",
+        "insufficient",
+    ] = "insufficient"
     evidence: list[ReviewPredictionEvidenceV1] = Field(default_factory=list)
     # Framework attribution: which decision framework drove this signal, and how
     # many times that framework has been revised through the learning loop.
@@ -420,6 +426,12 @@ class ReviewPredictionCommentV1(BaseModel):
     type: Literal["blocker", "note", "question", "praise"]
     disposition: Literal["request_changes", "comment", "approve"]
     issue_key: str | None = None
+    specificity: Literal[
+        "framework_specific",
+        "evidence_backed",
+        "request_context_only",
+        "insufficient",
+    ] = "insufficient"
     summary: str
     rationale: str
 
@@ -428,6 +440,27 @@ class ReviewPredictionExpressedFeedbackV1(BaseModel):
     summary: str
     comments: list[ReviewPredictionCommentV1] = Field(default_factory=list)
     approval_state: Literal["approve", "comment", "request_changes", "uncertain"]
+
+
+class ReviewPredictionExpressionDeltaV1(BaseModel):
+    """How a private assessment item moved into, or out of, expressed feedback."""
+
+    issue_key: str
+    private_bucket: Literal["blocking", "non_blocking", "questions", "positive"]
+    expressed_disposition: Literal[
+        "expressed",
+        "deferred",
+        "suppressed",
+        "below_threshold",
+    ]
+    specificity: Literal[
+        "framework_specific",
+        "evidence_backed",
+        "request_context_only",
+        "insufficient",
+    ] = "insufficient"
+    confidence: float = Field(ge=0.0, le=1.0)
+    rationale: str
 
 
 class ArtifactSummaryV1(BaseModel):
@@ -449,6 +482,9 @@ class ArtifactReviewV1(BaseModel):
     private_assessment: ReviewPredictionPrivateAssessmentV1
     delivery_policy: ReviewPredictionDeliveryPolicyV1
     expressed_feedback: ReviewPredictionExpressedFeedbackV1
+    private_expressed_deltas: list[ReviewPredictionExpressionDeltaV1] = Field(
+        default_factory=list
+    )
     framework_conflict_resolution: ReviewFrameworkConflictResolutionV1 | None = None
     framework_temporal_balance: ReviewFrameworkTemporalBalanceV1 | None = None
 

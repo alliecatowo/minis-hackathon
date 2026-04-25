@@ -113,6 +113,7 @@ def test_signal_defaults_framework_fields_to_none():
     sig = ReviewPredictionSignalV1.model_validate(_signal())
     assert sig.framework_id is None
     assert sig.revision is None
+    assert sig.specificity == "insufficient"
 
 
 def test_signal_accepts_framework_id_and_revision():
@@ -369,3 +370,35 @@ def test_envelope_full_expressed_feedback():
     assert len(comments) == 1
     assert comments[0]["type"] == "blocker"
     assert comments[0]["issue_key"] == "missing-tests"
+    assert comments[0]["specificity"] == "insufficient"
+
+
+def test_envelope_preserves_private_expressed_deltas():
+    envelope_dict = _minimal_envelope()
+    envelope_dict["private_assessment"]["non_blocking_issues"] = [
+        _signal(key="clarity-pass", confidence=0.86)
+    ]
+    envelope_dict["private_expressed_deltas"] = [
+        {
+            "issue_key": "clarity-pass",
+            "private_bucket": "non_blocking",
+            "expressed_disposition": "deferred",
+            "specificity": "evidence_backed",
+            "confidence": 0.86,
+            "rationale": "Trusted-peer delivery defers low-value local clarity notes.",
+        }
+    ]
+
+    envelope = ReviewPredictionV1.model_validate(envelope_dict)
+    dumped = envelope.model_dump(mode="json")
+
+    assert dumped["private_expressed_deltas"] == [
+        {
+            "issue_key": "clarity-pass",
+            "private_bucket": "non_blocking",
+            "expressed_disposition": "deferred",
+            "specificity": "evidence_backed",
+            "confidence": 0.86,
+            "rationale": "Trusted-peer delivery defers low-value local clarity notes.",
+        }
+    ]

@@ -15,6 +15,7 @@ from app.models.schemas import (
     BehavioralContext,
     MotivationsProfile,
     ReviewPredictionFrameworkSignalV1,
+    ReviewPredictionExpressionDeltaV1,
     ReviewFrameworkConflictDecisionV1,
     ReviewFrameworkConflictResolutionV1,
     ReviewPredictionCommentV1,
@@ -1335,6 +1336,51 @@ def _build_evidence_pool(
     return deduped
 
 
+def _review_fidelity_evidence_counts(
+    mini: Any,
+    same_repo_precedent: dict[str, Any] | None = None,
+) -> dict[str, int]:
+    behavioral_context = _parse_behavioral_context(getattr(mini, "behavioral_context_json", None))
+    motivations = _parse_motivations(getattr(mini, "motivations_json", None))
+    principles_raw = getattr(mini, "principles_json", None)
+    principles_count = 0
+    if isinstance(principles_raw, dict):
+        principles = principles_raw.get("principles")
+        if isinstance(principles, list):
+            principles_count = len([item for item in principles if isinstance(item, dict)])
+
+    memory_content = _normalize_text(getattr(mini, "memory_content", None))
+    evidence_cache = _normalize_text(getattr(mini, "evidence_cache", None))
+
+    return {
+        "decision_frameworks": len(_extract_decision_frameworks(principles_raw)),
+        "principles": principles_count,
+        "review_behavior": len(_review_entries(behavioral_context)),
+        "motivations": (
+            len(motivations.motivations) + len(motivations.motivation_chains)
+            if motivations
+            else 0
+        ),
+        "memory": 1 if memory_content else 0,
+        "evidence": 1 if evidence_cache else 0,
+        "same_repo_precedent": int((same_repo_precedent or {}).get("cycle_count", 0)),
+    }
+
+
+def review_prediction_insufficiency_reason(
+    mini: Any,
+    same_repo_precedent: dict[str, Any] | None = None,
+) -> str | None:
+    counts = _review_fidelity_evidence_counts(mini, same_repo_precedent)
+    if sum(counts.values()) > 0:
+        return None
+    return (
+        "insufficient review-fidelity evidence: no decision frameworks, principles, "
+        "review behavior, motivations, memory, raw evidence, or same-repo review "
+        "precedent are available"
+    )
+
+
 def _infer_recency_score(detail: str) -> float:
     lower_detail = detail.lower()
     if any(keyword in lower_detail for keyword in _RECENCY_HINT_KEYWORDS):
@@ -1436,6 +1482,19 @@ def _pick_evidence(
     if selected:
         return selected
     return [item for _blend, _score, item in ranked[:max_items]]
+
+
+def _specificity_from_evidence(
+    evidence: list[ReviewPredictionEvidenceV1],
+) -> str:
+    sources = {item.source for item in evidence}
+    if "principles" in sources:
+        return "framework_specific"
+    if sources & {"behavioral_context", "motivations", "memory", "evidence"}:
+        return "evidence_backed"
+    if sources == {"input"}:
+        return "request_context_only"
+    return "insufficient"
 
 
 def _contains_any(text: str, keywords: set[str]) -> bool:
@@ -1608,12 +1667,14 @@ def _make_signal(
     evidence_pool: list[ReviewPredictionEvidenceV1],
     keywords: set[str],
 ) -> ReviewPredictionSignalV1:
+    evidence = _pick_evidence(evidence_pool, keywords)
     return ReviewPredictionSignalV1(
         key=key,
         summary=summary,
         rationale=rationale,
         confidence=confidence,
-        evidence=_pick_evidence(evidence_pool, keywords),
+        specificity=_specificity_from_evidence(evidence),
+        evidence=evidence,
     )
 
 
@@ -1969,9 +2030,74 @@ def _make_expressed_comment(
         type=signal_type,
         disposition=disposition,
         issue_key=signal.key,
+        specificity=signal.specificity,
         summary=signal.summary,
         rationale=_append_sentence(signal.rationale, _comment_delivery_addendum(signal_type, policy)),
     )
+
+
+def _expression_disposition_for_signal(
+    policy: ReviewPredictionDeliveryPolicyV1,
+    bucket: str,
+    signal: ReviewPredictionSignalV1,
+) -> tuple[str, str]:
+    if bucket not in set(policy.say):
+        return "suppressed", f"{bucket} is not in delivery_policy.say."
+    if bucket in set(policy.suppress):
+        return "suppressed", f"{bucket} is explicitly suppressed by delivery policy."
+    if bucket in set(policy.defer):
+        return "deferred", f"{bucket} is deferred by audience/context delivery policy."
+    if bucket != "blocking" and signal.confidence < policy.risk_threshold:
+        return (
+            "below_threshold",
+            f"signal confidence {signal.confidence:.2f} is below risk_threshold {policy.risk_threshold:.2f}.",
+        )
+    return "expressed", "signal crosses delivery policy and specificity thresholds."
+
+
+def _build_private_expressed_deltas(
+    assessment: ReviewPredictionPrivateAssessmentV1,
+    policy: ReviewPredictionDeliveryPolicyV1,
+) -> list[ReviewPredictionExpressionDeltaV1]:
+    buckets: dict[str, list[ReviewPredictionSignalV1]] = {
+        "blocking": assessment.blocking_issues,
+        "non_blocking": assessment.non_blocking_issues,
+        "questions": assessment.open_questions,
+        "positive": assessment.positive_signals,
+    }
+    routed = {
+        bucket: _route_assessment_bucket(policy, bucket, signals)
+        for bucket, signals in buckets.items()
+    }
+    if routed["blocking"]:
+        active_buckets = {"blocking", "non_blocking", "questions"}
+    elif routed["non_blocking"] or routed["questions"]:
+        active_buckets = {"non_blocking", "questions"}
+    elif routed["positive"]:
+        active_buckets = {"positive"}
+    else:
+        active_buckets = set()
+
+    deltas: list[ReviewPredictionExpressionDeltaV1] = []
+    for bucket, signals in buckets.items():
+        expressed_slots = _comment_limit(policy, bucket) if bucket in active_buckets else 0
+        expressed_keys = {signal.key for signal in routed[bucket][:expressed_slots]}
+        for signal in signals:
+            disposition, rationale = _expression_disposition_for_signal(policy, bucket, signal)
+            if disposition == "expressed" and signal.key not in expressed_keys:
+                disposition = "deferred"
+                rationale = f"{bucket} crossed routing policy but was deferred by expressed comment limits."
+            deltas.append(
+                ReviewPredictionExpressionDeltaV1(
+                    issue_key=signal.key,
+                    private_bucket=bucket,
+                    expressed_disposition=disposition,
+                    specificity=signal.specificity,
+                    confidence=signal.confidence,
+                    rationale=rationale,
+                )
+            )
+    return deltas
 
 
 def _build_expressed_feedback(
@@ -2109,6 +2235,7 @@ def _build_artifact_review_fields(
         same_repo_precedent=same_repo_precedent,
     )
     expressed_feedback = _build_expressed_feedback(assessment, policy, body)
+    private_expressed_deltas = _build_private_expressed_deltas(assessment, policy)
 
     return {
         "reviewer_username": getattr(mini, "username", "unknown"),
@@ -2124,10 +2251,14 @@ def _build_artifact_review_fields(
         "private_assessment": assessment,
         "delivery_policy": policy,
         "expressed_feedback": expressed_feedback,
+        "private_expressed_deltas": private_expressed_deltas,
     }
 
 
 def build_artifact_review_v1(mini: Any, body: ArtifactReviewRequestBaseV1) -> ArtifactReviewV1:
+    unavailable_reason = review_prediction_insufficiency_reason(mini)
+    if unavailable_reason:
+        return build_unavailable_artifact_review_v1(mini, body, reason=unavailable_reason)
     return ArtifactReviewV1(
         **_build_artifact_review_fields(mini, body),
         mode="local_smoke",
@@ -2186,6 +2317,12 @@ def build_review_prediction_v1(
     *,
     same_repo_precedent: dict[str, Any] | None = None,
 ) -> ReviewPredictionV1:
+    unavailable_reason = review_prediction_insufficiency_reason(
+        mini,
+        same_repo_precedent=same_repo_precedent,
+    )
+    if unavailable_reason:
+        return build_unavailable_review_prediction_v1(mini, body, reason=unavailable_reason)
     return ReviewPredictionV1(
         **_build_artifact_review_fields(
             mini,

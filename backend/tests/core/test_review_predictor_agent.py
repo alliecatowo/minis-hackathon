@@ -366,7 +366,7 @@ async def test_predict_review_agent_gates_response_missing_availability_contract
     mini.behavioral_context_json = None
     mini.motivations_json = None
     mini.values_json = None
-    mini.memory_content = None
+    mini.memory_content = "review: asks for tests before approving risky changes"
     mini.evidence_cache = None
     mini.principles_json = None
 
@@ -423,7 +423,7 @@ async def test_predict_review_agent_reports_unavailable_on_failure():
     mini.behavioral_context_json = None
     mini.motivations_json = None
     mini.values_json = None
-    mini.memory_content = None
+    mini.memory_content = "review: asks for tests before approving risky changes"
     mini.evidence_cache = None
     mini.principles_json = None
 

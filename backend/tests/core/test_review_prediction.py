@@ -391,6 +391,13 @@ def test_build_review_prediction_returns_structured_request_changes():
     assert "test-coverage" in blocker_keys
     assert prediction.private_assessment.confidence >= 0.5
     assert prediction.expressed_feedback.comments
+    assert prediction.private_expressed_deltas
+    assert any(
+        delta.issue_key == "auth-boundary"
+        and delta.private_bucket == "blocking"
+        and delta.expressed_disposition == "expressed"
+        for delta in prediction.private_expressed_deltas
+    )
 
 
 def test_build_review_prediction_includes_framework_signals_from_decision_frameworks():
@@ -744,6 +751,33 @@ def test_relationship_context_supports_explicit_junior_mentorship_context():
     assert "coaching-oriented" in prediction.expressed_feedback.summary
 
 
+def test_evidence_empty_mini_gates_instead_of_generic_keyword_prediction():
+    mini = _mini(
+        behavioral_context_json=None,
+        motivations_json=None,
+        values_json=None,
+        memory_content=None,
+        evidence_cache=None,
+        principles_json=None,
+    )
+    body = ReviewPredictionRequestV1(
+        title="Refactor auth token handling for async worker",
+        description="Touches JWT parsing, queue retries, and database persistence.",
+        changed_files=["backend/app/auth.py", "backend/app/workers/token_queue.py"],
+        author_model="senior_peer",
+        delivery_context="normal",
+    )
+
+    prediction = build_review_prediction_v1(mini, body)
+
+    assert prediction.prediction_available is False
+    assert prediction.mode == "gated"
+    assert prediction.private_assessment.blocking_issues == []
+    assert prediction.expressed_feedback.comments == []
+    assert prediction.private_expressed_deltas == []
+    assert "insufficient review-fidelity evidence" in prediction.unavailable_reason
+
+
 def test_cross_team_public_context_routes_private_assessment_to_narrow_expression():
     mini = _mini()
     shared_assessment = ReviewPredictionPrivateAssessmentV1(
@@ -792,6 +826,36 @@ def test_cross_team_public_context_routes_private_assessment_to_narrow_expressio
     assert "cross-team context keeps expressed feedback factual and question-oriented" in policy.rationale
     assert [comment.type for comment in expressed.comments] == ["question"]
     assert expressed.comments[0].issue_key == "rollout-safety"
+
+
+def test_cross_team_public_prediction_records_suppressed_private_feedback_delta():
+    mini = _mini()
+    body = ReviewPredictionRequestV1(
+        title="Refactor local naming boundaries",
+        description="Moves helper names and boundary wording in a cross-team package.",
+        changed_files=["backend/app/platform/names.py"],
+        relationship_context=ReviewRelationshipContextV1(
+            reviewer_author_relationship="cross_team_partner",
+            channel="public_review",
+            team_alignment="cross_team",
+            repo_ownership="author_owned",
+            audience_sensitivity="high",
+            data_confidence="explicit",
+            rationale="Public review on an author-owned repo with cross-team audience.",
+        ),
+    )
+
+    prediction = build_review_prediction_v1(mini, body)
+
+    assert prediction.private_assessment.non_blocking_issues
+    clarity_delta = next(
+        delta for delta in prediction.private_expressed_deltas if delta.issue_key == "clarity-pass"
+    )
+    assert clarity_delta.private_bucket == "non_blocking"
+    assert clarity_delta.expressed_disposition == "deferred"
+    assert clarity_delta.specificity in {"framework_specific", "evidence_backed"}
+    assert "deferred" in clarity_delta.rationale
+    assert all(comment.issue_key != "clarity-pass" for comment in prediction.expressed_feedback.comments)
 
 
 def test_unknown_relationship_context_is_explicit_and_neutral():
@@ -1018,13 +1082,14 @@ def test_recent_contradictory_snippet_does_not_dominate_stable_principles_eviden
     )
     assert auth_signal.evidence
     assert auth_signal.evidence[0].source == "principles"
+    assert auth_signal.specificity == "framework_specific"
 
 
 def test_same_repo_precedent_escalates_test_gap_and_strictness():
     mini = _mini(
         behavioral_context_json=None,
         motivations_json=None,
-        memory_content=None,
+        memory_content="review: asks about retry timeout behavior before risky worker changes",
         evidence_cache=None,
         values_json={
             "engineering_values": [
