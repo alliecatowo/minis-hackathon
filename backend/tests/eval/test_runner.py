@@ -110,15 +110,18 @@ class TestGoldenTurn:
             "prompt": "test prompt",
             "reference_answer": "test answer",
             "rubric": [{"criterion": "check this"}],
+            "case_type": "adversarial",
         }
         turn = GoldenTurn.from_dict(data)
         assert turn.id == "test_id"
+        assert turn.case_type == "adversarial"
         assert turn.rubric == [{"criterion": "check this"}]
 
     def test_missing_rubric_defaults_empty(self):
         data = {"id": "no_rubric", "prompt": "p", "reference_answer": "r"}
         turn = GoldenTurn.from_dict(data)
         assert turn.rubric == []
+        assert turn.case_type == "baseline"
 
     def test_parses_held_out_review(self):
         turn = GoldenTurn.from_dict(
@@ -301,6 +304,28 @@ def _write_turns_yaml(path: Path, username: str, num_turns: int = 2) -> Path:
     return f
 
 
+def _write_turns_with_case_types(
+    path: Path,
+    username: str,
+    case_types: list[str],
+) -> Path:
+    turns = []
+    for i, case_type in enumerate(case_types):
+        turns.append(
+            f"  - id: turn_{i}\n"
+            f"    case_type: {case_type}\n"
+            f'    prompt: "Question {i}?"\n'
+            f"    reference_answer: |\n"
+            f"      Answer {i}.\n"
+            f"    rubric:\n"
+            f"      - criterion_{i}: check {i}\n"
+        )
+    content = f"subject: {username}\nturns:\n" + "".join(turns)
+    f = path / f"{username}.yaml"
+    f.write_text(content)
+    return f
+
+
 def _write_review_turns_yaml(path: Path, username: str) -> Path:
     content = f"""\
 subject: {username}
@@ -365,6 +390,43 @@ class TestRunEval:
         summary = report.summaries[0]
         assert summary.subject == "testuser"
         assert len(summary.turn_scores) == 2
+
+    @pytest.mark.asyncio
+    async def test_adversarial_summary_metrics(self, tmp_path: Path):
+        subjects_dir = tmp_path / "subjects"
+        turns_dir = tmp_path / "turns"
+        subjects_dir.mkdir()
+        turns_dir.mkdir()
+
+        sf = _write_subject_yaml(subjects_dir, "novel_user")
+        tf = _write_turns_with_case_types(
+            turns_dir,
+            "novel_user",
+            ["adversarial", "baseline", "adversarial"],
+        )
+
+        scorecards = iter([_make_scorecard(overall=3), _make_scorecard(overall=5), _make_scorecard(overall=5)])
+        with (
+            patch("eval.runner._resolve_mini_id", new=AsyncMock(return_value="test-mini-id")),
+            patch("eval.runner._send_chat_turn", new=AsyncMock(return_value="response")),
+            patch(
+                "eval.runner.score_response",
+                new=AsyncMock(side_effect=lambda **_: next(scorecards)),
+            ),
+        ):
+            report = await run_eval(
+                subject_files=[sf],
+                turn_files=[tf],
+                base_url="http://test",
+            )
+
+        summary = report.summaries[0]
+        assert summary.adversarial_turn_count == 2
+        assert summary.adversarial_pass_count == 1
+        assert summary.adversarial_fail_count == 1
+        assert summary.adversarial_pass_rate == 0.5
+        assert summary.non_adversarial_turn_count == 1
+        assert summary.non_adversarial_pass_rate == 1.0
 
     @pytest.mark.asyncio
     async def test_all_turns_scored(self, tmp_path: Path):
@@ -617,3 +679,22 @@ class TestRunEval:
         assert "long_horizon_default" in rubric_keys
         assert "recency_as_signal_not_policy" in rubric_keys
         assert "canonical_hottest_take_consistency" in rubric_keys
+
+    def test_checked_in_alliecatowo_fixture_includes_adversarial_cases(self):
+        fixture_path = (
+            Path(__file__).resolve().parents[2]
+            / "eval"
+            / "golden_turns"
+            / "alliecatowo.yaml"
+        )
+        fixture = GoldenTurnFile.from_yaml(fixture_path)
+        adversarial_turns = [t for t in fixture.turns if t.id.startswith("adversarial_")]
+        adversarial_ids = {t.id for t in adversarial_turns}
+
+        assert adversarial_ids == {
+            "adversarial_unfamiliar_repo",
+            "adversarial_competing_values",
+            "adversarial_generic_advice_trap",
+            "adversarial_audience_mismatch",
+        }
+        assert all(t.case_type == "adversarial" for t in adversarial_turns)

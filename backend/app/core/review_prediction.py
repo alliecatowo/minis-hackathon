@@ -15,6 +15,8 @@ from app.models.schemas import (
     BehavioralContext,
     MotivationsProfile,
     ReviewPredictionFrameworkSignalV1,
+    ReviewFrameworkConflictDecisionV1,
+    ReviewFrameworkConflictResolutionV1,
     ReviewPredictionCommentV1,
     ReviewPredictionDeliveryPolicyV1,
     ReviewPredictionEvidenceV1,
@@ -194,6 +196,58 @@ _FRAMEWORK_SIGNAL_STOPWORDS = {
     "how",
     "why",
     "should",
+_FRAMEWORK_ARCHITECTURE_TERMS = {
+    "architecture",
+    "architectural",
+    "abstraction",
+    "boundary",
+    "boundaries",
+    "contract",
+    "correctness",
+    "durable",
+    "long-term",
+    "migration",
+    "schema",
+    "interface",
+    "api",
+    "seam",
+}
+_FRAMEWORK_SHIPPING_TERMS = {
+    "ship",
+    "shipping",
+    "speed",
+    "velocity",
+    "hotfix",
+    "incident",
+    "patch",
+    "restore",
+    "mitigate",
+    "mitigation",
+    "quick",
+    "quickly",
+    "pragmatic",
+    "pragmatism",
+}
+_FRAMEWORK_MENTORSHIP_TERMS = {
+    "mentor",
+    "mentorship",
+    "teach",
+    "teaching",
+    "coach",
+    "coaching",
+    "guide",
+    "guidance",
+    "junior",
+}
+_FRAMEWORK_LOCAL_NORM_TERMS = {
+    "repo",
+    "local",
+    "precedent",
+    "pattern",
+    "existing",
+    "convention",
+    "norm",
+}
     "would",
 }
 
@@ -240,6 +294,20 @@ def _string_list(raw: Any) -> list[str]:
             value = item.strip()
             if value:
                 out.append(value)
+def _dedupe(values: Any) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        value = item.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
     return out
 
 
@@ -316,6 +384,130 @@ def _cohere_framework_signal_reason(
     matched_terms: set[str],
 ) -> str:
     if matched_terms:
+
+def _resolve_framework_conflicts(
+    signals: list[ReviewPredictionFrameworkSignalV1],
+    *,
+    body: ArtifactReviewRequestBaseV1,
+    policy: ReviewPredictionDeliveryPolicyV1,
+) -> ReviewFrameworkConflictResolutionV1 | None:
+    if len(signals) < 2:
+        return None
+
+    request_tokens = _tokenise_text(_build_request_text(body))
+    architectural_change = bool(request_tokens & _FRAMEWORK_ARCHITECTURE_TERMS) or _has_matching_file(
+        body.changed_files,
+        ("api", "schema", "migration", "architecture", "interface", "contract"),
+    )
+    scored: list[tuple[float, ReviewPredictionFrameworkSignalV1, set[str], list[str]]] = []
+    for signal in signals:
+        frame_tokens = _tokenise_text(
+            f"{signal.framework_id} {signal.name} {signal.summary} {signal.reason}"
+        )
+        dimensions: set[str] = set()
+        if frame_tokens & _FRAMEWORK_ARCHITECTURE_TERMS:
+            dimensions.add("architecture")
+        if frame_tokens & _FRAMEWORK_SHIPPING_TERMS:
+            dimensions.add("shipping_speed")
+        if frame_tokens & _FRAMEWORK_MENTORSHIP_TERMS:
+            dimensions.add("mentorship")
+        if frame_tokens & _FRAMEWORK_LOCAL_NORM_TERMS:
+            dimensions.add("local_repo_norm")
+        if not dimensions:
+            dimensions.add("general")
+
+        score = signal.confidence
+        context_boost = 0.0
+        reasons: list[str] = []
+        if policy.context in {"hotfix", "incident"}:
+            if "shipping_speed" in dimensions:
+                context_boost += 0.2
+                reasons.append(f"{policy.context} pressure favors restoring service over broadening scope")
+            if "architecture" in dimensions:
+                context_boost -= 0.12
+                reasons.append("architecture concerns are preserved but deferred under delivery pressure")
+            if "mentorship" in dimensions:
+                context_boost -= 0.08
+                reasons.append("coaching detail is narrowed while the fix is time-sensitive")
+            if "local_repo_norm" in dimensions:
+                context_boost += 0.05
+                reasons.append("local precedent helps keep a hotfix low-risk")
+        elif architectural_change:
+            if "architecture" in dimensions:
+                context_boost += 0.18
+                reasons.append("architectural-change context favors durable boundaries and correctness")
+            if "shipping_speed" in dimensions:
+                context_boost -= 0.06
+                reasons.append("shipping-speed pressure is secondary when the change sets structure")
+        elif policy.context == "exploratory":
+            if "mentorship" in dimensions:
+                context_boost += 0.12
+                reasons.append("exploratory work benefits from guidance over blocking")
+            if "shipping_speed" in dimensions:
+                context_boost += 0.04
+                reasons.append("prototype context rewards low-friction iteration")
+
+        if body.author_model == "junior_peer" and "mentorship" in dimensions:
+            context_boost += 0.1
+            reasons.append("junior-peer relationship favors mentorship")
+
+        scored.append((_coerce_confidence(score + context_boost), signal, dimensions, reasons))
+
+    if not scored:
+        return None
+    dimensions_seen = {
+        dimension for _score, _signal, dimensions, _reasons in scored for dimension in dimensions
+    }
+    if len(dimensions_seen - {"general"}) < 2:
+        return None
+
+    scored.sort(key=lambda item: (item[0], item[1].confidence), reverse=True)
+    top_score = scored[0][0]
+    winners = [item for item in scored if top_score - item[0] <= 0.03]
+    winning_ids = [signal.framework_id for _score, signal, _dimensions, _reasons in winners]
+
+    evidence_ids = []
+    provenance_ids = []
+    decisions: list[ReviewFrameworkConflictDecisionV1] = []
+    deferred_ids: list[str] = []
+    suppressed_ids: list[str] = []
+    rationale_parts: list[str] = []
+    for _score, signal, dimensions, reasons in scored:
+        evidence_ids.extend(signal.evidence_ids)
+        provenance_ids.extend(signal.provenance_ids)
+        if signal.framework_id in winning_ids:
+            disposition = "win"
+            rationale_parts.extend(reasons or ["highest fit after context-sensitive framework scoring"])
+        elif policy.context in {"hotfix", "incident"} and "architecture" in dimensions:
+            disposition = "defer"
+            deferred_ids.append(signal.framework_id)
+        elif architectural_change and "shipping_speed" in dimensions:
+            disposition = "defer"
+            deferred_ids.append(signal.framework_id)
+        else:
+            disposition = "suppress"
+            suppressed_ids.append(signal.framework_id)
+
+        decisions.append(
+            ReviewFrameworkConflictDecisionV1(
+                framework_id=signal.framework_id,
+                disposition=disposition,
+            )
+        )
+
+    runner_up = scored[len(winners)][0] if len(scored) > len(winners) else top_score
+    confidence = _coerce_confidence(0.58 + max(0.0, top_score - runner_up))
+
+    return ReviewFrameworkConflictResolutionV1(
+        winning_framework_ids=winning_ids,
+        deferred_framework_ids=deferred_ids,
+        suppressed_framework_ids=suppressed_ids,
+        tradeoff_rationale=", ".join(_dedupe(rationale_parts)),
+        confidence=confidence,
+        evidence_ids=_dedupe(evidence_ids),
+        provenance_ids=_dedupe(provenance_ids),
+        decisions=decisions,
+    )
         terms = ", ".join(sorted(matched_terms))
         return f"Matched request terms [{terms}] to this framework condition/action."
     return "This high-confidence framework is one of the top learned rules in this mini."
@@ -1756,3 +1948,9 @@ async def build_review_prediction_v1_with_precedent(
         body,
         same_repo_precedent=same_repo_precedent,
     )
+    framework_conflict_resolution = _resolve_framework_conflicts(
+        framework_signals,
+        body=body,
+        policy=policy,
+    )
+        "framework_conflict_resolution": framework_conflict_resolution,

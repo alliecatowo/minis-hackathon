@@ -296,6 +296,22 @@ class ReviewPredictionFrameworkSignalV1(BaseModel):
     provenance_ids: list[str] = Field(default_factory=list)
 
 
+class ReviewFrameworkConflictDecisionV1(BaseModel):
+    framework_id: str
+    disposition: Literal["win", "defer", "suppress"]
+
+
+class ReviewFrameworkConflictResolutionV1(BaseModel):
+    winning_framework_ids: list[str] = Field(default_factory=list)
+    deferred_framework_ids: list[str] = Field(default_factory=list)
+    suppressed_framework_ids: list[str] = Field(default_factory=list)
+    tradeoff_rationale: str = ""
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    evidence_ids: list[str] = Field(default_factory=list)
+    provenance_ids: list[str] = Field(default_factory=list)
+    decisions: list[ReviewFrameworkConflictDecisionV1] = Field(default_factory=list)
+
+
 class ReviewPredictionSignalV1(BaseModel):
     key: str
     summary: str
@@ -365,6 +381,7 @@ class ArtifactReviewV1(BaseModel):
     private_assessment: ReviewPredictionPrivateAssessmentV1
     delivery_policy: ReviewPredictionDeliveryPolicyV1
     expressed_feedback: ReviewPredictionExpressedFeedbackV1
+    framework_conflict_resolution: ReviewFrameworkConflictResolutionV1 | None = None
 
 
 class ReviewPredictionV1(ArtifactReviewV1):

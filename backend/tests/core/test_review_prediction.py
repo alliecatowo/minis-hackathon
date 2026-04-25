@@ -148,6 +148,64 @@ def _decision_framework_payload() -> dict[str, Any]:
         }
     }
 
+def _conflicting_framework_payload() -> dict[str, Any]:
+    return {
+        "decision_frameworks": {
+            "version": "decision_frameworks_v1",
+            "source": "principles_motivations_normalizer",
+            "frameworks": [
+                {
+                    "framework_id": "fw-architecture-correctness",
+                    "name": "Architecture correctness",
+                    "condition": "architectural API boundary changes need durable correctness",
+                    "priority": "critical",
+                    "tradeoff": "architecture correctness vs shipping speed",
+                    "escalation_threshold": "high",
+                    "counterexamples": [],
+                    "evidence_ids": ["ev-arch-1"],
+                    "evidence_provenance": [
+                        {
+                            "id": "prov-arch-1",
+                            "source_type": "review",
+                            "item_type": "comment",
+                        }
+                    ],
+                    "counter_evidence_ids": [],
+                    "confidence": 0.94,
+                    "specificity_level": "contextual",
+                    "value_ids": ["durable-value"],
+                    "motivation_ids": ["craftsmanship"],
+                    "decision_order": ["if architectural boundary shifts", "prioritize correctness"],
+                    "revision": 4,
+                },
+                {
+                    "framework_id": "fw-shipping-speed",
+                    "name": "Shipping speed",
+                    "condition": "hotfix patch incident restore service with shipping speed",
+                    "priority": "high",
+                    "tradeoff": "shipping speed vs architecture polish",
+                    "escalation_threshold": "medium",
+                    "counterexamples": [],
+                    "evidence_ids": ["ev-ship-1"],
+                    "evidence_provenance": [
+                        {
+                            "id": "prov-ship-1",
+                            "source_type": "review",
+                            "item_type": "comment",
+                        }
+                    ],
+                    "counter_evidence_ids": [],
+                    "confidence": 0.86,
+                    "specificity_level": "case_pattern",
+                    "value_ids": ["shipping"],
+                    "motivation_ids": ["pragmatism"],
+                    "decision_order": ["if hotfix pressure", "keep scope shippable"],
+                    "revision": 2,
+                },
+            ],
+        }
+    }
+
 
 def test_review_prediction_request_requires_some_change_input():
     with pytest.raises(ValidationError):
@@ -225,6 +283,53 @@ def test_design_doc_artifact_review_uses_generic_signoff_language():
         artifact_type="design_doc",
         repo_name="acme/api",
         title="Design doc for auth token rotation",
+
+def test_framework_conflict_resolution_favors_shipping_speed_for_hotfix_context():
+    mini = _mini(principles_json=_conflicting_framework_payload())
+    body = ReviewPredictionRequestV1(
+        title="Hotfix patch for architectural API boundary regression",
+        description="Restore service quickly while noting the durable boundary cleanup follow-up.",
+        changed_files=["backend/app/api/auth.py"],
+        author_model="trusted_peer",
+        delivery_context="hotfix",
+    )
+
+    prediction = build_review_prediction_v1(mini, body)
+
+    resolution = prediction.framework_conflict_resolution
+    assert resolution is not None
+    assert resolution.winning_framework_ids == ["fw-shipping-speed"]
+    assert resolution.deferred_framework_ids == ["fw-architecture-correctness"]
+    assert resolution.suppressed_framework_ids == []
+    assert "hotfix pressure" in resolution.tradeoff_rationale
+    assert resolution.confidence > 0.6
+    assert set(resolution.evidence_ids) == {"ev-ship-1", "ev-arch-1"}
+    assert set(resolution.provenance_ids) == {"prov-ship-1", "prov-arch-1"}
+
+
+def test_framework_conflict_resolution_favors_architecture_for_architectural_change():
+    mini = _mini(principles_json=_conflicting_framework_payload())
+    body = ReviewPredictionRequestV1(
+        title="Architectural API boundary migration with shipping speed pressure",
+        description="Refactors the durable auth contract and asks whether to cut scope for speed.",
+        changed_files=["backend/app/api/contract.py", "backend/app/migrations/auth_boundary.py"],
+        author_model="senior_peer",
+        delivery_context="normal",
+    )
+
+    prediction = build_review_prediction_v1(mini, body)
+
+    resolution = prediction.framework_conflict_resolution
+    assert resolution is not None
+    assert resolution.winning_framework_ids == ["fw-architecture-correctness"]
+    assert resolution.deferred_framework_ids == ["fw-shipping-speed"]
+    assert resolution.suppressed_framework_ids == []
+    assert "architectural-change context" in resolution.tradeoff_rationale
+    decisions = {item.framework_id: item.disposition for item in resolution.decisions}
+    assert decisions == {
+        "fw-architecture-correctness": "win",
+        "fw-shipping-speed": "defer",
+    }
         description="Outlines auth boundaries, queue retry handling, and rollout notes.",
         artifact_summary="Proposes rotation steps, rollback posture, and follow-up validation work.",
         author_model="senior_peer",

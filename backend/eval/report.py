@@ -68,6 +68,7 @@ def _format_review_breakdown(ts: TurnScore) -> str:
 def _render_detail_table(summary: SubjectSummary, include_review: bool = False) -> str:
     """Render the per-turn detail table for one subject."""
     headers = [
+        "Case",
         "Turn",
         "Overall",
         "Voice",
@@ -81,14 +82,25 @@ def _render_detail_table(summary: SubjectSummary, include_review: bool = False) 
     headers.append("Rationale")
     rows = []
     for ts in summary.turn_scores:
+        case_label = "adversarial" if ts.is_adversarial else "baseline"
         if ts.failed:
-            row = [f"`{ts.turn_id}`", "—", "—", "—", "—", "—", f"*{ts.error}*"]
+            row = [
+                case_label,
+                f"`{ts.turn_id}`",
+                "—",
+                "—",
+                "—",
+                "—",
+                "—",
+                f"*{ts.error}*",
+            ]
             if include_review:
                 row.append("—")
             row.append("—")
             rows.append(row)
         else:
             row = [
+                case_label,
                 f"`{ts.turn_id}`",
                 _score_badge(ts.scorecard.overall_score),
                 _score_badge(ts.scorecard.voice_match),
@@ -175,6 +187,16 @@ def _render_subject_section(summary: SubjectSummary, include_review: bool = Fals
     lines.append(_render_agreement_scorecard(summary.agreement_scorecard))
     lines.append(_render_framework_summary(summary.decision_frameworks_summary))
 
+    if summary.adversarial_turn_count:
+        lines.append(
+            "**Adversarial Cases** — "
+            f"pass: {summary.adversarial_pass_count}/{summary.adversarial_turn_count} "
+            f"({summary.adversarial_pass_rate:.0%}) | "
+            f"fail: {summary.adversarial_fail_count}"
+        )
+    else:
+        lines.append("**Adversarial Cases** — no adversarial turns in this run")
+
     weak = summary.weak_rubric_items()
     if weak:
         lines.append(
@@ -193,6 +215,7 @@ def _render_summary_table(report: EvalReport) -> str:
         for summary in report.summaries
         for ts in summary.turn_scores
     )
+    include_adversarial = any(summary.adversarial_turn_count > 0 for summary in report.summaries)
     headers = [
         "Subject",
         "Turns",
@@ -206,6 +229,9 @@ def _render_summary_table(report: EvalReport) -> str:
         headers.append("Avg Review")
         headers.append("Blocker F1")
         headers.append("Comment F1")
+    if include_adversarial:
+        headers.append("Adversarial Turns")
+        headers.append("Adversarial Pass")
     headers.append("Weak Items")
     rows = []
     for summary in report.summaries:
@@ -226,6 +252,9 @@ def _render_summary_table(report: EvalReport) -> str:
             row.append(f"{summary.avg_review_agreement:.2f}")
             row.append(f"{summary.avg_blocker_f1:.2f}")
             row.append(f"{summary.avg_comment_f1:.2f}")
+        if include_adversarial:
+            row.append(f"{summary.adversarial_pass_count}/{summary.adversarial_turn_count}")
+            row.append(f"{summary.adversarial_pass_rate:.0%}")
         row.append(", ".join(f"`{w}`" for w in weak) if weak else "—")
         rows.append(row)
     return _md_table(headers, rows)
@@ -449,6 +478,7 @@ def report_to_json(report: EvalReport) -> dict:
                     turn_data["scorecard"]["review_selection"] = (
                         ts.scorecard.review_selection.model_dump()
                     )
+            turn_data["case_type"] = ts.case_type
             if ts.review_agreement is not None:
                 turn_data["review_agreement"] = ts.review_agreement.model_dump()
             turns.append(turn_data)
@@ -464,6 +494,12 @@ def report_to_json(report: EvalReport) -> dict:
                 "avg_review_agreement": summary.avg_review_agreement,
                 "avg_blocker_f1": summary.avg_blocker_f1,
                 "avg_comment_f1": summary.avg_comment_f1,
+                "adversarial_turn_count": summary.adversarial_turn_count,
+                "non_adversarial_turn_count": summary.non_adversarial_turn_count,
+                "adversarial_pass_count": summary.adversarial_pass_count,
+                "adversarial_fail_count": summary.adversarial_fail_count,
+                "adversarial_pass_rate": summary.adversarial_pass_rate,
+                "non_adversarial_pass_rate": summary.non_adversarial_pass_rate,
                 "agreement_scorecard": summary.agreement_scorecard,
                 "decision_frameworks_summary": summary.decision_frameworks_summary,
                 "turns": turns,

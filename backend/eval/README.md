@@ -84,6 +84,7 @@ turns:
       # Source attribution (blog URL, talk, etc.)
       # Mark "paraphrased, needs verification" if not verbatim
       The actual reference text...
+    case_type: baseline  # optional: baseline | adversarial
     rubric:
       - criterion_name: "What to check for"
 ```
@@ -120,6 +121,9 @@ fixed candidate IDs and the harness computes:
 - blocker precision / recall / F1
 - comment-selection precision / recall / F1
 - overall review agreement as the average of verdict accuracy and available F1s
+
+Adversarial cases should set `case_type: adversarial`. Reports track adversarial
+pass/fail separately using `overall_score >= 4` as the pass threshold.
 
 ## Regression Guard
 

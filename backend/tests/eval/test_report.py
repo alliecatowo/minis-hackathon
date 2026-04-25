@@ -14,6 +14,7 @@ def _turn_score(turn_id: str = "t1") -> TurnScore:
         prompt="prompt",
         reference_answer="reference",
         mini_response="response",
+        case_type="adversarial",
         scorecard=ScoreCard(
             overall_score=4,
             voice_match=4,
@@ -51,5 +52,24 @@ def test_report_to_json_includes_new_dimensions() -> None:
     turn = subject["turns"][0]
     assert subject["avg_framework_consistency"] == 5.0
     assert subject["avg_recency_bias_penalty"] == 0.25
+    assert subject["adversarial_turn_count"] == 1
+    assert subject["non_adversarial_turn_count"] == 0
+    assert subject["adversarial_pass_count"] == 1
+    assert subject["adversarial_fail_count"] == 0
+    assert subject["adversarial_pass_rate"] == 1.0
+    assert subject["non_adversarial_pass_rate"] == 0.0
     assert turn["scorecard"]["framework_consistency"] == 5
     assert turn["scorecard"]["recency_bias_penalty"] == 0.25
+    assert turn["case_type"] == "adversarial"
+
+
+def test_render_report_includes_adversarial_summary_lines() -> None:
+    summary = SubjectSummary(subject="testuser", turn_scores=[_turn_score(), _turn_score("t2")])
+    report = EvalReport(summaries=[summary], base_url="http://localhost:8000")
+
+    md = render_report(report)
+
+    assert "Adversarial Cases" in md
+    assert "pass: 2/2" in md
+    assert "Adversarial Turns" in md
+    assert "Adversarial Pass" in md

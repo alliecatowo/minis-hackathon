@@ -215,12 +215,21 @@ class TurnScore:
     reference_answer: str
     mini_response: str
     scorecard: ScoreCard
+    case_type: str = "baseline"
     review_agreement: ReviewAgreement | None = None
     error: str | None = None
 
     @property
     def failed(self) -> bool:
         return self.error is not None
+
+    @property
+    def is_adversarial(self) -> bool:
+        return self.case_type.lower().strip() == "adversarial"
+
+    @property
+    def pass_threshold(self) -> bool:
+        return (not self.failed) and self.scorecard.overall_score >= 4
 
 
 def compute_framework_summary(frameworks: list[dict]) -> dict:
@@ -276,6 +285,50 @@ class SubjectSummary:
     # Decision-framework profile summary fetched from the API.
     # None if the endpoint returned 404 or the request failed.
     decision_frameworks_summary: dict | None = None
+
+    def _case_turn_scores(self, case_type: str) -> list[TurnScore]:
+        return [
+            ts
+            for ts in self.turn_scores
+            if ts.case_type.lower().strip() == case_type.lower().strip()
+        ]
+
+    @property
+    def adversarial_turns(self) -> list[TurnScore]:
+        return self._case_turn_scores("adversarial")
+
+    @property
+    def non_adversarial_turns(self) -> list[TurnScore]:
+        return [ts for ts in self.turn_scores if not ts.is_adversarial]
+
+    def _case_pass_rate(self, turns: list[TurnScore]) -> float:
+        if not turns:
+            return 0.0
+        return sum(1 for ts in turns if ts.pass_threshold) / len(turns)
+
+    @property
+    def adversarial_turn_count(self) -> int:
+        return len(self.adversarial_turns)
+
+    @property
+    def non_adversarial_turn_count(self) -> int:
+        return len(self.non_adversarial_turns)
+
+    @property
+    def adversarial_pass_count(self) -> int:
+        return sum(1 for ts in self.adversarial_turns if ts.pass_threshold)
+
+    @property
+    def adversarial_fail_count(self) -> int:
+        return len(self.adversarial_turns) - self.adversarial_pass_count
+
+    @property
+    def adversarial_pass_rate(self) -> float:
+        return self._case_pass_rate(self.adversarial_turns)
+
+    @property
+    def non_adversarial_pass_rate(self) -> float:
+        return self._case_pass_rate(self.non_adversarial_turns)
 
     @property
     def avg_overall(self) -> float:

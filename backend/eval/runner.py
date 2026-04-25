@@ -56,6 +56,7 @@ class GoldenTurn:
     prompt: str
     reference_answer: str
     rubric: list[dict[str, Any]]
+    case_type: str = "baseline"
     held_out_review: HeldOutReviewExpectation | None = None
 
     @classmethod
@@ -65,6 +66,7 @@ class GoldenTurn:
             prompt=data["prompt"],
             reference_answer=data["reference_answer"],
             rubric=data.get("rubric", []),
+            case_type=data.get("case_type", "baseline"),
             held_out_review=(
                 HeldOutReviewExpectation.from_dict(data["held_out_review"])
                 if data.get("held_out_review")
@@ -398,6 +400,7 @@ async def run_eval(
                                 recency_bias_penalty=1.0,
                                 overall_rationale="Mini chat request failed.",
                             ),
+                            case_type=turn.case_type,
                             error=str(exc),
                         )
                     )
@@ -435,6 +438,7 @@ async def run_eval(
                                 recency_bias_penalty=1.0,
                                 overall_rationale="Judge scoring failed.",
                             ),
+                            case_type=turn.case_type,
                             error=str(exc),
                         )
                     )
@@ -448,6 +452,7 @@ async def run_eval(
                         reference_answer=turn.reference_answer,
                         mini_response=mini_response,
                         scorecard=scorecard,
+                        case_type=turn.case_type,
                         review_agreement=(
                             compute_review_agreement(
                                 turn.held_out_review, scorecard.review_selection

@@ -550,3 +550,21 @@ class TestSubjectSummary:
         summary.turn_scores = [good, failed]
         # Only the good turn should count
         assert summary.avg_overall == pytest.approx(4.0)
+
+    def test_adversarial_turn_metrics(self):
+        summary = SubjectSummary(subject="testuser")
+        summary.turn_scores = [
+            self._make_turn_score(2, 3, 3, framework=3, rubric={"weakness": 3}),
+            self._make_turn_score(4, 4, 4, framework=4),
+            self._make_turn_score(5, 5, 5, framework=5),
+        ]
+        summary.turn_scores[0].case_type = "adversarial"
+        summary.turn_scores[1].case_type = "baseline"
+        summary.turn_scores[2].case_type = "adversarial"
+
+        assert summary.adversarial_turn_count == 2
+        assert summary.adversarial_pass_count == 1
+        assert summary.adversarial_fail_count == 1
+        assert summary.adversarial_pass_rate == 0.5
+        assert summary.non_adversarial_turn_count == 1
+        assert summary.non_adversarial_pass_rate == 1.0
