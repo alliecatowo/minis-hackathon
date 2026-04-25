@@ -196,16 +196,21 @@ class GitHubSource(IngestionSource):
                 continue
             msg = commit.get("commit", {}).get("message") or commit.get("message") or ""
             author = (
+                commit.get("author", {}).get("login")
+                or commit.get("committer", {}).get("login")
+                or commit.get("commit", {}).get("author", {}).get("name")
+                or ""
+            )
+            author_name = (
                 commit.get("commit", {}).get("author", {}).get("name")
-                or commit.get("author", {}).get("login")
                 or ""
             )
             repo_name = commit.get("repository", {}).get("full_name", "")
             content_parts = [f"Commit: {sha[:12]}"]
             if repo_name:
                 content_parts.append(f"Repository: {repo_name}")
-            if author:
-                content_parts.append(f"Author: {author}")
+            if author_name or author:
+                content_parts.append(f"Author: {author_name or author}")
             content_parts.append(f"Message:\n{msg}")
 
             # Attach diff summary if available
@@ -227,10 +232,20 @@ class GitHubSource(IngestionSource):
                 content="\n".join(content_parts),
                 context="commit_message",
                 evidence_date=evidence_date,
+                source_uri=commit.get("html_url"),
+                author_id=author,
+                provenance={
+                    "collector": "github",
+                    "authored_by_subject": bool(
+                        identifier and author and author.casefold() == identifier.casefold()
+                    ),
+                    "confidence": 0.95 if author else 0.75,
+                },
                 metadata={
                     "sha": sha,
                     "repo": repo_name,
                     "author": author,
+                    "author_name": author_name,
                 },
                 privacy="public",
             )
@@ -247,6 +262,7 @@ class GitHubSource(IngestionSource):
             title = pr.get("title") or ""
             body = pr.get("body") or ""
             state = pr.get("state") or ""
+            author = pr.get("user", {}).get("login") or ""
             content_parts = [
                 f"Pull Request #{number}: {title}",
                 f"Repository: {repo}",
@@ -278,10 +294,20 @@ class GitHubSource(IngestionSource):
                 content="\n".join(content_parts),
                 context="issue_discussion",
                 evidence_date=evidence_date,
+                source_uri=pr.get("html_url"),
+                author_id=author,
+                provenance={
+                    "collector": "github",
+                    "authored_by_subject": bool(
+                        identifier and author and author.casefold() == identifier.casefold()
+                    ),
+                    "confidence": 0.9 if author else 0.7,
+                },
                 metadata={
                     "number": number,
                     "repo": repo,
                     "state": state,
+                    "author": author,
                 },
                 privacy="public",
             )
@@ -302,6 +328,7 @@ class GitHubSource(IngestionSource):
             body = review.get("body") or ""
             path = review.get("path") or ""
             diff_hunk = review.get("diff_hunk") or ""
+            author = review.get("user", {}).get("login") or ""
             content_parts = [f"Review comment (id={review_id})"]
             if path:
                 content_parts.append(f"File: {path}")
@@ -320,7 +347,21 @@ class GitHubSource(IngestionSource):
                 content="\n".join(content_parts),
                 context="code_review",
                 evidence_date=evidence_date,
-                metadata={"review_id": review_id, "pr_id": str(pr_id), "path": path},
+                source_uri=review.get("html_url"),
+                author_id=author,
+                provenance={
+                    "collector": "github",
+                    "authored_by_subject": bool(
+                        identifier and author and author.casefold() == identifier.casefold()
+                    ),
+                    "confidence": 0.95 if author else 0.75,
+                },
+                metadata={
+                    "review_id": review_id,
+                    "pr_id": str(pr_id),
+                    "path": path,
+                    "author": author,
+                },
                 privacy="public",
             )
 
@@ -334,6 +375,7 @@ class GitHubSource(IngestionSource):
                 continue
             body = comment.get("body") or ""
             issue_url = comment.get("issue_url") or comment.get("html_url") or ""
+            author = comment.get("user", {}).get("login") or ""
             content_parts = [f"Issue comment (id={comment_id})"]
             if issue_url:
                 content_parts.append(f"Issue: {issue_url}")
@@ -350,7 +392,16 @@ class GitHubSource(IngestionSource):
                 content="\n".join(content_parts),
                 context="issue_discussion",
                 evidence_date=evidence_date,
-                metadata={"comment_id": comment_id},
+                source_uri=comment.get("html_url"),
+                author_id=author,
+                provenance={
+                    "collector": "github",
+                    "authored_by_subject": bool(
+                        identifier and author and author.casefold() == identifier.casefold()
+                    ),
+                    "confidence": 0.95 if author else 0.75,
+                },
+                metadata={"comment_id": comment_id, "author": author},
                 privacy="public",
             )
 

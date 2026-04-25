@@ -21,7 +21,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.models import ModelTier, get_model
@@ -29,6 +29,7 @@ from app.models.evidence import Evidence, ExplorerFinding, ExplorerQuote
 from app.models.schemas import Motivation, MotivationChain, MotivationsProfile
 
 logger = logging.getLogger(__name__)
+_AI_LIKE_STATUS = "ai_like"
 
 _EVIDENCE_CANDIDATE_LIMIT = 200
 _EVIDENCE_SAMPLE_LIMIT = 50
@@ -362,6 +363,10 @@ async def infer_motivations(
         .where(
             Evidence.mini_id == mini_id,
             Evidence.item_type.in_(MOTIVATION_EVIDENCE_ITEM_TYPES),
+            or_(
+                Evidence.ai_contamination_status.is_(None),
+                Evidence.ai_contamination_status != _AI_LIKE_STATUS,
+            ),
         )
         .order_by(func.coalesce(Evidence.evidence_date, Evidence.created_at).desc())
         .limit(_EVIDENCE_CANDIDATE_LIMIT)

@@ -19,7 +19,7 @@ import json
 import logging
 import re
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 
 from app.core.agent import AgentTool
 from app.models.evidence import (
@@ -33,6 +33,7 @@ from app.models.knowledge import NodeType, RelationType
 logger = logging.getLogger(__name__)
 
 _SIGNAL_SEARCH_CANDIDATE_LIMIT = 200
+_AI_LIKE_STATUS = "ai_like"
 
 _CONFLICT_SIGNAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("explicit_disagreement", re.compile(r"\bi disagree\b", re.IGNORECASE)),
@@ -208,6 +209,31 @@ def _float_or_none(value: object) -> float | None:
     return value if isinstance(value, int | float) else None
 
 
+def _usable_evidence_condition():
+    return or_(
+        Evidence.ai_contamination_status.is_(None),
+        Evidence.ai_contamination_status != _AI_LIKE_STATUS,
+    )
+
+
+def _contamination_status(row: Evidence) -> str | None:
+    status = getattr(row, "ai_contamination_status", None)
+    return status if isinstance(status, str) else None
+
+
+def _contamination_rank(row: Evidence) -> int:
+    status = _contamination_status(row)
+    if status == "human":
+        return 0
+    if status is None:
+        return 1
+    if status in {"uncertain", "insufficient_baseline"}:
+        return 2
+    if status == "error":
+        return 3
+    return 4
+
+
 def _serialize_provenance_envelope(row: Evidence) -> dict[str, object]:
     raw_context = _dict_or_none(getattr(row, "raw_context_json", None))
     provenance = _dict_or_none(getattr(row, "provenance_json", None))
@@ -233,8 +259,20 @@ def _serialize_provenance_envelope(row: Evidence) -> dict[str, object]:
         "raw_body_ref": _str_or_none(getattr(row, "raw_body_ref", None)),
         "surrounding_context_ref": _str_or_none(raw_context.get("ref")) if raw_context else None,
         "raw_context": raw_context,
-        "ai_contamination_confidence": _float_or_none(
+        "ai_contamination_score": _float_or_none(
             getattr(row, "ai_contamination_score", None)
+        ),
+        "ai_contamination_confidence": _float_or_none(
+            getattr(row, "ai_contamination_confidence", None)
+        ),
+        "ai_contamination_status": _str_or_none(
+            getattr(row, "ai_contamination_status", None)
+        ),
+        "ai_contamination_reasoning": _str_or_none(
+            getattr(row, "ai_contamination_reasoning", None)
+        ),
+        "ai_contamination_provenance": _dict_or_none(
+            getattr(row, "ai_contamination_provenance_json", None)
         ),
         "provenance": provenance,
         "provenance_confidence": _float_or_none(provenance.get("confidence")) if provenance else None,
@@ -259,6 +297,8 @@ def _prioritize_rows(rows: list[Evidence], signal_mode: str) -> list[Evidence]:
     """Filter/sort rows for explorer high-signal evidence mining."""
     annotated: list[tuple[Evidence, dict[str, object]]] = []
     for row in rows:
+        if _contamination_status(row) == _AI_LIKE_STATUS:
+            continue
         signal = _build_signal_metadata(row)
         if _include_for_signal_mode(signal_mode, signal):
             annotated.append((row, signal))
@@ -266,6 +306,7 @@ def _prioritize_rows(rows: list[Evidence], signal_mode: str) -> list[Evidence]:
     annotated.sort(
         key=lambda item: (
             item[0].explored,
+            _contamination_rank(item[0]),
             -_score_for_signal_mode(signal_mode, item[1]),
             -(len(item[1]["conflict_matches"]) + len(item[1]["approval_matches"])),
             _signal_sort_timestamp(item[0]),
@@ -409,7 +450,11 @@ def build_explorer_tools(
         if signal_mode == "all":
             stmt = (
                 select(Evidence)
-                .where(Evidence.mini_id == mini_id, Evidence.source_type == source_type)
+                .where(
+                    Evidence.mini_id == mini_id,
+                    Evidence.source_type == source_type,
+                    _usable_evidence_condition(),
+                )
                 .order_by(func.coalesce(Evidence.evidence_date, Evidence.created_at))
                 .offset(offset)
                 .limit(page_size)
@@ -420,13 +465,18 @@ def build_explorer_tools(
             count_stmt = (
                 select(func.count())
                 .select_from(Evidence)
-                .where(Evidence.mini_id == mini_id, Evidence.source_type == source_type)
+                .where(
+                    Evidence.mini_id == mini_id,
+                    Evidence.source_type == source_type,
+                    _usable_evidence_condition(),
+                )
             )
             total = (await db_session.execute(count_stmt)).scalar() or 0
         else:
             stmt = select(Evidence).where(
                 Evidence.mini_id == mini_id,
                 Evidence.source_type == source_type,
+                _usable_evidence_condition(),
             )
             result = await db_session.execute(stmt)
             prioritized = _prioritize_rows(result.scalars().all(), signal_mode)
@@ -464,6 +514,7 @@ def build_explorer_tools(
         conditions = [
             Evidence.mini_id == mini_id,
             Evidence.content.ilike(f"%{query}%"),
+            _usable_evidence_condition(),
         ]
         if source_type:
             conditions.append(Evidence.source_type == source_type)
@@ -490,7 +541,11 @@ def build_explorer_tools(
     # ── read_item ──────────────────────────────────────────────────────────
 
     async def read_item(item_id: str) -> str:
-        stmt = select(Evidence).where(Evidence.id == item_id, Evidence.mini_id == mini_id)
+        stmt = select(Evidence).where(
+            Evidence.id == item_id,
+            Evidence.mini_id == mini_id,
+            _usable_evidence_condition(),
+        )
         result = await db_session.execute(stmt)
         row = result.scalar_one_or_none()
         if not row:
