@@ -744,3 +744,32 @@ class ExtractedValues(BaseModel):
     personality_patterns: PersonalityPattern
     behavioral_boundaries: BehavioralBoundary
     technical_profile: TechnicalProfile = TechnicalProfile()
+
+
+# -- Frameworks-at-risk schemas (ALLIE-519) --
+
+AtRiskReason = Literal["low_band", "declining_trend", "low_evidence"]
+
+
+class AtRiskFramework(BaseModel):
+    """A framework flagged for owner review via the active-learning loop."""
+
+    framework_id: str
+    condition: str
+    action: str
+    value: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    revision: int = 0
+    confidence_history: list[ConfidenceHistoryEntry] = Field(default_factory=list)
+    reason: AtRiskReason
+    # Human-readable decline trend summary, e.g. "↘ -0.15 over 4 cycles"
+    trend_summary: str | None = None
+    retired: bool = False
+
+
+class RetireFrameworkResponse(BaseModel):
+    """Response after retiring a framework."""
+
+    framework_id: str
+    retired: bool
+    message: str

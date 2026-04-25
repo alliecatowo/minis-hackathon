@@ -916,3 +916,43 @@ export async function listOrgTeams(orgId: string): Promise<Team[]> {
   if (!res.ok) throw new Error("Failed to fetch org teams");
   return res.json();
 }
+
+// --- Frameworks-at-risk API functions ---
+
+export type AtRiskReason = "low_band" | "declining_trend" | "low_evidence";
+
+export interface AtRiskFramework {
+  framework_id: string;
+  condition: string;
+  action: string;
+  value: string;
+  confidence: number;
+  revision: number;
+  confidence_history: unknown[];
+  reason: AtRiskReason;
+  trend_summary: string | null;
+  retired: boolean;
+}
+
+export async function getFrameworksAtRisk(miniId: string): Promise<AtRiskFramework[]> {
+  const res = await fetch(`${API_BASE}/minis/${encodeURIComponent(miniId)}/frameworks-at-risk`);
+  if (!res.ok) {
+    throw new Error("Failed to fetch frameworks at risk");
+  }
+  return res.json();
+}
+
+export async function retireFramework(
+  miniId: string,
+  frameworkId: string,
+): Promise<{ framework_id: string; retired: boolean; message: string }> {
+  const res = await fetch(
+    `${API_BASE}/minis/${encodeURIComponent(miniId)}/frameworks/${encodeURIComponent(frameworkId)}/retire`,
+    { method: "POST" },
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Failed to retire framework" }));
+    throw new Error(err.detail || "Failed to retire framework");
+  }
+  return res.json();
+}

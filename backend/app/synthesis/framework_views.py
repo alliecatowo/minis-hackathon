@@ -1,29 +1,47 @@
-"""Shared view helper for decision-framework serialisation.
+"""Shared formatter for decision-framework views.
 
-A single ``_format_decision_framework`` converts a raw framework dict (from
-``principles_json["decision_frameworks"]["frameworks"]``) into the canonical
-wire shape returned by the chat tool, the public ``/frameworks`` route, and
-any future surface that needs the same representation.
-
-Wire shape::
-
-    {
-        "framework_id": str,
-        "trigger":      str,   # the ``condition`` field
-        "action":       str,   # first item of ``decision_order`` or tradeoff
-        "value":        str,   # first value_id stripped of "value:" prefix
-        "confidence":   float,
-        "revision":     int,
-        "badge":        str,   # "" | "HIGH CONFIDENCE" | "LOW CONFIDENCE"
-    }
+This module keeps a single normalization path for framework payloads so the
+chat tool, public routes, and owner-only review surfaces all agree on shape
+and filtering rules.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-_HIGH_CONFIDENCE_THRESHOLD = 0.7
-_LOW_CONFIDENCE_THRESHOLD = 0.3
+CONFIDENCE_BAND_LOW: float = 0.3
+CONFIDENCE_BAND_HIGH: float = 0.7
+
+
+def confidence_band(confidence: float) -> str:
+    """Return confidence band label: LOW, MEDIUM, or HIGH."""
+    if confidence < CONFIDENCE_BAND_LOW:
+        return "LOW"
+    if confidence >= CONFIDENCE_BAND_HIGH:
+        return "HIGH"
+    return "MEDIUM"
+
+
+def _coerce_str(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _first_str(value: Any) -> str:
+    if isinstance(value, list) and value and isinstance(value[0], str):
+        return value[0].strip()
+    return ""
+
+
+def _get_frameworks(principles_json: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(principles_json, dict):
+        return []
+    df_payload = principles_json.get("decision_frameworks")
+    if not isinstance(df_payload, dict):
+        return []
+    raw = df_payload.get("frameworks")
+    if not isinstance(raw, list):
+        return []
+    return [fw for fw in raw if isinstance(fw, dict)]
 
 
 def _format_decision_framework(fw: dict[str, Any]) -> dict[str, Any]:
@@ -72,9 +90,9 @@ def _format_decision_framework(fw: dict[str, Any]) -> dict[str, Any]:
             value = raw_vid.removeprefix("value:").replace("_", " ").strip()
 
     # Badge string
-    if confidence >= _HIGH_CONFIDENCE_THRESHOLD:
+    if confidence >= CONFIDENCE_BAND_HIGH:
         badge = "HIGH CONFIDENCE"
-    elif confidence < _LOW_CONFIDENCE_THRESHOLD:
+    elif confidence < CONFIDENCE_BAND_LOW:
         badge = "LOW CONFIDENCE"
     else:
         badge = ""
@@ -82,11 +100,20 @@ def _format_decision_framework(fw: dict[str, Any]) -> dict[str, Any]:
     return {
         "framework_id": fw.get("framework_id") or "",
         "trigger": trigger,
+        "condition": trigger,
         "action": action,
         "value": value,
+        "tradeoff": _coerce_str(fw.get("tradeoff")),
         "confidence": round(confidence, 4),
+        "confidence_band": confidence_band(confidence),
         "revision": revision,
         "badge": badge,
+        "confidence_history": fw.get("confidence_history") or [],
+        "priority": _coerce_str(fw.get("priority")) or "medium",
+        "temporal_span": fw.get("temporal_span") or {},
+        "evidence_ids": fw.get("evidence_ids") or [],
+        "specificity_level": _coerce_str(fw.get("specificity_level")) or "case_pattern",
+        "retired": bool(fw.get("retired", False)),
     }
 
 
@@ -95,39 +122,20 @@ def format_decision_frameworks(
     *,
     min_confidence: float = 0.0,
     limit: int = 10,
+    include_retired: bool = False,
 ) -> list[dict[str, Any]]:
-    """Return a confidence-ranked list of formatted framework dicts.
+    """Return normalized frameworks sorted by confidence and revision.
 
-    Args:
-        principles_json: The mini's ``principles_json`` blob.
-        min_confidence:  Only include frameworks with confidence >= this value.
-        limit:           Maximum number of results to return.
-
-    Returns:
-        List of dicts in wire shape, sorted by confidence desc then revision desc.
+    The returned entries include both legacy wire keys (trigger/badge) and the
+    richer fields needed by frameworks-at-risk and owner review surfaces.
     """
-    if not isinstance(principles_json, dict):
-        return []
+    result = [_format_decision_framework(raw) for raw in _get_frameworks(principles_json)]
 
-    df_payload = principles_json.get("decision_frameworks")
-    if not isinstance(df_payload, dict):
-        return []
+    if not include_retired:
+        result = [fw for fw in result if not fw.get("retired", False)]
 
-    raw_frameworks = df_payload.get("frameworks")
-    if not isinstance(raw_frameworks, list):
-        return []
-
-    formatted = [
-        _format_decision_framework(fw)
-        for fw in raw_frameworks
-        if isinstance(fw, dict)
-    ]
-
-    # Filter by min_confidence
     if min_confidence > 0.0:
-        formatted = [f for f in formatted if f["confidence"] >= min_confidence]
+        result = [fw for fw in result if fw["confidence"] >= min_confidence]
 
-    # Sort: confidence desc, revision desc
-    formatted.sort(key=lambda f: (-f["confidence"], -f["revision"]))
-
-    return formatted[:limit]
+    result.sort(key=lambda fw: (-fw["confidence"], -fw["revision"]))
+    return result[:limit]

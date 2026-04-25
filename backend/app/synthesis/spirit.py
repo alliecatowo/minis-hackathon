@@ -58,10 +58,12 @@ def _render_decision_frameworks(
     if not isinstance(raw_frameworks, list) or not raw_frameworks:
         return ""
 
-    # Normalise and parse each framework dict
+    # Normalise and parse each framework dict — skip retired entries
     parsed: list[dict[str, Any]] = []
     for raw in raw_frameworks:
         if not isinstance(raw, dict):
+            continue
+        if raw.get("retired", False):
             continue
         try:
             confidence = float(raw.get("confidence", 0.5))
