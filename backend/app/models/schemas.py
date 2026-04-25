@@ -294,6 +294,16 @@ class ReviewPredictionFrameworkSignalV1(BaseModel):
         default_factory=list
     )
     provenance_ids: list[str] = Field(default_factory=list)
+    temporal_stability_bonus: float = Field(default=0.0, ge=0.0)
+    scope_match_boost: float = Field(default=0.0, ge=0.0)
+
+
+class ReviewFrameworkTemporalBalanceV1(BaseModel):
+    visible_stable_framework_ids: list[str] = Field(default_factory=list)
+    visible_project_preference_ids: list[str] = Field(default_factory=list)
+    stable_frameworks_preserved: bool = False
+    rationale: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class ReviewPredictionSignalV1(BaseModel):
@@ -365,6 +375,7 @@ class ArtifactReviewV1(BaseModel):
     private_assessment: ReviewPredictionPrivateAssessmentV1
     delivery_policy: ReviewPredictionDeliveryPolicyV1
     expressed_feedback: ReviewPredictionExpressedFeedbackV1
+    framework_temporal_balance: ReviewFrameworkTemporalBalanceV1 | None = None
 
 
 class ReviewPredictionV1(ArtifactReviewV1):

@@ -617,3 +617,18 @@ class TestRunEval:
         assert "long_horizon_default" in rubric_keys
         assert "recency_as_signal_not_policy" in rubric_keys
         assert "canonical_hottest_take_consistency" in rubric_keys
+
+    def test_checked_in_alliecatowo_fixture_includes_temporal_balance_regression_turn(self):
+        fixture_path = (
+            Path(__file__).resolve().parents[2]
+            / "eval"
+            / "golden_turns"
+            / "alliecatowo.yaml"
+        )
+        fixture = GoldenTurnFile.from_yaml(fixture_path)
+        turn = next(t for t in fixture.turns if t.id == "temporal_balance_regression")
+
+        rubric_keys = {list(item.keys())[0] for item in turn.rubric}
+        assert "temporal_balance_scoped_preference" in rubric_keys
+        assert "durable_framework_survives" in rubric_keys
+        assert "scope_aware_update_gate" in rubric_keys

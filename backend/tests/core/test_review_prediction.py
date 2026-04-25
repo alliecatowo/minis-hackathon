@@ -149,6 +149,145 @@ def _decision_framework_payload() -> dict[str, Any]:
     }
 
 
+def _decision_framework_temporal_balance_payload() -> dict[str, Any]:
+    return {
+        "decision_frameworks": {
+            "version": "decision_frameworks_v1",
+            "source": "principles_motivations_normalizer",
+            "frameworks": [
+                {
+                    "framework_id": "fw-legacy-core-review",
+                    "name": "Global review posture",
+                    "condition": "Keep pull requests small and require comprehensive tests for behavior changes.",
+                    "priority": "critical",
+                    "tradeoff": "depth vs velocity",
+                    "escalation_threshold": "high",
+                    "counterexamples": [],
+                    "temporal_span": {
+                        "first_seen_at": "2023-02-01T00:00:00Z",
+                        "last_reinforced_at": "2026-01-01T00:00:00Z",
+                        "source_dates": ["2023-02-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+                    },
+                    "evidence_ids": ["ev-framework-legacy-1"],
+                    "evidence_provenance": [
+                        {
+                            "id": "prov-legacy-1",
+                            "source_type": "review",
+                            "item_type": "comment",
+                        }
+                    ],
+                    "counter_evidence_ids": [],
+                    "confidence": 0.9,
+                    "specificity_level": "global",
+                    "value_ids": ["quality", "maintainability"],
+                    "motivation_ids": ["quality"],
+                    "decision_order": ["if scope is global", "prioritize long-term consistency"],
+                    "approval_policy": "block",
+                    "revision": 8,
+                },
+                {
+                    "framework_id": "fw-local-payments-webhook",
+                    "name": "Payments webhook trial-first updates",
+                    "condition": "backend/services/payments/webhooks changes should optimize for short-term delivery",
+                    "priority": "high",
+                    "tradeoff": "speed vs procedural consistency",
+                    "escalation_threshold": "medium",
+                    "counterexamples": [],
+                    "evidence_ids": ["ev-framework-payments-webhook-1"],
+                    "evidence_provenance": [],
+                    "counter_evidence_ids": [],
+                    "confidence": 0.82,
+                    "specificity_level": "scope_local",
+                    "value_ids": ["velocity"],
+                    "motivation_ids": ["pragmatism"],
+                    "decision_order": [
+                        "if in payments service",
+                        "accept delivery cadence adjustments",
+                    ],
+                    "approval_policy": "note",
+                    "revision": 1,
+                },
+                {
+                    "framework_id": "fw-local-payments-worker",
+                    "name": "Payments worker refactor posture",
+                    "condition": "backend/services/payments should prefer fewer ceremony changes",
+                    "priority": "medium",
+                    "tradeoff": "simplicity vs formality",
+                    "escalation_threshold": "medium",
+                    "counterexamples": [],
+                    "evidence_ids": ["ev-framework-payments-worker-1"],
+                    "evidence_provenance": [],
+                    "counter_evidence_ids": [],
+                    "confidence": 0.77,
+                    "specificity_level": "scope_local",
+                    "value_ids": ["velocity"],
+                    "motivation_ids": ["pragmatism"],
+                    "decision_order": ["if worker touched", "avoid process-heavy change"],
+                    "approval_policy": "note",
+                    "revision": 1,
+                },
+                {
+                    "framework_id": "fw-local-payments-batch",
+                    "name": "Payments batch behavior",
+                    "condition": "payments batch handler should focus on throughput in this repo",
+                    "priority": "medium",
+                    "tradeoff": "throughput vs strict consistency",
+                    "escalation_threshold": "medium",
+                    "counterexamples": [],
+                    "evidence_ids": ["ev-framework-payments-batch-1"],
+                    "evidence_provenance": [],
+                    "counter_evidence_ids": [],
+                    "confidence": 0.74,
+                    "specificity_level": "scope_local",
+                    "value_ids": ["throughput"],
+                    "motivation_ids": ["pragmatism"],
+                    "decision_order": ["if batch job touched", "lean to immediate delivery"],
+                    "approval_policy": "note",
+                    "revision": 1,
+                },
+                {
+                    "framework_id": "fw-local-payments-latency",
+                    "name": "Payments latency preference",
+                    "condition": "when adjusting payments latency, prefer quick observability signals",
+                    "priority": "low",
+                    "tradeoff": "latency vs validation",
+                    "escalation_threshold": "medium",
+                    "counterexamples": [],
+                    "evidence_ids": ["ev-framework-payments-latency-1"],
+                    "evidence_provenance": [],
+                    "counter_evidence_ids": [],
+                    "confidence": 0.68,
+                    "specificity_level": "scope_local",
+                    "value_ids": ["throughput"],
+                    "motivation_ids": ["pragmatism"],
+                    "decision_order": ["if latency touched", "ship fast and iterate"],
+                    "approval_policy": "note",
+                    "revision": 1,
+                },
+                {
+                    "framework_id": "fw-local-payments-docs",
+                    "name": "Payments docs-first preference",
+                    "condition": "payments work should avoid extra design docs and document in code comments",
+                    "priority": "low",
+                    "tradeoff": "docs vs direct shipping",
+                    "escalation_threshold": "medium",
+                    "counterexamples": [],
+                    "evidence_ids": ["ev-framework-payments-docs-1"],
+                    "evidence_provenance": [],
+                    "counter_evidence_ids": [],
+                    "confidence": 0.64,
+                    "specificity_level": "scope_local",
+                    "value_ids": ["velocity"],
+                    "motivation_ids": ["pragmatism"],
+                    "decision_order": ["if docs are skipped", "prioritize implementation speed"],
+                    "approval_policy": "note",
+                    "revision": 1,
+                },
+            ],
+        }
+    }
+
+
 def test_review_prediction_request_requires_some_change_input():
     with pytest.raises(ValidationError):
         ReviewPredictionRequestV1()
@@ -217,6 +356,38 @@ def test_build_review_prediction_includes_framework_signals_from_decision_framew
     assert signal.revision == 3
     assert signal.evidence_ids == ["ev-framework-tests-1"]
     assert any(item.id == "prov-tests-1" for item in signal.evidence_provenance)
+
+
+def test_temporal_balance_preserves_stable_framework_with_local_scoped_preference():
+    mini = _mini(principles_json=_decision_framework_temporal_balance_payload())
+    body = ReviewPredictionRequestV1(
+        title="Update payments webhook retry handling in payments service",
+        description="Touch a small webhook handler and tune retry timing for release speed.",
+        changed_files=["backend/services/payments/webhooks.py"],
+        repo_name="acme/payments-service",
+        author_model="senior_peer",
+        delivery_context="normal",
+    )
+
+    prediction = build_review_prediction_v1(mini, body)
+    assert prediction.framework_temporal_balance is not None
+    assert prediction.framework_temporal_balance.stable_frameworks_preserved is True
+    assert prediction.framework_temporal_balance.visible_stable_framework_ids == [
+        "fw-legacy-core-review"
+    ]
+    assert "fw-local-payments-webhook" in prediction.framework_temporal_balance.visible_project_preference_ids
+    assert prediction.framework_temporal_balance.visible_project_preference_ids
+    assert len(prediction.framework_temporal_balance.visible_project_preference_ids) >= 1
+    assert prediction.framework_temporal_balance.rationale.startswith(
+        "Scoped signals lead"
+    )
+    assert len(prediction.framework_signals) == 5
+
+    visible_ids = [signal.framework_id for signal in prediction.framework_signals]
+    assert visible_ids[:2] == ["fw-local-payments-webhook", "fw-local-payments-worker"]
+    assert "fw-legacy-core-review" in visible_ids
+    assert prediction.framework_signals[0].framework_id == "fw-local-payments-webhook"
+    assert prediction.framework_signals[0].framework_id != "fw-legacy-core-review"
 
 
 def test_design_doc_artifact_review_uses_generic_signoff_language():

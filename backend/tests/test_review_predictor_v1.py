@@ -198,6 +198,8 @@ def test_envelope_default_framework_signals_is_empty_list():
     assert envelope.framework_signals == []
     dumped = envelope.model_dump(mode="json")
     assert dumped["framework_signals"] == []
+    assert "framework_temporal_balance" in dumped
+    assert dumped["framework_temporal_balance"] is None
 
 
 def test_envelope_round_trip_is_json_serialisable():
