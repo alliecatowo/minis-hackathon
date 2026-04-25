@@ -331,6 +331,22 @@ class ReviewPredictionEvidenceV1(BaseModel):
         "input",
     ]
     detail: str
+    ranking_signals: list["ReviewPredictionEvidenceRankingSignalV1"] = Field(
+        default_factory=list
+    )
+
+
+class ReviewPredictionEvidenceRankingSignalV1(BaseModel):
+    name: Literal[
+        "lexical_relevance",
+        "durable_framework",
+        "recent_local_context",
+        "framework_relevance",
+        "relationship_context",
+        "audience_context",
+    ]
+    value: float = Field(ge=0.0, le=1.0)
+    reason: str
 
 
 class ReviewPredictionFrameworkSignalV1(BaseModel):

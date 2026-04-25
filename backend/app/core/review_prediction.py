@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,7 @@ from app.models.schemas import (
     ReviewPredictionCommentV1,
     ReviewFrameworkTemporalBalanceV1,
     ReviewPredictionDeliveryPolicyV1,
+    ReviewPredictionEvidenceRankingSignalV1,
     ReviewPredictionEvidenceV1,
     ReviewPredictionExpressedFeedbackV1,
     ReviewPredictionPrivateAssessmentV1,
@@ -258,6 +259,116 @@ _FRAMEWORK_LOCAL_NORM_TERMS = {
     "convention",
     "norm",
 }
+_RELATIONSHIP_TERMS = {
+    "junior_peer": {
+        "junior",
+        "newer",
+        "newcomer",
+        "onboard",
+        "onboarding",
+        "mentee",
+    },
+    "trusted_peer": {
+        "trusted",
+        "collaborator",
+        "peer",
+        "teammate",
+        "high-trust",
+        "high trust",
+        "known",
+    },
+    "senior_peer": {
+        "senior",
+        "staff",
+        "principal",
+        "experienced",
+        "peer",
+        "maintainer",
+    },
+    "unknown": {
+        "unknown",
+        "external",
+        "contributor",
+        "oss",
+        "open source",
+    },
+}
+_AUDIENCE_TERMS = {
+    "junior_peer": {
+        "junior",
+        "public",
+        "cross-team",
+        "cross team",
+        "teaching",
+        "coaching",
+        "onboarding",
+    },
+    "trusted_peer": {
+        "trusted",
+        "teammate",
+        "peer",
+        "private",
+        "same-team",
+        "same team",
+    },
+    "senior_peer": {
+        "senior",
+        "staff",
+        "peer",
+        "maintainer",
+    },
+    "unknown": {
+        "unknown",
+        "public",
+        "cross-team",
+        "cross team",
+        "external",
+        "oss",
+        "open source",
+    },
+}
+
+
+def _term_variants(value: str) -> set[str]:
+    normalized = value.strip().lower()
+    if not normalized or normalized == "unknown":
+        return set()
+    return {normalized, normalized.replace("_", "-"), normalized.replace("_", " ")}
+
+
+def _relationship_terms_for_context(
+    author_model: str,
+    relationship_context: ReviewRelationshipContextV1 | None,
+) -> set[str]:
+    terms: set[str] = set()
+    if author_model != "unknown":
+        terms.update(_RELATIONSHIP_TERMS.get(author_model, set()))
+
+    if relationship_context and relationship_context.data_confidence != "unknown":
+        for field_name in (
+            "reviewer_author_relationship",
+            "trust_level",
+            "mentorship_context",
+        ):
+            terms.update(_term_variants(str(getattr(relationship_context, field_name))))
+    return terms
+
+
+def _audience_terms_for_context(
+    author_model: str,
+    relationship_context: ReviewRelationshipContextV1 | None,
+) -> set[str]:
+    terms = set(_AUDIENCE_TERMS.get(author_model, set()))
+    if relationship_context and relationship_context.data_confidence != "unknown":
+        for field_name in ("channel", "team_alignment", "audience_sensitivity"):
+            terms.update(_term_variants(str(getattr(relationship_context, field_name))))
+        if relationship_context.channel == "public_review":
+            terms.add("public")
+        if relationship_context.team_alignment == "cross_team":
+            terms.update({"cross-team", "cross team"})
+        if relationship_context.team_alignment == "external":
+            terms.update({"external", "oss", "open source"})
+    return terms
 
 
 def _normalize_text(value: str | None) -> str:
@@ -976,6 +1087,66 @@ def _review_entries(behavioral_context: BehavioralContext | None) -> list[dict[s
     return entries
 
 
+def _audience_or_relationship_context_entries(
+    behavioral_context: BehavioralContext | None,
+    author_model: str,
+    relationship_context: ReviewRelationshipContextV1 | None = None,
+) -> list[dict[str, str]]:
+    if not behavioral_context:
+        return []
+
+    relationship_terms = _relationship_terms_for_context(author_model, relationship_context)
+    audience_terms = _audience_terms_for_context(author_model, relationship_context)
+    entries: list[dict[str, str]] = []
+    for entry in behavioral_context.contexts:
+        context_text = " ".join(
+            [
+                entry.context,
+                entry.summary,
+                " ".join(entry.behaviors),
+                entry.communication_style or "",
+                entry.decision_style or "",
+                " ".join(entry.evidence),
+            ]
+        ).lower()
+        relationship_match = _contains_any(context_text, relationship_terms)
+        audience_match = _contains_any(context_text, audience_terms)
+        if not relationship_match and not audience_match:
+            continue
+
+        markers: list[str] = []
+        if author_model != "unknown" and relationship_match:
+            markers.append(f"relationship={author_model}")
+        elif (
+            relationship_context
+            and relationship_context.data_confidence != "unknown"
+            and relationship_match
+        ):
+            markers.append(
+                f"relationship={relationship_context.reviewer_author_relationship}"
+            )
+        if audience_match:
+            markers.append("audience-context")
+
+        detail_parts = [entry.summary]
+        if entry.behaviors:
+            detail_parts.append("; ".join(entry.behaviors[:3]))
+        if entry.communication_style:
+            detail_parts.append(entry.communication_style)
+        if entry.decision_style:
+            detail_parts.append(entry.decision_style)
+        if entry.evidence:
+            detail_parts.append(f"evidence: {'; '.join(entry.evidence[:2])}")
+        marker_text = f" ({', '.join(markers)})" if markers else ""
+        entries.append(
+            {
+                "context": entry.context,
+                "detail": f"{entry.context}{marker_text}: {' '.join(detail_parts)}",
+            }
+        )
+    return entries[:4]
+
+
 def _principle_entries(mini: Any, request_text: str) -> list[dict[str, Any]]:
     raw = getattr(mini, "principles_json", None)
     if not isinstance(raw, dict):
@@ -1274,6 +1445,8 @@ def _build_evidence_pool(
     mini: Any,
     body: ArtifactReviewRequestBaseV1,
     same_repo_precedent: dict[str, Any] | None = None,
+    framework_signals: list[ReviewPredictionFrameworkSignalV1] | None = None,
+    relationship_context: ReviewRelationshipContextV1 | None = None,
 ) -> list[ReviewPredictionEvidenceV1]:
     request_text = _build_request_text(body)
     behavioral_context = _parse_behavioral_context(getattr(mini, "behavioral_context_json", None))
@@ -1281,7 +1454,13 @@ def _build_evidence_pool(
 
     evidence: list[ReviewPredictionEvidenceV1] = []
 
-    for entry in _review_entries(behavioral_context)[:2]:
+    review_entries = _review_entries(behavioral_context)
+    audience_entries = _audience_or_relationship_context_entries(
+        behavioral_context,
+        body.author_model,
+        relationship_context,
+    )
+    for entry in _dedupe_context_entries([*audience_entries, *review_entries])[:6]:
         evidence.append(
             ReviewPredictionEvidenceV1(
                 source="behavioral_context",
@@ -1306,6 +1485,20 @@ def _build_evidence_pool(
             ReviewPredictionEvidenceV1(
                 source="principles",
                 detail=entry["detail"][:300],
+            )
+        )
+
+    for signal in (framework_signals or [])[:3]:
+        framework_detail = (
+            f"framework_id={signal.framework_id}; {signal.name}: {signal.summary} "
+            f"(confidence: {signal.confidence:.2f}; reason: {signal.reason}; "
+            f"temporal_stability_bonus: {signal.temporal_stability_bonus:.2f}; "
+            f"scope_match_boost: {signal.scope_match_boost:.2f})"
+        )
+        evidence.append(
+            ReviewPredictionEvidenceV1(
+                source="principles",
+                detail=framework_detail[:300],
             )
         )
 
@@ -1381,6 +1574,18 @@ def review_prediction_insufficiency_reason(
     )
 
 
+def _dedupe_context_entries(entries: list[dict[str, str]]) -> list[dict[str, str]]:
+    deduped: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in entries:
+        key = (entry.get("context", ""), entry.get("detail", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(entry)
+    return deduped
+
+
 def _infer_recency_score(detail: str) -> float:
     lower_detail = detail.lower()
     if any(keyword in lower_detail for keyword in _RECENCY_HINT_KEYWORDS):
@@ -1439,49 +1644,207 @@ def _stability_components(
     return principle_frequency, cross_context_consistency, source_confidence
 
 
-def _blended_evidence_score(
+def _relationship_fit(
+    detail: str,
+    author_model: str,
+    relationship_context: ReviewRelationshipContextV1 | None,
+) -> float:
+    if (
+        author_model == "unknown"
+        and (
+            relationship_context is None
+            or relationship_context.data_confidence == "unknown"
+        )
+    ):
+        return 0.0
+    terms = _relationship_terms_for_context(author_model, relationship_context)
+    if not terms:
+        return 0.0
+    return 1.0 if _contains_any(detail, terms) else 0.0
+
+
+def _audience_fit(
+    detail: str,
+    author_model: str,
+    relationship_context: ReviewRelationshipContextV1 | None,
+) -> float:
+    terms = _audience_terms_for_context(author_model, relationship_context)
+    if not terms:
+        return 0.0
+    return 1.0 if _contains_any(detail, terms) else 0.0
+
+
+def _framework_relevance_score(
+    item: ReviewPredictionEvidenceV1,
+    keywords: set[str],
+) -> float:
+    lower_detail = item.detail.lower()
+    lexical = sum(1 for keyword in keywords if keyword in lower_detail)
+    if item.source == "principles" and "framework_id=" in lower_detail:
+        return min(1.0, 0.78 + min(lexical, 3) * 0.06)
+    if item.source == "principles":
+        return min(0.9, 0.62 + min(lexical, 3) * 0.06)
+    if item.source in {"behavioral_context", "motivations"} and lexical > 0:
+        return min(0.65, 0.35 + lexical * 0.08)
+    return min(0.45, lexical * 0.08)
+
+
+def _recent_local_context_score(item: ReviewPredictionEvidenceV1) -> float:
+    detail = item.detail.lower()
+    recency = _infer_recency_score(item.detail)
+    local_context = (
+        "same-repo" in detail
+        or "scope_match_boost:" in detail
+        or item.source == "evidence"
+        or any(keyword in detail for keyword in _RECENCY_HINT_KEYWORDS)
+    )
+    if not local_context:
+        return recency * 0.25
+    return recency
+
+
+def _ranking_signal(
+    name: Literal[
+        "lexical_relevance",
+        "durable_framework",
+        "recent_local_context",
+        "framework_relevance",
+        "relationship_context",
+        "audience_context",
+    ],
+    value: float,
+    reason: str,
+) -> ReviewPredictionEvidenceRankingSignalV1:
+    return ReviewPredictionEvidenceRankingSignalV1(
+        name=name,
+        value=round(_coerce_confidence(value), 3),
+        reason=reason,
+    )
+
+
+def _rank_evidence_item(
     item: ReviewPredictionEvidenceV1,
     evidence_pool: list[ReviewPredictionEvidenceV1],
     keywords: set[str],
-) -> tuple[float, int]:
+    body: ArtifactReviewRequestBaseV1,
+) -> tuple[float, int, ReviewPredictionEvidenceV1]:
+    resolved_relationship_context = _resolve_relationship_context(body)
     lower_detail = item.detail.lower()
     lexical = sum(1 for keyword in keywords if keyword in lower_detail)
-    recency = _infer_recency_score(item.detail)
+    lexical_relevance = min(lexical / 4.0, 1.0)
+    recent_local_context = _recent_local_context_score(item)
     principle_frequency, cross_context_consistency, source_confidence = _stability_components(
         item,
         evidence_pool,
         keywords,
     )
-    stability = (
+    durable_framework = (
         (principle_frequency * 0.35)
         + (cross_context_consistency * 0.30)
         + (source_confidence * 0.35)
     )
+    framework_relevance = _framework_relevance_score(item, keywords)
+    relationship_context = _relationship_fit(
+        lower_detail,
+        body.author_model,
+        resolved_relationship_context,
+    )
+    audience_context = _audience_fit(
+        lower_detail,
+        body.author_model,
+        resolved_relationship_context,
+    )
 
-    # Explicitly favor stable long-horizon framework signals over recency spikes.
-    blend = (recency * 0.25) + (stability * 0.75)
-    # Keep lexical relevance as a secondary ordering signal.
-    return blend, lexical
+    final_score = (
+        (durable_framework * 0.30)
+        + (recent_local_context * 0.18)
+        + (framework_relevance * 0.18)
+        + (lexical_relevance * 0.16)
+        + (relationship_context * 0.10)
+        + (audience_context * 0.08)
+    )
+
+    relationship_reason = (
+        f"Matched explicit author_model={body.author_model} relationship markers."
+        if relationship_context
+        else (
+            "Author relationship is unknown, so no relationship fit was inferred."
+            if resolved_relationship_context.data_confidence == "unknown"
+            else "No explicit reviewer-author relationship markers matched this evidence."
+        )
+    )
+    audience_reason = (
+        "Matched audience markers for this review context."
+        if audience_context
+        else "No audience-specific marker matched; treated as neutral."
+    )
+    ranked_item = item.model_copy(
+        update={
+            "ranking_signals": [
+                _ranking_signal(
+                    "lexical_relevance",
+                    lexical_relevance,
+                    f"Matched {lexical} request term(s) against the evidence detail.",
+                ),
+                _ranking_signal(
+                    "durable_framework",
+                    durable_framework,
+                    "Combines principle frequency, cross-source consistency, and source reliability.",
+                ),
+                _ranking_signal(
+                    "recent_local_context",
+                    recent_local_context,
+                    "Rewards recent or same-repo local context without letting it overwhelm durable frameworks.",
+                ),
+                _ranking_signal(
+                    "framework_relevance",
+                    framework_relevance,
+                    "Uses extracted principles/framework entries and request overlap as typed framework signal.",
+                ),
+                _ranking_signal(
+                    "relationship_context",
+                    relationship_context,
+                    relationship_reason,
+                ),
+                _ranking_signal(
+                    "audience_context",
+                    audience_context,
+                    audience_reason,
+                ),
+            ]
+        }
+    )
+
+    return final_score, lexical, ranked_item
 
 
 def _pick_evidence(
     evidence_pool: list[ReviewPredictionEvidenceV1],
     keywords: set[str],
+    body: ArtifactReviewRequestBaseV1,
     max_items: int = 2,
 ) -> list[ReviewPredictionEvidenceV1]:
     if not evidence_pool:
         return []
 
-    ranked: list[tuple[float, int, ReviewPredictionEvidenceV1]] = []
+    ranked: list[tuple[float, int, int, ReviewPredictionEvidenceV1]] = []
     for item in evidence_pool:
-        blended, lexical = _blended_evidence_score(item, evidence_pool, keywords)
-        ranked.append((blended, lexical, item))
+        blended, lexical, ranked_item = _rank_evidence_item(item, evidence_pool, keywords, body)
+        context_signal = max(
+            (
+                signal.value
+                for signal in ranked_item.ranking_signals
+                if signal.name in {"relationship_context", "audience_context"}
+            ),
+            default=0.0,
+        )
+        ranked.append((blended, lexical, int(context_signal > 0.0), ranked_item))
 
-    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    selected = [item for _blend, score, item in ranked if score > 0][:max_items]
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    selected = [item for _blend, score, _context, item in ranked if score > 0][:max_items]
     if selected:
         return selected
-    return [item for _blend, _score, item in ranked[:max_items]]
+    return [item for _blend, _score, _context, item in ranked[:max_items]]
 
 
 def _specificity_from_evidence(
@@ -1666,8 +2029,9 @@ def _make_signal(
     confidence: float,
     evidence_pool: list[ReviewPredictionEvidenceV1],
     keywords: set[str],
+    body: ArtifactReviewRequestBaseV1,
 ) -> ReviewPredictionSignalV1:
-    evidence = _pick_evidence(evidence_pool, keywords)
+    evidence = _pick_evidence(evidence_pool, keywords, body)
     return ReviewPredictionSignalV1(
         key=key,
         summary=summary,
@@ -1723,6 +2087,7 @@ def _build_private_assessment(
                 confidence=0.82,
                 evidence_pool=evidence_pool,
                 keywords={"auth", "permission", "security", "token"},
+                body=body,
             )
         )
 
@@ -1736,6 +2101,7 @@ def _build_private_assessment(
                     confidence=0.8,
                     evidence_pool=evidence_pool,
                     keywords={"migration", "schema", "database", "contract"},
+                    body=body,
                 )
             )
         else:
@@ -1747,6 +2113,7 @@ def _build_private_assessment(
                     confidence=0.71,
                     evidence_pool=evidence_pool,
                     keywords={"migration", "schema", "database"},
+                    body=body,
                 )
             )
 
@@ -1759,6 +2126,7 @@ def _build_private_assessment(
                 confidence=0.77,
                 evidence_pool=evidence_pool,
                 keywords={"cache", "async", "queue", "worker", "retry", "timeout"},
+                body=body,
             )
         )
 
@@ -1784,6 +2152,7 @@ def _build_private_assessment(
                 confidence=0.78 if target is blocking_issues else 0.68,
                 evidence_pool=evidence_pool,
                 keywords={"test", "coverage", "review", "quality"},
+                body=body,
             )
         )
     elif has_tests:
@@ -1795,6 +2164,7 @@ def _build_private_assessment(
                 confidence=0.72,
                 evidence_pool=evidence_pool,
                 keywords={"test", "coverage"},
+                body=body,
             )
         )
 
@@ -1815,6 +2185,7 @@ def _build_private_assessment(
                 confidence=0.66,
                 evidence_pool=evidence_pool,
                 keywords={"rollback", "metrics", "logging", "flag", "monitor"},
+                body=body,
             )
         )
     elif has_rollout:
@@ -1826,6 +2197,7 @@ def _build_private_assessment(
                 confidence=0.67,
                 evidence_pool=evidence_pool,
                 keywords={"rollback", "metrics", "logging", "flag", "monitor"},
+                body=body,
             )
         )
 
@@ -1838,6 +2210,7 @@ def _build_private_assessment(
                 confidence=0.58,
                 evidence_pool=evidence_pool,
                 keywords={"clarity", "naming", "readability", "refactor"},
+                body=body,
             )
         )
 
@@ -1850,6 +2223,7 @@ def _build_private_assessment(
                 confidence=0.61,
                 evidence_pool=evidence_pool,
                 keywords={"docs", "documentation", "readme", "comment"},
+                body=body,
             )
         )
     if has_tests and "tests" in precedent_focuses:
@@ -1861,6 +2235,7 @@ def _build_private_assessment(
                 confidence=0.63,
                 evidence_pool=evidence_pool,
                 keywords={"test", "coverage", "review"},
+                body=body,
             )
         )
 
@@ -2213,7 +2588,14 @@ def _build_artifact_review_fields(
     same_repo_precedent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     relationship_context = _resolve_relationship_context(body)
-    evidence_pool = _build_evidence_pool(mini, body, same_repo_precedent=same_repo_precedent)
+    framework_signals, framework_temporal_balance = _build_framework_signals(mini, body)
+    evidence_pool = _build_evidence_pool(
+        mini,
+        body,
+        same_repo_precedent=same_repo_precedent,
+        framework_signals=framework_signals,
+        relationship_context=relationship_context,
+    )
     policy = _derive_delivery_policy(
         mini,
         body,
@@ -2221,7 +2603,6 @@ def _build_artifact_review_fields(
         same_repo_precedent=same_repo_precedent,
         relationship_context=relationship_context,
     )
-    framework_signals, framework_temporal_balance = _build_framework_signals(mini, body)
     framework_conflict_resolution = _resolve_framework_conflicts(
         framework_signals,
         body=body,

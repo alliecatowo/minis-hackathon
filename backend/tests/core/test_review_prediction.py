@@ -507,6 +507,130 @@ def test_temporal_balance_preserves_stable_framework_with_local_scoped_preferenc
     assert prediction.framework_signals[0].framework_id != "fw-legacy-core-review"
 
 
+def test_relationship_aware_evidence_selection_differs_for_trusted_vs_junior_public_context():
+    mini = _mini(
+        behavioral_context_json={
+            "summary": "Review delivery changes substantially by relationship and audience.",
+            "contexts": [
+                {
+                    "context": "trusted_peer_code_review",
+                    "summary": "With trusted teammates, refactor review suppresses naming nits and focuses on merge risk.",
+                    "behaviors": [
+                        "skips refactor polish for trusted collaborators",
+                        "keeps peer feedback compact",
+                    ],
+                    "communication_style": "brief and direct in same-team private review",
+                    "decision_style": "prioritizes merge risk over teaching",
+                    "motivators": ["throughput"],
+                    "stressors": ["review noise"],
+                    "evidence": ["Trusted peer review avoids noisy refactor churn."],
+                },
+                {
+                    "context": "junior_public_cross_team_review",
+                    "summary": "For junior authors in public cross-team review, refactor feedback becomes explanatory.",
+                    "behaviors": [
+                        "turns refactor naming concerns into teaching comments",
+                        "adds context for public cross-team readers",
+                    ],
+                    "communication_style": "warmer and more explicit in public cross-team threads",
+                    "decision_style": "uses review to coach the next revision",
+                    "motivators": ["shared understanding"],
+                    "stressors": ["implicit expectations"],
+                    "evidence": ["Junior public review spells out why a refactor convention matters."],
+                },
+            ],
+        },
+        motivations_json=None,
+        principles_json=None,
+        memory_content="",
+        evidence_cache="",
+    )
+    trusted_body = ReviewPredictionRequestV1(
+        repo_name="acme/api",
+        title="Refactor naming cleanup",
+        description="Renames helper functions for readability without runtime behavior changes.",
+        changed_files=["backend/app/helpers.py"],
+        author_model="trusted_peer",
+        delivery_context="normal",
+    )
+    junior_public_body = ReviewPredictionRequestV1(
+        repo_name="acme/platform",
+        title="Refactor naming cleanup",
+        description="Cross-team public PR renames helper functions for readability.",
+        changed_files=["backend/app/helpers.py"],
+        author_model="junior_peer",
+        delivery_context="normal",
+    )
+
+    trusted_prediction = build_review_prediction_v1(mini, trusted_body)
+    junior_prediction = build_review_prediction_v1(mini, junior_public_body)
+
+    trusted_evidence = trusted_prediction.private_assessment.non_blocking_issues[0].evidence[0]
+    junior_evidence = junior_prediction.private_assessment.non_blocking_issues[0].evidence[0]
+
+    assert "trusted_peer_code_review" in trusted_evidence.detail
+    assert "junior_public_cross_team_review" in junior_evidence.detail
+    assert trusted_evidence.detail != junior_evidence.detail
+    assert {
+        signal.name for signal in trusted_evidence.ranking_signals
+    } >= {"relationship_context", "audience_context", "durable_framework", "recent_local_context"}
+    assert any(
+        signal.name == "relationship_context" and signal.value > 0.0
+        for signal in trusted_evidence.ranking_signals
+    )
+    assert any(
+        signal.name == "audience_context" and signal.value > 0.0
+        for signal in junior_evidence.ranking_signals
+    )
+
+
+def test_unknown_author_keeps_relationship_unknown_but_can_use_public_audience_context():
+    mini = _mini(
+        behavioral_context_json={
+            "summary": "Public and private review styles diverge.",
+            "contexts": [
+                {
+                    "context": "unknown_public_oss_review",
+                    "summary": "For unknown external OSS contributors, refactor review is public and careful.",
+                    "behaviors": ["explains refactor conventions for public readers"],
+                    "communication_style": "careful and explicit",
+                    "decision_style": "does not assume shared team context",
+                    "motivators": ["clarity"],
+                    "stressors": ["unstated expectations"],
+                    "evidence": ["Unknown public contributors get extra context."],
+                }
+            ],
+        },
+        motivations_json=None,
+        principles_json=None,
+        memory_content="",
+        evidence_cache="",
+    )
+    body = ReviewPredictionRequestV1(
+        repo_name="external/project",
+        title="Refactor naming cleanup",
+        description="Public cross-team PR renames helper functions for readability.",
+        changed_files=["backend/app/helpers.py"],
+        author_model="unknown",
+        delivery_context="normal",
+    )
+
+    prediction = build_review_prediction_v1(mini, body)
+    evidence = prediction.private_assessment.non_blocking_issues[0].evidence[0]
+
+    assert prediction.delivery_policy.author_model == "unknown"
+    assert "unknown_public_oss_review" in evidence.detail
+    relationship_signal = next(
+        signal for signal in evidence.ranking_signals if signal.name == "relationship_context"
+    )
+    audience_signal = next(
+        signal for signal in evidence.ranking_signals if signal.name == "audience_context"
+    )
+    assert relationship_signal.value == 0.0
+    assert "unknown" in relationship_signal.reason.lower()
+    assert audience_signal.value > 0.0
+
+
 def test_design_doc_artifact_review_uses_generic_signoff_language():
     mini = _mini()
     body = ArtifactReviewRequestV1(
