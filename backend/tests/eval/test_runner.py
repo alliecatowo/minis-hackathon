@@ -680,6 +680,21 @@ class TestRunEval:
         assert "recency_as_signal_not_policy" in rubric_keys
         assert "canonical_hottest_take_consistency" in rubric_keys
 
+    def test_checked_in_alliecatowo_fixture_includes_temporal_balance_turn(self):
+        fixture_path = (
+            Path(__file__).resolve().parents[2]
+            / "eval"
+            / "golden_turns"
+            / "alliecatowo.yaml"
+        )
+        fixture = GoldenTurnFile.from_yaml(fixture_path)
+        turn = next(t for t in fixture.turns if t.id == "temporal_balance_stable_vs_project_pattern")
+
+        rubric_keys = {list(item.keys())[0] for item in turn.rubric}
+        assert "scoped_preference_is_input" in rubric_keys
+        assert "durable_framework_remains" in rubric_keys
+        assert "repeatability_gate" in rubric_keys
+
     def test_checked_in_alliecatowo_fixture_includes_adversarial_cases(self):
         fixture_path = (
             Path(__file__).resolve().parents[2]

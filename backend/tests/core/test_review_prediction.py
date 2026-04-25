@@ -148,56 +148,218 @@ def _decision_framework_payload() -> dict[str, Any]:
         }
     }
 
-def _conflicting_framework_payload() -> dict[str, Any]:
+
+def _temporal_balance_payload() -> dict[str, Any]:
+    local_frameworks = []
+    for index in range(5):
+        local_frameworks.append(
+            {
+                "framework_id": f"fw-local-{index}",
+                "name": f"Project scoped preference {index}",
+                "condition": "Changes to auth flow in backend/app should move quickly",
+                "priority": "medium",
+                "tradeoff": "speed vs strict global controls",
+                "escalation_threshold": "medium",
+                "counterexamples": [],
+                "evidence_ids": [f"ev-local-{index}"],
+                "evidence_provenance": [],
+                "counter_evidence_ids": [],
+                "confidence": 0.95,
+                "specificity_level": "scope_local",
+                "value_ids": ["velocity"],
+                "motivation_ids": ["pragmatism"],
+                "decision_order": ["if local request changes", "prefer project-specific pattern"],
+                "revision": 2,
+            }
+        )
+
     return {
         "decision_frameworks": {
             "version": "decision_frameworks_v1",
             "source": "principles_motivations_normalizer",
             "frameworks": [
                 {
-                    "framework_id": "fw-architecture-correctness",
-                    "name": "Architecture correctness",
-                    "condition": "architectural API boundary changes need durable correctness",
-                    "priority": "critical",
-                    "tradeoff": "architecture correctness vs shipping speed",
+                    "framework_id": "fw-stable-global",
+                    "name": "Durable reliability boundary",
+                    "condition": "API boundary and rollout protections should remain stable over time",
+                    "priority": "high",
+                    "tradeoff": "durability vs local drift",
                     "escalation_threshold": "high",
                     "counterexamples": [],
-                    "evidence_ids": ["ev-arch-1"],
+                    "evidence_ids": ["ev-stable-1"],
                     "evidence_provenance": [
                         {
-                            "id": "prov-arch-1",
+                            "id": "prov-stable-1",
                             "source_type": "review",
                             "item_type": "comment",
                         }
                     ],
                     "counter_evidence_ids": [],
-                    "confidence": 0.94,
-                    "specificity_level": "contextual",
-                    "value_ids": ["durable-value"],
+                    "confidence": 0.72,
+                    "specificity_level": "global",
+                    "temporal_span": {
+                        "first_seen_at": "2021-03-01T00:00:00Z",
+                        "last_reinforced_at": "2024-08-01T00:00:00Z",
+                        "source_dates": [
+                            "2021-03-01T00:00:00Z",
+                            "2024-08-01T00:00:00Z",
+                        ],
+                    },
+                    "value_ids": ["reliability"],
                     "motivation_ids": ["craftsmanship"],
-                    "decision_order": ["if architectural boundary shifts", "prioritize correctness"],
-                    "revision": 4,
-                },
-                {
-                    "framework_id": "fw-shipping-speed",
-                    "name": "Shipping speed",
-                    "condition": "hotfix patch incident restore service with shipping speed",
-                    "priority": "high",
-                    "tradeoff": "shipping speed vs architecture polish",
-                    "escalation_threshold": "medium",
-                    "counterexamples": [],
-                    "evidence_ids": ["ev-ship-1"],
-                    "evidence_provenance": [
-                        {
-                            "id": "prov-ship-1",
-                            "source_type": "review",
-                            "item_type": "comment",
-                        }
+                    "decision_order": [
+                        "if API boundary changes",
+                        "preserve rollback and test requirements",
                     ],
-                    "counter_evidence_ids": [],
-                    "confidence": 0.86,
-                    "specificity_level": "case_pattern",
-                    "value_ids": ["shipping"],
+                    "revision": 8,
+                },
+                *local_frameworks,
+            ],
+        }
+    }
+
+
+def test_temporal_balance_prefers_local_scope_but_keeps_stable_framework_visible():
+    mini = _mini(principles_json=_temporal_balance_payload())
+    body = ReviewPredictionRequestV1(
+        title="Refactor auth request handling",
+        description=(
+            "Updated API boundary auth flow in backend/app/auth.py with a temporary bypass "
+            "in this repo."
+        ),
+        changed_files=["backend/app/auth.py", "backend/app/session.py"],
+        author_model="senior_peer",
+        delivery_context="normal",
+    )
+
+    prediction = build_review_prediction_v1(mini, body)
+
+    assert len(prediction.framework_signals) == 5
+    signal_ids = [signal.framework_id for signal in prediction.framework_signals]
+    assert "fw-stable-global" in signal_ids
+    assert signal_ids[0].startswith("fw-local-")
+    assert any(
+        signal.framework_id in {f"fw-local-{idx}" for idx in range(5)}
+        and signal.scope_match_boost > 0
+        for signal in prediction.framework_signals
+    )
+    assert any(signal.framework_id == "fw-stable-global" for signal in prediction.framework_signals)
+
+    balance = prediction.framework_temporal_balance
+    assert balance is not None
+    assert balance.stable_frameworks_preserved is True
+    assert "fw-stable-global" in balance.visible_stable_framework_ids
+
+
+def test_review_prediction_request_requires_some_change_input():
+    with pytest.raises(ValidationError):
+        ReviewPredictionRequestV1()
+
+
+def test_review_prediction_request_accepts_artifact_summary_without_diff():
+    body = ArtifactReviewRequestV1(
+        artifact_type="design_doc",
+        title="Design doc for retry isolation",
+        artifact_summary="Proposes splitting queue retry policy from delivery concerns.",
+    )
+
+    assert body.artifact_type == "design_doc"
+
+
+def test_build_review_prediction_returns_structured_request_changes():
+    mini = _mini()
+    body = ReviewPredictionRequestV1(
+        repo_name="acme/api",
+        title="Refactor auth token handling for async worker",
+        description="Touches JWT parsing, queue retries, and database persistence.",
+        diff_summary="Updates permission checks and schema writes with no validation notes.",
+        changed_files=["backend/app/auth.py", "backend/app/workers/token_queue.py"],
+        author_model="senior_peer",
+        delivery_context="normal",
+    )
+
+    prediction = build_review_prediction_v1(mini, body)
+
+    assert prediction.version == "review_prediction_v1"
+    assert prediction.repo_name == "acme/api"
+    assert prediction.delivery_policy.strictness == "high"
+    assert prediction.delivery_policy.teaching_mode is False
+    assert prediction.expressed_feedback.approval_state == "request_changes"
+    blocker_keys = {item.key for item in prediction.private_assessment.blocking_issues}
+    assert "auth-boundary" in blocker_keys
+    assert "runtime-behavior" in blocker_keys
+    assert "test-coverage" in blocker_keys
+    assert prediction.private_assessment.confidence >= 0.5
+    assert prediction.expressed_feedback.comments
+
+
+def test_build_review_prediction_includes_framework_signals_from_decision_frameworks():
+    mini = _mini(principles_json=_decision_framework_payload())
+    body = ReviewPredictionRequestV1(
+        title="Add tests and rollback plan for auth retry migration",
+        description="This change adds queue retry tests and explicit rollback coverage.",
+        changed_files=["backend/app/retry.py", "backend/app/auth.py"],
+        author_model="senior_peer",
+        delivery_context="normal",
+    )
+
+    prediction = build_review_prediction_v1(mini, body)
+
+    assert prediction.framework_signals
+    signal_ids = {signal.framework_id for signal in prediction.framework_signals}
+    assert {"fw-tests", "fw-rollout"}.intersection(signal_ids)
+    framework_by_id = {signal.framework_id: signal for signal in prediction.framework_signals}
+    signal = framework_by_id["fw-tests"]
+    assert signal.name
+    assert "Decision framework" not in signal.name
+    assert signal.summary
+    assert signal.reason
+    assert signal.confidence >= 0.9
+    assert signal.revision_count == 3
+    assert signal.revision == 3
+    assert signal.evidence_ids == ["ev-framework-tests-1"]
+    assert any(item.id == "prov-tests-1" for item in signal.evidence_provenance)
+
+
+def test_design_doc_artifact_review_uses_generic_signoff_language():
+    mini = _mini()
+    body = ArtifactReviewRequestV1(
+        artifact_type="design_doc",
+        repo_name="acme/api",
+        title="Design doc for auth token rotation",
+        description="Outlines auth boundaries, queue retry handling, and rollout notes.",
+        artifact_summary="Proposes rotation steps, rollback posture, and follow-up validation work.",
+        author_model="senior_peer",
+        delivery_context="normal",
+    )
+
+    prediction = build_artifact_review_v1(mini, body)
+
+    assert prediction.version == "artifact_review_v1"
+    assert prediction.artifact_summary is not None
+    assert prediction.artifact_summary.artifact_type == "design_doc"
+    assert prediction.artifact_summary.title == "Design doc for auth token rotation"
+    assert "merge" not in prediction.expressed_feedback.summary.lower()
+    assert "sign-off" in prediction.expressed_feedback.summary.lower()
+
+
+def test_issue_plan_artifact_review_supports_artifact_summary_input():
+    mini = _mini()
+    body = ArtifactReviewRequestV1(
+        artifact_type="issue_plan",
+        title="Issue plan for retry hardening",
+        artifact_summary="Plan covers queue retries, logging, rollback, and test follow-through.",
+        author_model="trusted_peer",
+        delivery_context="normal",
+    )
+
+    prediction = build_artifact_review_v1(mini, body)
+
+    assert prediction.version == "artifact_review_v1"
+    assert prediction.artifact_summary is not None
+    assert prediction.artifact_summary.artifact_type == "issue_plan"
+    assert prediction.private_assessment.confidence >= 0.4
+    assert prediction.expressed_feedback.summary
                     "motivation_ids": ["pragmatism"],
                     "decision_order": ["if hotfix pressure", "keep scope shippable"],
                     "revision": 2,
