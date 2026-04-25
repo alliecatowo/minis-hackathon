@@ -5,8 +5,13 @@ Thin FastMCP wrapper around the Minis backend API.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import stat
+import sys
+import time
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 from uuid import UUID
@@ -14,9 +19,10 @@ from uuid import UUID
 import httpx
 from fastmcp import FastMCP
 
-DEFAULT_BACKEND_URL = "http://localhost:8000"
+DEFAULT_BACKEND_URL = "https://minis.fly.dev"
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 10.0
 DEFAULT_READ_TIMEOUT_SECONDS = 300.0
+DEFAULT_TOKEN_PATH = Path.home() / ".config" / "minis" / "mcp-token"
 _AUTHOR_MODELS = {"junior_peer", "trusted_peer", "senior_peer", "unknown"}
 _DELIVERY_CONTEXTS = {"hotfix", "normal", "exploratory", "incident"}
 
@@ -41,7 +47,17 @@ def _backend_url() -> str:
 
 
 def _auth_token() -> str:
-    return os.environ.get("MINIS_AUTH_TOKEN", "").strip()
+    env_token = os.environ.get("MINIS_AUTH_TOKEN", "").strip()
+    if env_token:
+        return env_token
+
+    token_file = Path(os.environ.get("MINIS_AUTH_TOKEN_FILE", str(DEFAULT_TOKEN_PATH))).expanduser()
+    try:
+        return token_file.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
+    except OSError as exc:
+        raise BackendError(f"Unable to read MINIS auth token file at {token_file}") from exc
 
 
 def _api(path: str) -> str:
@@ -70,6 +86,18 @@ def _auth_headers(require_auth: bool) -> dict[str, str]:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return headers
+
+
+def _token_path() -> Path:
+    return Path(os.environ.get("MINIS_AUTH_TOKEN_FILE", str(DEFAULT_TOKEN_PATH))).expanduser()
+
+
+def _write_auth_token(token: str) -> Path:
+    token_path = _token_path()
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(token.strip() + "\n", encoding="utf-8")
+    token_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    return token_path
 
 
 async def _request_json(
@@ -107,6 +135,84 @@ async def _request_json(
     if "application/json" in content_type:
         return response.json()
     return response.text
+
+
+async def _github_device_config() -> dict[str, str]:
+    result = await _request_json("GET", "/auth/github-device/config", timeout=10.0)
+    if not isinstance(result, dict) or not result.get("client_id"):
+        raise BackendError("Backend did not return a GitHub device auth client_id.")
+    return {"client_id": str(result["client_id"]), "scope": str(result.get("scope") or "read:user")}
+
+
+async def _request_github_device_code(client_id: str, scope: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        response = await client.post(
+            "https://github.com/login/device/code",
+            data={"client_id": client_id, "scope": scope},
+            headers={"Accept": "application/json"},
+        )
+    if response.status_code >= 400:
+        raise BackendError(f"GitHub device-code request failed: {response.status_code}")
+    payload = response.json()
+    required = {"device_code", "user_code", "verification_uri", "expires_in", "interval"}
+    if not isinstance(payload, dict) or not required.issubset(payload):
+        raise BackendError("GitHub device-code response omitted required fields.")
+    return payload
+
+
+async def _poll_github_device_token(
+    *,
+    client_id: str,
+    device_code: str,
+    expires_in: int,
+    interval: int,
+) -> str:
+    deadline = time.monotonic() + expires_in
+    poll_interval = max(interval, 1)
+
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        while time.monotonic() < deadline:
+            await asyncio.sleep(poll_interval)
+            response = await client.post(
+                "https://github.com/login/oauth/access_token",
+                data={
+                    "client_id": client_id,
+                    "device_code": device_code,
+                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                },
+                headers={"Accept": "application/json"},
+            )
+            if response.status_code >= 400:
+                raise BackendError(f"GitHub token polling failed: {response.status_code}")
+            payload = response.json()
+            if payload.get("access_token"):
+                return str(payload["access_token"])
+
+            error = payload.get("error")
+            if error == "authorization_pending":
+                continue
+            if error == "slow_down":
+                poll_interval += 5
+                continue
+            if error == "access_denied":
+                raise BackendError("GitHub device authorization was denied.")
+            if error == "expired_token":
+                raise BackendError("GitHub device authorization expired.")
+            raise BackendError(f"GitHub device authorization failed: {error or payload}")
+
+    raise BackendError("GitHub device authorization expired.")
+
+
+async def _exchange_github_token_for_minis_token(github_access_token: str) -> dict[str, Any]:
+    result = await _request_json(
+        "POST",
+        "/auth/github-device/exchange",
+        json_body={"access_token": github_access_token},
+        timeout=20.0,
+    )
+    if not isinstance(result, dict) or not result.get("access_token"):
+        raise BackendError("Backend did not return a Minis access_token.")
+    return result
 
 
 async def _resolve_mini_id(identifier: str) -> str:
@@ -579,17 +685,101 @@ async def advise_patch(
     }
 
 
-_BADGE_HIGH_THRESHOLD = 0.7
-_BADGE_LOW_THRESHOLD = 0.3
+def _comment_summary(comment: Any) -> dict[str, Any] | None:
+    if not isinstance(comment, dict):
+        return None
+    return {
+        "type": comment.get("type"),
+        "disposition": comment.get("disposition"),
+        "issue_key": comment.get("issue_key"),
+        "summary": comment.get("summary"),
+        "rationale": comment.get("rationale"),
+    }
 
 
-def _framework_badge(confidence: float) -> str | None:
-    """Return badge label matching the GitHub App review comment convention."""
-    if confidence > _BADGE_HIGH_THRESHOLD:
-        return "high"
-    if confidence < _BADGE_LOW_THRESHOLD:
-        return "low"
-    return None
+@mcp.tool()
+async def advise_coding_changes(
+    identifier: str,
+    title: str | None = None,
+    description: str | None = None,
+    diff_summary: str | None = None,
+    changed_files: list[str] | None = None,
+    repo_name: str | None = None,
+    author_model: str = "unknown",
+    delivery_context: str = "normal",
+) -> dict[str, Any]:
+    """Turn a mini's review prediction into coding-session guidance.
+
+    The tool does not invent advice. It returns unavailable/gated unless the
+    review-prediction backend returns an available structured prediction.
+    """
+
+    prediction = await predict_review.fn(
+        identifier,
+        title=title,
+        description=description,
+        diff_summary=diff_summary,
+        changed_files=changed_files,
+        repo_name=repo_name,
+        author_model=author_model,
+        delivery_context=delivery_context,
+    )
+
+    if not prediction.get("prediction_available"):
+        return {
+            "mini_id": prediction.get("mini_id"),
+            "reviewer_username": prediction.get("reviewer_username"),
+            "guidance_available": False,
+            "mode": "gated",
+            "unavailable_reason": prediction.get("unavailable_reason"),
+            "change_plan": [],
+            "questions_to_answer": [],
+            "prediction": prediction.get("prediction"),
+        }
+
+    raw_prediction = prediction.get("prediction") if isinstance(prediction.get("prediction"), dict) else {}
+    expressed_feedback = raw_prediction.get("expressed_feedback", {})
+    comments = expressed_feedback.get("comments", []) if isinstance(expressed_feedback, dict) else []
+
+    change_plan: list[dict[str, Any]] = []
+    for blocker in prediction.get("likely_blockers", []):
+        if isinstance(blocker, dict):
+            change_plan.append(
+                {
+                    "priority": "blocker",
+                    "issue_key": blocker.get("key"),
+                    "action": blocker.get("summary"),
+                    "rationale": blocker.get("rationale"),
+                    "framework_id": blocker.get("framework_id"),
+                    "confidence": blocker.get("confidence"),
+                }
+            )
+
+    for comment in comments:
+        summarized = _comment_summary(comment)
+        if summarized and summarized["type"] in {"blocker", "note"}:
+            change_plan.append(
+                {
+                    "priority": summarized["type"],
+                    "issue_key": summarized["issue_key"],
+                    "action": summarized["summary"],
+                    "rationale": summarized["rationale"],
+                }
+            )
+
+    return {
+        "mini_id": prediction.get("mini_id"),
+        "reviewer_username": prediction.get("reviewer_username"),
+        "guidance_available": True,
+        "mode": "review_prediction",
+        "unavailable_reason": None,
+        "approval_state": prediction.get("approval_state"),
+        "summary": prediction.get("summary"),
+        "change_plan": change_plan,
+        "questions_to_answer": prediction.get("open_questions", []),
+        "delivery_policy": prediction.get("delivery_policy", {}),
+        "prediction": raw_prediction,
+    }
 
 
 @mcp.tool()
@@ -605,8 +795,8 @@ async def get_decision_frameworks(
     ``"low"`` (confidence < 0.3), or ``null`` — matching the GitHub App badge
     convention.
 
-    When the mini has no framework profile yet the response contains an empty
-    ``frameworks`` list and a ``note`` rather than an error.
+    When the mini has no framework profile yet the response is explicitly gated:
+    ``frameworks_available=false``, ``mode="gated"``, and an ``unavailable_reason``.
 
     Args:
         username: GitHub username or mini UUID.
@@ -614,79 +804,78 @@ async def get_decision_frameworks(
         limit: Maximum number of frameworks to return (default 20).
     """
 
-    mini = await _fetch_mini(username)
+    path = f"/minis/by-username/{quote(username, safe='')}/decision-frameworks"
+    result = await _request_json(
+        "GET",
+        f"{path}?min_confidence={min_confidence}&limit={limit}",
+    )
+    if not isinstance(result, dict):
+        raise BackendError("Expected a decision-framework payload from the backend.")
 
-    principles_json: dict[str, Any] | None = mini.get("principles_json") or mini.get("principles")
+    frameworks = result.get("frameworks") if isinstance(result.get("frameworks"), list) else []
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
 
-    # Defensive: also accept a nested payload that a future ALLIE-461 endpoint
-    # might expose as {"decision_frameworks": {...}} at the top level.
-    if isinstance(principles_json, dict) and "frameworks" in principles_json and "version" in principles_json:
-        # Already looks like a DecisionFrameworkProfile — wrap it.
-        df_payload = principles_json
-    elif isinstance(principles_json, dict):
-        df_payload = principles_json.get("decision_frameworks") or {}
-    else:
-        df_payload = {}
-
-    raw_frameworks: list[Any] = df_payload.get("frameworks", []) if isinstance(df_payload, dict) else []
-
-    if not raw_frameworks:
+    if not frameworks:
         return {
-            "username": mini.get("username", username),
+            "username": result.get("username", username),
+            "frameworks_available": False,
+            "mode": "gated",
+            "unavailable_reason": "mini has no decision-framework evidence yet",
             "frameworks": [],
-            "summary": {"total": 0, "mean_confidence": 0.0, "max_revision": 0},
-            "note": "no framework profile yet",
+            "summary": {
+                "total": int(summary.get("total", 0) or 0),
+                "mean_confidence": float(summary.get("mean_confidence", 0.0) or 0.0),
+                "max_revision": int(summary.get("max_revision", 0) or 0),
+            },
         }
 
-    # Filter by min_confidence
-    filtered = [
-        fw for fw in raw_frameworks
-        if isinstance(fw, dict) and fw.get("confidence", 0.0) >= min_confidence
-    ]
-
-    # Sort: confidence desc, then revision desc
-    filtered.sort(key=lambda fw: (-fw.get("confidence", 0.0), -fw.get("revision", 0)))
-
-    # Apply limit
-    filtered = filtered[:limit]
-
-    # Build structured output
-    out_frameworks: list[dict[str, Any]] = []
-    for fw in filtered:
-        conf: float = fw.get("confidence", 0.0)
-        out_frameworks.append(
-            {
-                "framework_id": fw.get("framework_id"),
-                "confidence": conf,
-                "revision": fw.get("revision", 0),
-                # Map schema fields to the CLI-style names used in badges/display
-                "trigger": fw.get("condition") or fw.get("trigger"),
-                "action": fw.get("block_policy") or fw.get("approval_policy") or fw.get("action"),
-                "value": (
-                    fw.get("value_ids", [None])[0]
-                    if fw.get("value_ids")
-                    else fw.get("value")
-                ),
-                "badge": _framework_badge(conf),
-            }
-        )
-
-    total = len(out_frameworks)
-    mean_conf = sum(fw["confidence"] for fw in out_frameworks) / total if total else 0.0
-    max_rev = max((fw["revision"] for fw in out_frameworks), default=0)
-
     return {
-        "username": mini.get("username", username),
-        "frameworks": out_frameworks,
-        "summary": {
-            "total": total,
-            "mean_confidence": round(mean_conf, 4),
-            "max_revision": max_rev,
-        },
+        "username": result.get("username", username),
+        "frameworks_available": True,
+        "mode": "frameworks",
+        "unavailable_reason": None,
+        "frameworks": frameworks,
+        "summary": summary,
     }
 
 
+async def _run_auth_login() -> None:
+    config = await _github_device_config()
+    device = await _request_github_device_code(config["client_id"], config["scope"])
+    print("Authorize Minis MCP with GitHub:")
+    print(f"  1. Open {device['verification_uri']}")
+    print(f"  2. Enter code: {device['user_code']}")
+    print("Waiting for authorization...")
+
+    github_token = await _poll_github_device_token(
+        client_id=config["client_id"],
+        device_code=str(device["device_code"]),
+        expires_in=int(device["expires_in"]),
+        interval=int(device["interval"]),
+    )
+    minis_token = await _exchange_github_token_for_minis_token(github_token)
+    token_path = _write_auth_token(str(minis_token["access_token"]))
+    print(f"Authenticated as {minis_token.get('github_username')}.")
+    print(f"Token saved to {token_path}.")
+    print("Claude Code can now run this MCP server without MINIS_AUTH_TOKEN.")
+
+
+def _run_auth_status() -> None:
+    token = _auth_token()
+    if not token:
+        print("No Minis auth token found. Run: uv run minis-mcp auth login")
+        raise SystemExit(1)
+    source = "MINIS_AUTH_TOKEN" if os.environ.get("MINIS_AUTH_TOKEN") else str(_token_path())
+    print(f"Minis auth token found via {source}.")
+
+
 def main() -> None:
+    if sys.argv[1:3] == ["auth", "login"]:
+        asyncio.run(_run_auth_login())
+        return
+    if sys.argv[1:3] == ["auth", "status"]:
+        _run_auth_status()
+        return
     mcp.run()
 
 

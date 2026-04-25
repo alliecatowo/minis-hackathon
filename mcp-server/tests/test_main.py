@@ -4,6 +4,7 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 
 def _load_main_module():
@@ -509,65 +510,180 @@ class MinisMcpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["framework_id"], "fw-require-tests")
         self.assertEqual(result["revision"], 3)
 
+    async def test_advise_coding_changes_returns_gated_when_prediction_unavailable(self):
+        async def fake_predict_review(identifier, **kwargs):
+            return {
+                "mini_id": "mini-123",
+                "reviewer_username": "torvalds",
+                "prediction_available": False,
+                "mode": "gated",
+                "unavailable_reason": "mini has no review evidence",
+                "prediction": {"prediction_available": False},
+            }
+
+        original = main.predict_review.fn
+        main.predict_review.fn = fake_predict_review
+        try:
+            result = await main.advise_coding_changes.fn("torvalds", title="Refactor auth")
+        finally:
+            main.predict_review.fn = original
+
+        self.assertIs(result["guidance_available"], False)
+        self.assertEqual(result["mode"], "gated")
+        self.assertEqual(result["change_plan"], [])
+
+    async def test_advise_coding_changes_derives_plan_from_review_prediction(self):
+        async def fake_predict_review(identifier, **kwargs):
+            return {
+                "mini_id": "mini-123",
+                "reviewer_username": "torvalds",
+                "prediction_available": True,
+                "approval_state": "request_changes",
+                "summary": "Needs tests.",
+                "likely_blockers": [
+                    {
+                        "key": "tests",
+                        "summary": "Add retry tests.",
+                        "rationale": "Auth retry path changed.",
+                        "confidence": 0.9,
+                        "framework_id": "fw-tests",
+                    }
+                ],
+                "open_questions": [{"key": "rollback", "summary": "Rollback plan?"}],
+                "delivery_policy": {"strictness": "high"},
+                "prediction": {
+                    "expressed_feedback": {
+                        "comments": [
+                            {
+                                "type": "note",
+                                "disposition": "comment",
+                                "issue_key": "naming",
+                                "summary": "Clarify the helper name.",
+                                "rationale": "Name hides retry behavior.",
+                            }
+                        ]
+                    }
+                },
+            }
+
+        original = main.predict_review.fn
+        main.predict_review.fn = fake_predict_review
+        try:
+            result = await main.advise_coding_changes.fn("torvalds", title="Refactor auth")
+        finally:
+            main.predict_review.fn = original
+
+        self.assertIs(result["guidance_available"], True)
+        self.assertEqual(result["mode"], "review_prediction")
+        self.assertEqual(result["change_plan"][0]["priority"], "blocker")
+        self.assertEqual(result["change_plan"][0]["framework_id"], "fw-tests")
+        self.assertEqual(result["change_plan"][1]["priority"], "note")
+        self.assertEqual(result["questions_to_answer"][0]["key"], "rollback")
+
+    def test_auth_token_reads_file_when_env_missing(self):
+        import tempfile
+        import os
+
+        original_env_token = os.environ.pop("MINIS_AUTH_TOKEN", None)
+        original_env_file = os.environ.get("MINIS_AUTH_TOKEN_FILE")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            token_file = Path(tmpdir) / "token"
+            token_file.write_text("file-token\n", encoding="utf-8")
+            os.environ["MINIS_AUTH_TOKEN_FILE"] = str(token_file)
+            try:
+                self.assertEqual(main._auth_token(), "file-token")
+            finally:
+                if original_env_token is not None:
+                    os.environ["MINIS_AUTH_TOKEN"] = original_env_token
+                else:
+                    os.environ.pop("MINIS_AUTH_TOKEN", None)
+                if original_env_file is not None:
+                    os.environ["MINIS_AUTH_TOKEN_FILE"] = original_env_file
+                else:
+                    os.environ.pop("MINIS_AUTH_TOKEN_FILE", None)
+
 
 # ---------------------------------------------------------------------------
 # get_decision_frameworks tests
 # ---------------------------------------------------------------------------
 
 _SAMPLE_MINI = {
-    "id": "5f3f7d6d-b362-4ce7-b9da-c1fd67dbd5bd",
     "username": "torvalds",
-    "principles_json": {
-        "decision_frameworks": {
-            "version": "decision_frameworks_v1",
-            "frameworks": [
-                {
-                    "framework_id": "fw-aaa",
-                    "condition": "When safety-critical code changes",
-                    "block_policy": "Block until tests added",
-                    "value_ids": ["correctness"],
-                    "confidence": 0.85,
-                    "revision": 3,
-                },
-                {
-                    "framework_id": "fw-bbb",
-                    "condition": "When refactoring without tests",
-                    "block_policy": "Request tests",
-                    "value_ids": ["reliability"],
-                    "confidence": 0.20,
-                    "revision": 1,
-                },
-                {
-                    "framework_id": "fw-ccc",
-                    "condition": "When perf regression detected",
-                    "block_policy": "Require benchmark",
-                    "value_ids": ["performance"],
-                    "confidence": 0.55,
-                    "revision": 2,
-                },
-            ],
-        }
+    "frameworks": [
+        {
+            "framework_id": "fw-aaa",
+            "trigger": "When safety-critical code changes",
+            "action": "Block until tests added",
+            "value": "correctness",
+            "confidence": 0.85,
+            "revision": 3,
+            "badge": "high",
+        },
+        {
+            "framework_id": "fw-ccc",
+            "trigger": "When perf regression detected",
+            "action": "Require benchmark",
+            "value": "performance",
+            "confidence": 0.55,
+            "revision": 2,
+            "badge": None,
+        },
+        {
+            "framework_id": "fw-bbb",
+            "trigger": "When refactoring without tests",
+            "action": "Request tests",
+            "value": "reliability",
+            "confidence": 0.20,
+            "revision": 1,
+            "badge": "low",
+        },
+    ],
+    "summary": {
+        "total": 3,
+        "mean_confidence": round((0.85 + 0.55 + 0.20) / 3, 4),
+        "max_revision": 3,
     },
 }
 
 _MINI_NO_PROFILE = {
-    "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     "username": "ghost",
-    "principles_json": None,
+    "frameworks": [],
+    "summary": {"total": 0, "mean_confidence": 0.0, "max_revision": 0},
 }
 
 
 class GetDecisionFrameworksTests(unittest.IsolatedAsyncioTestCase):
-    async def _call(self, mini_payload, **kwargs):
-        async def fake_fetch_mini(identifier):
-            return mini_payload
+    async def _call(self, payload, **kwargs):
+        async def fake_request_json(method, path, **request_kwargs):
+            self.assertEqual(method, "GET")
+            self.assertTrue(path.startswith("/minis/by-username/torvalds/decision-frameworks"))
+            self.assertFalse(request_kwargs)
+            query = parse_qs(urlsplit(path).query)
+            min_confidence = float(query.get("min_confidence", ["0.0"])[0])
+            limit = int(query.get("limit", ["20"])[0])
+            frameworks = [
+                fw for fw in payload["frameworks"] if fw.get("confidence", 0.0) >= min_confidence
+            ][:limit]
+            return {
+                **payload,
+                "frameworks": frameworks,
+                "summary": {
+                    "total": len(frameworks),
+                    "mean_confidence": round(
+                        sum(fw["confidence"] for fw in frameworks) / len(frameworks), 4
+                    )
+                    if frameworks
+                    else 0.0,
+                    "max_revision": max((fw["revision"] for fw in frameworks), default=0),
+                },
+            }
 
-        original = main._fetch_mini
-        main._fetch_mini = fake_fetch_mini
+        original = main._request_json
+        main._request_json = fake_request_json
         try:
             return await main.get_decision_frameworks.fn("torvalds", **kwargs)
         finally:
-            main._fetch_mini = original
+            main._request_json = original
 
     async def test_frameworks_sorted_by_confidence_desc(self):
         result = await self._call(_SAMPLE_MINI)
@@ -605,21 +721,23 @@ class GetDecisionFrameworksTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_profile_returns_note(self):
         result = await self._call(_MINI_NO_PROFILE)
         self.assertEqual(result["frameworks"], [])
-        self.assertIn("note", result)
+        self.assertIs(result["frameworks_available"], False)
+        self.assertEqual(result["mode"], "gated")
+        self.assertIn("no decision-framework evidence", result["unavailable_reason"])
         self.assertEqual(result["summary"]["total"], 0)
         self.assertEqual(result["summary"]["mean_confidence"], 0.0)
 
     async def test_bad_username_raises_backend_error(self):
-        async def fake_fetch_mini_error(identifier):
+        async def fake_request_error(method, path, **kwargs):
             raise main.BackendError("404 Mini not found")
 
-        original = main._fetch_mini
-        main._fetch_mini = fake_fetch_mini_error
+        original = main._request_json
+        main._request_json = fake_request_error
         try:
             with self.assertRaisesRegex(main.BackendError, "404"):
                 await main.get_decision_frameworks.fn("nobody")
         finally:
-            main._fetch_mini = original
+            main._request_json = original
 
     async def test_username_propagated_to_output(self):
         result = await self._call(_SAMPLE_MINI)

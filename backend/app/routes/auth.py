@@ -1,13 +1,16 @@
 import logging
 import re
 import secrets
+from datetime import timedelta
+from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user
+from app.core.auth import issue_service_jwt, get_current_user
 from app.core.config import settings
 from app.db import get_session
 from app.models.user import User
@@ -57,6 +60,100 @@ class UserResponse(BaseModel):
     github_username: str | None
     display_name: str | None
     avatar_url: str | None
+
+
+class GithubDeviceConfigResponse(BaseModel):
+    client_id: str
+    scope: str = "read:user"
+
+
+class GithubDeviceExchangeRequest(BaseModel):
+    access_token: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user_id: str
+    github_username: str
+
+
+async def _fetch_github_user(access_token: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        response = await client.get(
+            "https://api.github.com/user",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {access_token}",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+    if response.status_code == 401:
+        raise HTTPException(status_code=401, detail="Invalid GitHub access token")
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail=f"GitHub user verification failed: {response.status_code}",
+        )
+    payload = response.json()
+    if not isinstance(payload, dict) or not payload.get("id") or not payload.get("login"):
+        raise HTTPException(status_code=502, detail="GitHub user response missing id/login")
+    return payload
+
+
+@router.get("/github-device/config", response_model=GithubDeviceConfigResponse)
+async def get_github_device_config():
+    """Return the public GitHub OAuth client ID for CLI/MCP device auth."""
+    if not settings.github_device_client_id:
+        raise HTTPException(status_code=501, detail="GitHub device auth is not configured")
+    return GithubDeviceConfigResponse(client_id=settings.github_device_client_id)
+
+
+@router.post("/github-device/exchange", response_model=TokenResponse)
+async def exchange_github_device_token(
+    body: GithubDeviceExchangeRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Exchange a GitHub device-flow token for a Minis bearer token.
+
+    This gives non-browser clients the same user-scoped auth contract as the
+    web BFF without exposing the service JWT secret or relying on localhost
+    callback redirects.
+    """
+    github_user = await _fetch_github_user(body.access_token.strip())
+    github_id = str(github_user["id"])
+    github_username = str(github_user["login"])
+
+    result = await session.execute(
+        select(User).where(func.lower(User.github_username) == github_username.lower())
+    )
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        backend_user_id = f"github:{github_id}"
+        result = await session.execute(select(User).where(User.id == backend_user_id))
+        user = result.scalar_one_or_none()
+
+    if user is None:
+        user = User(id=f"github:{github_id}")
+        session.add(user)
+
+    user.github_username = github_username
+    user.display_name = github_user.get("name") or github_username
+    user.avatar_url = github_user.get("avatar_url")
+
+    await session.commit()
+    await session.refresh(user)
+
+    expires_delta = timedelta(days=30)
+    token = issue_service_jwt(str(user.id), expires_delta=expires_delta)
+    return TokenResponse(
+        access_token=token,
+        expires_in=int(expires_delta.total_seconds()),
+        user_id=str(user.id),
+        github_username=github_username,
+    )
 
 
 @router.post("/logout")

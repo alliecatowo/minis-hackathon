@@ -1,6 +1,6 @@
 # Minis MCP Server
 
-MCP server that wraps the Minis API, letting you create and chat with AI personality clones of GitHub developers from any MCP client (Claude Desktop, Claude Code, etc).
+MCP server that wraps the Minis API, letting coding agents use a mini inside Claude Code, Claude Desktop, or any MCP client.
 
 ## Tools
 
@@ -14,12 +14,31 @@ MCP server that wraps the Minis API, letting you create and chat with AI persona
 | `chat_with_mini` | Send a message to a mini and collect the streamed reply |
 | `get_mini_graph` | Fetch the mini's knowledge graph and principles payload |
 | `predict_review` | Ask what a mini would likely block on for a proposed change before review |
+| `get_decision_frameworks` | Fetch learned decision frameworks with explicit unavailable gating |
+| `advise_coding_changes` | Turn an available review prediction into a coding-session change plan |
 
 ## Prerequisites
 
 - [uv](https://docs.astral.sh/uv/) installed
-- Minis backend running at `http://localhost:8000` (or set `MINIS_BACKEND_URL`)
-- Optional: `MINIS_AUTH_TOKEN` bearer token for authenticated routes such as `create_mini` and `list_minis(mine=true)`
+- A Minis backend URL. The default is `https://minis.fly.dev`; set `MINIS_BACKEND_URL` for staging or local development.
+- For authenticated/private minis: a token from `uv run minis-mcp auth login`, or `MINIS_AUTH_TOKEN`.
+
+## Authenticate
+
+The main non-browser client path is GitHub device auth. It does not require a localhost callback.
+
+```bash
+cd mcp-server
+uv run minis-mcp auth login
+```
+
+The command prints a GitHub verification URL and one-time code, exchanges the approved GitHub device token with the Minis backend, then stores a user-scoped Minis bearer token at:
+
+```text
+~/.config/minis/mcp-token
+```
+
+Override the token file with `MINIS_AUTH_TOKEN_FILE`. `MINIS_AUTH_TOKEN` still works and takes precedence.
 
 ## Running standalone
 
@@ -37,10 +56,9 @@ Add to `.claude/settings.json` or project `.mcp.json`:
   "mcpServers": {
     "minis": {
       "command": "uv",
-      "args": ["run", "--directory", "/home/Allie/develop/minis-hackathon/mcp-server", "minis-mcp"],
+      "args": ["run", "--directory", "/absolute/path/to/mcp-server", "minis-mcp"],
       "env": {
-        "MINIS_BACKEND_URL": "http://localhost:8000",
-        "MINIS_AUTH_TOKEN": "optional-user-bearer-token"
+        "MINIS_BACKEND_URL": "https://minis.fly.dev"
       }
     }
   }
@@ -62,6 +80,8 @@ Diff summary: "Adds retry logic and reshapes the auth error path."
 Tell me the likely blockers first, then the open questions.
 ```
 
+For code-writing assistance, use `advise_coding_changes` on the same diff context. If the mini has no usable review evidence or the backend predictor is disabled, the tool returns `guidance_available=false` with `mode=gated` and no fallback advice.
+
 ## Claude Desktop configuration
 
 Add to `claude_desktop_config.json`:
@@ -73,8 +93,7 @@ Add to `claude_desktop_config.json`:
       "command": "uv",
       "args": ["run", "--directory", "/absolute/path/to/mcp-server", "minis-mcp"],
       "env": {
-        "MINIS_BACKEND_URL": "http://localhost:8000",
-        "MINIS_AUTH_TOKEN": "optional-user-bearer-token"
+        "MINIS_BACKEND_URL": "https://minis.fly.dev"
       }
     }
   }
@@ -85,5 +104,10 @@ Add to `claude_desktop_config.json`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MINIS_BACKEND_URL` | `http://localhost:8000` | URL of the Minis FastAPI backend |
-| `MINIS_AUTH_TOKEN` | unset | Optional bearer token forwarded to authenticated backend routes |
+| `MINIS_BACKEND_URL` | `https://minis.fly.dev` | URL of the Minis FastAPI backend |
+| `MINIS_AUTH_TOKEN` | unset | Optional bearer token forwarded to authenticated backend routes; overrides token file |
+| `MINIS_AUTH_TOKEN_FILE` | `~/.config/minis/mcp-token` | File written by `auth login` and read by the MCP server |
+
+## Backend configuration
+
+Device auth requires the backend to set `GITHUB_DEVICE_CLIENT_ID` to a GitHub OAuth App client ID that supports device flow. The MCP client retrieves this public client ID from `/api/auth/github-device/config`.

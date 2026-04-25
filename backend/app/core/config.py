@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     trusted_service_secret: str = (
         "dev-trusted-service-secret-change-in-production"  # Secret for trusted service→backend reads
     )
+    github_device_client_id: str = ""  # GitHub OAuth App client ID for CLI/MCP device auth
     encryption_key: str = ""
 
     # Environment (development | staging | production)
