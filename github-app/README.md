@@ -16,7 +16,7 @@ A GitHub App that enables [minis](../backend/) (AI personality clones) to review
 Go to **GitHub Settings > Developer settings > GitHub Apps > New GitHub App** and configure:
 
 - **Name**: `minis-pr-reviewer` (or your choice)
-- **Homepage URL**: `https://github.com/alliecatowo/minis-hackathon`
+- **Homepage URL**: `https://github.com/alliecatowo/minis-ai`
 - **Webhook URL**: Your server URL + `/webhooks/github` (use smee.io or ngrok for local dev)
 - **Webhook secret**: Generate a random secret
 

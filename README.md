@@ -175,7 +175,7 @@ cd mcp-server && uv run minis-mcp
 
 ## Deployment
 
-[![Deploy to Fly.io + Neon + Vercel](https://img.shields.io/badge/Deploy%20Your%20Own-Fly.io%20%2B%20Neon%20%2B%20Vercel-purple?style=for-the-badge)](https://github.com/alliecatowo/minis-hackathon/blob/main/DEPLOY.md)
+[![Deploy to Fly.io + Neon + Vercel](https://img.shields.io/badge/Deploy%20Your%20Own-Fly.io%20%2B%20Neon%20%2B%20Vercel-purple?style=for-the-badge)](https://github.com/alliecatowo/minis-ai/blob/main/DEPLOY.md)
 
 One-click deployment with:
 - **Neon** — Serverless Postgres with automatic branching per PR

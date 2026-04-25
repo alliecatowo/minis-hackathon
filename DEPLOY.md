@@ -18,8 +18,8 @@ The result: Every PR gets its own preview environment with an isolated database 
 ## Step 1: Fork and Clone
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/minis-hackathon.git
-cd minis-hackathon
+git clone https://github.com/YOUR_USERNAME/minis-ai.git
+cd minis-ai
 ```
 
 ## Step 2: Create Neon Database

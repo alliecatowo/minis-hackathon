@@ -25,6 +25,8 @@ AI personality clones ("minis") built from GitHub profiles and authorized digita
 
 Voice/personality is the demo. Framework cloning is the product. See [`docs/VISION.md`](./docs/VISION.md).
 
+Canonical GitHub repo for current project work is `alliecatowo/minis-ai`. Do not open PRs or attach new Linear/GitHub references to `alliecatowo/minis`, `alliecatowo/my-minis`, `minis-v2`, or the old `alliecatowo/minis-hackathon` surface unless a Linear issue explicitly says so.
+
 ## Commands
 
 ```bash

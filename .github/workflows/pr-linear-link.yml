@@ -17,6 +17,8 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          CANONICAL_REPOSITORY: alliecatowo/minis-ai
+          CURRENT_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
 
@@ -24,7 +26,30 @@ jobs:
           $PR_HEAD
           $PR_BODY"
 
-          if echo "$combined" | grep -Eiq '(Linear:[[:space:]]*)?MINI-[0-9]+|Fix(e[sd])?[[:space:]]+MINI-[0-9]+|Refs?[[:space:]]+MINI-[0-9]+'; then
+          visible_combined="$(printf '%s\n' "$combined" | perl -0pe 's/<!--.*?-->//gs')"
+
+          if [ "$CURRENT_REPOSITORY" != "$CANONICAL_REPOSITORY" ]; then
+            echo "This workflow is running on $CURRENT_REPOSITORY, but the canonical Minis repo is $CANONICAL_REPOSITORY."
+            exit 1
+          fi
+
+          forbidden_repo_pattern='github\.com/alliecatowo/(minis|my-minis|minis-v2|minis-hackathon)([^A-Za-z0-9_.-]|$)|alliecatowo/(minis|my-minis|minis-v2|minis-hackathon)([^A-Za-z0-9_.-]|$)'
+
+          if echo "$visible_combined" | grep -Eiq "$forbidden_repo_pattern"; then
+            cat <<'EOF'
+          Wrong repository reference found.
+
+          Canonical repo for current Minis work is:
+          https://github.com/alliecatowo/minis-ai
+
+          Do not add new PR links or Linear references to alliecatowo/minis,
+          alliecatowo/my-minis, minis-v2, or alliecatowo/minis-hackathon unless
+          the Linear issue explicitly allows it.
+          EOF
+            exit 1
+          fi
+
+          if echo "$visible_combined" | grep -Eiq '(Linear:[[:space:]]*)?MINI-[0-9]+|Fix(e[sd])?[[:space:]]+MINI-[0-9]+|Refs?[[:space:]]+MINI-[0-9]+'; then
             echo "Found Linear issue reference."
             exit 0
           fi

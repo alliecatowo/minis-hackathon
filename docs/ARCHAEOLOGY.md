@@ -15,7 +15,7 @@
 | `baby-allie-hatchling` | `/home/Allie/develop/baby-allie-hatchling/` | ML research project — meta-learned Hebbian plasticity for LLMs (BDH fork). Not directly Minis-related but contains neuroscience-grounded architecture thinking. | `docs/pdd.md`, `docs/tdd.md`, `docs/roadmap.md` |
 | `minis-v2` | `/home/Allie/develop/minis-v2/` | Second Minis attempt. Full pipeline: GitHub ingestion → DuckDB → value extraction → spirit synthesis → ORPO fine-tuning with LoRA/DoRA adapters. | `minis/distill/values.py`, `minis/distill/spirit.py`, `minis/amplify/evol.py`, `minis/amplify/judge.py`, `minis/amplify/simulator.py`, `minis/train/config.py`, `minis/ingest/query.py` |
 | `my-minis` | `/home/Allie/develop/my-minis/` | Third attempt. Multi-agent LangGraph pipeline with specialized sub-agents: `PersonalityTypologistAgent` (MBTI/Big Five/Enneagram), `BehavioralContextAgent` (context-aware), `SynthesisAgent` (Gemini Thinking), `AIDetectionAgent`. Most sophisticated personality schema of any attempt. | `packages/minis/agents/`, `packages/minis/domain/services/`, `frontend/content/3.blog/` |
-| `minis-hackathon` (current) | `/home/Allie/develop/minis-hackathon/` | Current repo. Docs and `.claude/` subdirs only scanned. | `docs/research.md`, `docs/brain_architecture_proposal.md`, `docs/VISION.md`, `docs/ADR_001_UNIFIED_GRAPH_MEMORY.md` |
+| `minis-hackathon` (then-current workspace) | `/home/Allie/develop/minis-hackathon/` | Historical repo/workspace name at archaeology time. Docs and `.claude/` subdirs only scanned. | `docs/research.md`, `docs/brain_architecture_proposal.md`, `docs/VISION.md`, `docs/ADR_001_UNIFIED_GRAPH_MEMORY.md` |
 
 ### Claude Code Session Transcripts
 

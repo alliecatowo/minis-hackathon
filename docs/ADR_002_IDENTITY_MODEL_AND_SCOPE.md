@@ -197,7 +197,7 @@ or their equivalents:
   "subject_id": "subject:allie",
   "scope": {
     "type": "repo",
-    "id": "repo:minis-hackathon"
+    "id": "repo:minis-ai"
   },
   "perspective": "reviewer",
   "visibility": "team",
