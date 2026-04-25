@@ -164,12 +164,18 @@ def _validate_review_prediction_input(
 def _signal_summary(signal: Any) -> dict[str, Any] | None:
     if not isinstance(signal, dict):
         return None
-    return {
+    result: dict[str, Any] = {
         "key": signal.get("key"),
         "summary": signal.get("summary"),
         "rationale": signal.get("rationale"),
         "confidence": signal.get("confidence"),
     }
+    # Include framework attribution fields when present (additive, optional)
+    if signal.get("framework_id") is not None:
+        result["framework_id"] = signal["framework_id"]
+    if signal.get("revision") is not None:
+        result["revision"] = signal["revision"]
+    return result
 
 
 async def _stream_sse_events(

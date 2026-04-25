@@ -234,6 +234,102 @@ class MinisMcpTests(unittest.IsolatedAsyncioTestCase):
         ):
             await main.predict_review.fn("torvalds", title="Refactor auth", author_model="staff")
 
+    async def test_predict_review_includes_framework_id_and_revision_when_present(self):
+        """framework_id and revision pass through _signal_summary when signals carry them."""
+
+        async def fake_request_json(method, path, **kwargs):
+            if (method, path) == ("GET", "/minis/by-username/torvalds"):
+                return {"id": "5f3f7d6d-b362-4ce7-b9da-c1fd67dbd5bd"}
+
+            return {
+                "version": "review_prediction_v1",
+                "reviewer_username": "torvalds",
+                "private_assessment": {
+                    "blocking_issues": [
+                        {
+                            "key": "fw-test",
+                            "summary": "Tests required.",
+                            "rationale": "New path untested.",
+                            "confidence": 0.91,
+                            "framework_id": "fw-always-test",
+                            "revision": 5,
+                        }
+                    ],
+                    "non_blocking_issues": [],
+                    "open_questions": [
+                        {
+                            "key": "rollback",
+                            "summary": "Rollback plan?",
+                            "rationale": "Auth changes need rollback.",
+                            "confidence": 0.6,
+                            # No framework_id here — should be absent from output
+                        }
+                    ],
+                    "positive_signals": [],
+                    "confidence": 0.8,
+                },
+                "delivery_policy": {
+                    "author_model": "unknown",
+                    "context": "normal",
+                    "strictness": "high",
+                    "teaching_mode": False,
+                    "shield_author_from_noise": False,
+                    "rationale": "Peer review.",
+                },
+                "expressed_feedback": {
+                    "summary": "Needs tests.",
+                    "comments": [],
+                    "approval_state": "request_changes",
+                },
+            }
+
+        original = main._request_json
+        main._request_json = fake_request_json
+        try:
+            result = await main.predict_review.fn("torvalds", title="Refactor auth")
+        finally:
+            main._request_json = original
+
+        blockers = result["likely_blockers"]
+        self.assertEqual(len(blockers), 1)
+        blocker = blockers[0]
+        self.assertEqual(blocker["framework_id"], "fw-always-test")
+        self.assertEqual(blocker["revision"], 5)
+
+        # Open question without framework_id should NOT have the key at all
+        questions = result["open_questions"]
+        self.assertEqual(len(questions), 1)
+        self.assertNotIn("framework_id", questions[0])
+        self.assertNotIn("revision", questions[0])
+
+    async def test_predict_review_signal_without_framework_id_omits_field(self):
+        """Signals without framework_id do not get a None framework_id key in output."""
+        signal = {
+            "key": "style",
+            "summary": "Style issue.",
+            "rationale": "Nit.",
+            "confidence": 0.4,
+        }
+        result = main._signal_summary(signal)
+        self.assertIsNotNone(result)
+        self.assertNotIn("framework_id", result)
+        self.assertNotIn("revision", result)
+
+    def test_signal_summary_includes_framework_id_and_revision_when_set(self):
+        """_signal_summary passes through framework_id and revision when present."""
+        signal = {
+            "key": "no-tests",
+            "summary": "Tests required.",
+            "rationale": "Unvetted path.",
+            "confidence": 0.88,
+            "framework_id": "fw-require-tests",
+            "revision": 3,
+        }
+        result = main._signal_summary(signal)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["framework_id"], "fw-require-tests")
+        self.assertEqual(result["revision"], 3)
+
 
 # ---------------------------------------------------------------------------
 # get_decision_frameworks tests

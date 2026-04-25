@@ -7,6 +7,8 @@ import pytest
 
 from app.config import settings
 from app.review import (
+    _build_signal_index,
+    _format_prediction_comment,
     _render_framework_footer,
     generate_mention_response,
     generate_review,
@@ -417,3 +419,131 @@ def test_render_review_prediction_omits_footer_when_signals_absent():
     prediction = _base_prediction()
     result = render_review_prediction(prediction)
     assert "Framework signals" not in result
+
+
+# ---------------------------------------------------------------------------
+# framework_id attribution in expressed_feedback comment rendering
+# ---------------------------------------------------------------------------
+
+
+def _prediction_with_framework_signal(
+    *,
+    framework_id: str | None = None,
+    revision: int | None = None,
+) -> dict:
+    """Build a prediction where the blocker signal carries framework attribution."""
+    signal: dict = {
+        "key": "test-coverage",
+        "summary": "Tests required.",
+        "rationale": "Untested path.",
+        "confidence": 0.9,
+    }
+    if framework_id is not None:
+        signal["framework_id"] = framework_id
+    if revision is not None:
+        signal["revision"] = revision
+
+    return {
+        "version": "review_prediction_v1",
+        "reviewer_username": "alliecatowo",
+        "private_assessment": {
+            "blocking_issues": [signal],
+            "non_blocking_issues": [],
+            "open_questions": [],
+            "positive_signals": [],
+            "confidence": 0.9,
+        },
+        "delivery_policy": {
+            "author_model": "unknown",
+            "context": "normal",
+            "strictness": "high",
+            "teaching_mode": False,
+            "shield_author_from_noise": False,
+            "rationale": "defaults",
+        },
+        "expressed_feedback": {
+            "summary": "Needs tests before merge.",
+            "approval_state": "request_changes",
+            "comments": [
+                {
+                    "type": "blocker",
+                    "disposition": "request_changes",
+                    "issue_key": "test-coverage",
+                    "summary": "Please add tests for the new path.",
+                    "rationale": "Untested changes increase regression risk.",
+                }
+            ],
+        },
+    }
+
+
+def test_format_prediction_comment_appends_framework_attribution_with_revision():
+    comment = {
+        "type": "blocker",
+        "issue_key": "no-tests",
+        "summary": "Add tests.",
+        "rationale": "Untested.",
+    }
+    result = _format_prediction_comment(comment, framework_id="fw-require-tests", revision=3)
+    assert "fw-require-tests" in result
+    assert "validated 3×" in result
+
+
+def test_format_prediction_comment_appends_framework_attribution_without_validated_when_revision_zero():
+    comment = {
+        "type": "blocker",
+        "issue_key": "no-tests",
+        "summary": "Add tests.",
+        "rationale": "Untested.",
+    }
+    result = _format_prediction_comment(comment, framework_id="fw-require-tests", revision=0)
+    assert "fw-require-tests" in result
+    assert "validated" not in result
+
+
+def test_format_prediction_comment_no_attribution_when_framework_id_absent():
+    comment = {
+        "type": "note",
+        "issue_key": "style",
+        "summary": "Minor style nit.",
+        "rationale": "Consistency.",
+    }
+    result = _format_prediction_comment(comment)
+    assert "from framework" not in result
+
+
+def test_render_review_prediction_includes_framework_attribution_in_comment():
+    """render_review_prediction pulls framework_id from signal index into comment body."""
+    prediction = _prediction_with_framework_signal(framework_id="fw-always-test", revision=4)
+    result = render_review_prediction(prediction)
+    assert "fw-always-test" in result
+    assert "validated 4×" in result
+
+
+def test_render_review_prediction_no_framework_attribution_when_signal_has_no_framework_id():
+    """render_review_prediction omits attribution when no framework_id on matching signal."""
+    prediction = _prediction_with_framework_signal()
+    result = render_review_prediction(prediction)
+    assert "from framework" not in result
+
+
+def test_build_signal_index_indexes_all_buckets():
+    """_build_signal_index finds signals across all private_assessment lists."""
+    prediction = {
+        "private_assessment": {
+            "blocking_issues": [{"key": "b1", "framework_id": "fw-b"}],
+            "non_blocking_issues": [{"key": "nb1", "framework_id": "fw-nb"}],
+            "open_questions": [{"key": "q1", "framework_id": "fw-q"}],
+            "positive_signals": [{"key": "p1", "framework_id": "fw-p"}],
+        }
+    }
+    index = _build_signal_index(prediction)
+    assert index["b1"]["framework_id"] == "fw-b"
+    assert index["nb1"]["framework_id"] == "fw-nb"
+    assert index["q1"]["framework_id"] == "fw-q"
+    assert index["p1"]["framework_id"] == "fw-p"
+
+
+def test_build_signal_index_empty_when_no_assessment():
+    index = _build_signal_index({})
+    assert index == {}

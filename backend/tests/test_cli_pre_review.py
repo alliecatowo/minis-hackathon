@@ -156,3 +156,138 @@ def test_pre_review_fails_fast_when_there_are_no_changes(monkeypatch, tmp_path):
 
     assert result.exit_code == 1
     assert "No local changes found for pre-review" in result.output
+
+
+def test_pre_review_renders_framework_attribution_when_signal_has_framework_id(
+    monkeypatch, tmp_path
+):
+    """Framework attribution suffix renders for blockers that carry framework_id + revision."""
+    repo = _init_repo(tmp_path)
+    (repo / "tracked.txt").write_text("hello\nmore context\n")
+
+    def fake_get(url: str, **kwargs) -> httpx.Response:
+        return _response(
+            "GET",
+            url,
+            json={"id": "mini-456", "username": "reviewer", "status": "ready"},
+        )
+
+    def fake_post(url: str, **kwargs) -> httpx.Response:
+        return _response(
+            "POST",
+            url,
+            json={
+                "version": "review_prediction_v1",
+                "reviewer_username": "reviewer",
+                "private_assessment": {
+                    "blocking_issues": [
+                        {
+                            "key": "no-tests",
+                            "summary": "Tests required before merge.",
+                            "confidence": 0.9,
+                            "framework_id": "fw-always-test",
+                            "revision": 4,
+                        }
+                    ],
+                    "non_blocking_issues": [],
+                    "open_questions": [],
+                    "positive_signals": [],
+                    "confidence": 0.85,
+                },
+                "delivery_policy": {
+                    "author_model": "unknown",
+                    "context": "normal",
+                    "strictness": "high",
+                    "teaching_mode": False,
+                    "shield_author_from_noise": False,
+                    "rationale": "default",
+                },
+                "expressed_feedback": {
+                    "summary": "Needs tests.",
+                    "comments": [],
+                    "approval_state": "request_changes",
+                },
+            },
+        )
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(minis_cli.httpx, "get", fake_get)
+    monkeypatch.setattr(minis_cli.httpx, "post", fake_post)
+
+    result = runner.invoke(
+        minis_cli.app,
+        ["pre-review", "reviewer", "--base", "HEAD"],
+    )
+
+    assert result.exit_code == 0
+    assert "fw-always-test" in result.output
+    # Rich wraps long cell content across lines; check each token separately
+    assert "validated" in result.output
+    assert "4" in result.output
+
+
+def test_pre_review_renders_framework_attribution_without_revision_when_revision_zero(
+    monkeypatch, tmp_path
+):
+    """framework_id present but revision=0 → attribution without validated count."""
+    repo = _init_repo(tmp_path)
+    (repo / "tracked.txt").write_text("hello\nchanged\n")
+
+    def fake_get(url: str, **kwargs) -> httpx.Response:
+        return _response(
+            "GET",
+            url,
+            json={"id": "mini-789", "username": "reviewer", "status": "ready"},
+        )
+
+    def fake_post(url: str, **kwargs) -> httpx.Response:
+        return _response(
+            "POST",
+            url,
+            json={
+                "version": "review_prediction_v1",
+                "reviewer_username": "reviewer",
+                "private_assessment": {
+                    "blocking_issues": [
+                        {
+                            "key": "docs",
+                            "summary": "Docs missing.",
+                            "confidence": 0.7,
+                            "framework_id": "fw-require-docs",
+                            "revision": 0,
+                        }
+                    ],
+                    "non_blocking_issues": [],
+                    "open_questions": [],
+                    "positive_signals": [],
+                    "confidence": 0.7,
+                },
+                "delivery_policy": {
+                    "author_model": "unknown",
+                    "context": "normal",
+                    "strictness": "medium",
+                    "teaching_mode": False,
+                    "shield_author_from_noise": False,
+                    "rationale": "default",
+                },
+                "expressed_feedback": {
+                    "summary": "Needs docs.",
+                    "comments": [],
+                    "approval_state": "request_changes",
+                },
+            },
+        )
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(minis_cli.httpx, "get", fake_get)
+    monkeypatch.setattr(minis_cli.httpx, "post", fake_post)
+
+    result = runner.invoke(
+        minis_cli.app,
+        ["pre-review", "reviewer", "--base", "HEAD"],
+    )
+
+    assert result.exit_code == 0
+    assert "fw-require-docs" in result.output
+    # revision=0 means "validated N×" suffix should NOT appear
+    assert "validated" not in result.output

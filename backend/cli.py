@@ -205,15 +205,26 @@ def _render_pre_review_report(username: str, base_ref: str, prediction: dict[str
         table.add_column("Key", style="cyan")
         table.add_column("Confidence", justify="right")
         table.add_column("Summary")
+        table.add_column("Framework")
         for blocker in blockers:
             confidence = blocker.get("confidence")
             confidence_str = (
                 f"{float(confidence):.0%}" if isinstance(confidence, int | float) else "—"
             )
+            framework_id = blocker.get("framework_id")
+            revision = blocker.get("revision")
+            if framework_id:
+                if isinstance(revision, int) and revision > 0:
+                    framework_str = f"from framework: {framework_id}, validated {revision}×"
+                else:
+                    framework_str = f"from framework: {framework_id}"
+            else:
+                framework_str = ""
             table.add_row(
                 str(blocker.get("key") or "unknown"),
                 confidence_str,
                 str(blocker.get("summary") or ""),
+                framework_str,
             )
         console.print(table)
     else:

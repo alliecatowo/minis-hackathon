@@ -162,7 +162,12 @@ async def get_review_prediction(
         raise
 
 
-def _format_prediction_comment(comment: dict[str, Any]) -> str:
+def _format_prediction_comment(
+    comment: dict[str, Any],
+    *,
+    framework_id: str | None = None,
+    revision: int | None = None,
+) -> str:
     label = str(comment.get("type", "note")).replace("_", " ").title()
     issue_key = comment.get("issue_key")
     if issue_key:
@@ -176,7 +181,17 @@ def _format_prediction_comment(comment: dict[str, Any]) -> str:
         parts.append(summary)
     if rationale:
         parts.append(f"Why: {rationale}")
-    return ": ".join([parts[0], " ".join(parts[1:])]) if len(parts) > 1 else parts[0]
+
+    formatted = ": ".join([parts[0], " ".join(parts[1:])]) if len(parts) > 1 else parts[0]
+
+    if framework_id:
+        if isinstance(revision, int) and revision > 0:
+            attribution = f"[from framework: {framework_id}, validated {revision}×]"
+        else:
+            attribution = f"[from framework: {framework_id}]"
+        formatted = f"{formatted} {attribution}"
+
+    return formatted
 
 
 _MAX_FRAMEWORK_SIGNALS = 5
@@ -228,6 +243,23 @@ def _render_framework_footer(prediction: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _build_signal_index(prediction: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Build a {key: signal} lookup from all private_assessment signal lists.
+
+    Used to look up framework_id / revision when rendering expressed_feedback
+    comments that reference a matching issue_key.
+    """
+    index: dict[str, dict[str, Any]] = {}
+    assessment = prediction.get("private_assessment") or {}
+    for bucket in ("blocking_issues", "non_blocking_issues", "open_questions", "positive_signals"):
+        for signal in assessment.get(bucket) or []:
+            if isinstance(signal, dict):
+                key = signal.get("key")
+                if key:
+                    index[str(key)] = signal
+    return index
+
+
 def render_review_prediction(
     prediction: dict[str, Any],
     *,
@@ -239,6 +271,9 @@ def render_review_prediction(
     approval_state = str(feedback.get("approval_state") or "uncertain").replace("_", " ")
     summary = str(feedback.get("summary") or "").strip()
     comments = feedback.get("comments") or []
+
+    # Build signal index for framework attribution look-up
+    signal_index = _build_signal_index(prediction)
 
     lines: list[str] = []
     if requested_via_mention:
@@ -260,7 +295,16 @@ def render_review_prediction(
         lines.append("**Key comments**")
         lines.append("")
         for comment in comments:
-            lines.append(f"- {_format_prediction_comment(comment)}")
+            issue_key = comment.get("issue_key") if isinstance(comment, dict) else None
+            matched_signal = signal_index.get(str(issue_key)) if issue_key else None
+            framework_id: str | None = None
+            revision: int | None = None
+            if matched_signal:
+                framework_id = matched_signal.get("framework_id")
+                revision = matched_signal.get("revision")
+            lines.append(
+                f"- {_format_prediction_comment(comment, framework_id=framework_id, revision=revision)}"
+            )
     elif approval_state == "approve":
         lines.append("")
         lines.append("No major blockers are predicted for this PR.")

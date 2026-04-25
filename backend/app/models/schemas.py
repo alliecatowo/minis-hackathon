@@ -287,6 +287,8 @@ class ReviewPredictionSignalV1(BaseModel):
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
     evidence: list[ReviewPredictionEvidenceV1] = Field(default_factory=list)
+    framework_id: str | None = None
+    revision: int | None = None
 
 
 class ReviewPredictionPrivateAssessmentV1(BaseModel):
