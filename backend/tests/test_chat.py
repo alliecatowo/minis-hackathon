@@ -49,6 +49,7 @@ def _make_mini(
     memory_content: str | None = None,
     evidence_cache: str | None = None,
     knowledge_graph_json: dict | None = None,
+    principles_json: dict | str | None = None,
     owner_id: str | None = None,
     display_name: str | None = None,
 ) -> MagicMock:
@@ -61,6 +62,7 @@ def _make_mini(
     mini.memory_content = memory_content
     mini.evidence_cache = evidence_cache
     mini.knowledge_graph_json = knowledge_graph_json
+    mini.principles_json = principles_json
     mini.owner_id = owner_id or str(uuid.uuid4())
     mini.display_name = display_name or username
     return mini
@@ -97,12 +99,12 @@ def _make_session() -> MagicMock:
 
 
 class TestBuildChatTools:
-    def test_returns_seven_tools(self):
+    def test_returns_eight_tools(self):
         from app.routes.chat import _build_chat_tools
 
         mini = _make_mini()
         tools = _build_chat_tools(mini)
-        assert len(tools) == 7
+        assert len(tools) == 8
 
     def test_tool_names(self):
         from app.routes.chat import _build_chat_tools
@@ -116,6 +118,7 @@ class TestBuildChatTools:
             "search_knowledge_graph",
             "explore_knowledge_graph",
             "search_principles",
+            "apply_framework",
             "get_my_decision_frameworks",
             "think",
         }
@@ -157,6 +160,15 @@ class TestBuildChatTools:
         tools = _build_chat_tools(mini)
         think_tool = next(t for t in tools if t.name == "think")
         assert "reasoning" in think_tool.parameters["properties"]
+
+    def test_apply_framework_schema(self):
+        from app.routes.chat import _build_chat_tools
+
+        mini = _make_mini()
+        tools = _build_chat_tools(mini)
+        tool = next(t for t in tools if t.name == "apply_framework")
+        assert "situation" in tool.parameters["properties"]
+        assert tool.parameters["required"] == ["situation"]
 
     @pytest.mark.asyncio
     async def test_think_handler_returns_ok(self):
@@ -255,6 +267,88 @@ class TestBuildChatTools:
         kg_tool = next(t for t in tools if t.name == "search_knowledge_graph")
         result = await kg_tool.handler("python")
         assert "corrupted" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_apply_framework_uses_framework_value_and_provenance(self):
+        from app.routes.chat import _build_chat_tools
+
+        principles_json = {
+            "principles": [],
+            "decision_frameworks": {
+                "version": "decision_frameworks_v1",
+                "frameworks": [
+                    {
+                        "framework_id": "framework:async-cost",
+                        "condition": "when code uses async without IO wait",
+                        "action": "push back on async because it colors call sites",
+                        "tradeoff": "runtime complexity vs actual IO concurrency",
+                        "value_ids": ["value:simplicity"],
+                        "decision_order": ["check whether the work is IO-bound first"],
+                        "confidence": 0.86,
+                        "revision": 2,
+                        "evidence_ids": ["ev-async"],
+                        "evidence_provenance": [
+                            {
+                                "id": "ev-async",
+                                "source_type": "github",
+                                "item_type": "pull_request_review",
+                                "source_uri": "https://example.test/review",
+                                "visibility": "public",
+                                "ai_contamination_status": "human",
+                            }
+                        ],
+                    }
+                ],
+            },
+        }
+        mini = _make_mini(principles_json=principles_json)
+        tools = _build_chat_tools(mini)
+        tool = next(t for t in tools if t.name == "apply_framework")
+
+        result = await tool.handler("Should I make this compute-only helper async?")
+
+        assert "FRAMEWORK_APPLICATION" in result
+        assert "framework:async-cost" in result
+        assert "value:simplicity" in result or "runtime complexity" in result
+        assert "ev-async" in result
+        assert "contamination=human" in result
+
+    @pytest.mark.asyncio
+    async def test_apply_framework_gates_when_no_principles(self):
+        from app.routes.chat import _build_chat_tools
+
+        mini = _make_mini(principles_json=None)
+        tools = _build_chat_tools(mini)
+        tool = next(t for t in tools if t.name == "apply_framework")
+
+        result = await tool.handler("Should I use Rust?")
+
+        assert result.startswith("INSUFFICIENT_EVIDENCE")
+        assert "generic" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_apply_framework_gates_when_no_framework_matches(self):
+        from app.routes.chat import _build_chat_tools
+
+        principles_json = {
+            "principles": [
+                {
+                    "trigger": "when migrations touch user data",
+                    "action": "require rollback notes",
+                    "value": "data safety",
+                    "intensity": 0.8,
+                    "evidence_ids": ["ev-migration"],
+                }
+            ]
+        }
+        mini = _make_mini(principles_json=principles_json)
+        tools = _build_chat_tools(mini)
+        tool = next(t for t in tools if t.name == "apply_framework")
+
+        result = await tool.handler("Should I add a CSS animation?")
+
+        assert result.startswith("INSUFFICIENT_EVIDENCE")
+        assert "No stored framework matched" in result
 
 
 # ---------------------------------------------------------------------------
@@ -1462,6 +1556,50 @@ class TestToolUseDirective:
         prompt = captured_prompts[0]
         assert "search_memories" in prompt
         assert "search_evidence" in prompt
+        assert "apply_framework" in prompt
+
+    @pytest.mark.asyncio
+    async def test_tool_use_directive_requires_framework_application_for_predictions(self):
+        from app.main import app
+        from app.core.auth import get_optional_user
+        from app.db import get_session
+
+        mini_id = str(uuid.uuid4())
+        mini = _make_mini(mini_id=mini_id, system_prompt="You are testdev.")
+
+        session = _make_session()
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = mini
+        session.execute = AsyncMock(return_value=result_mock)
+
+        captured_prompts: list[str] = []
+
+        async def _fake_stream(**kwargs):
+            captured_prompts.append(kwargs.get("system_prompt", ""))
+            return
+            yield
+
+        with patch("app.routes.chat.run_agent_streaming", side_effect=_fake_stream):
+            app.dependency_overrides[get_session] = lambda: session
+            app.dependency_overrides[get_optional_user] = lambda: None
+
+            from httpx import ASGITransport, AsyncClient
+
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                await client.post(
+                    f"/api/minis/{mini_id}/chat",
+                    json={"message": "Should I use async for this helper?"},
+                )
+
+        app.dependency_overrides.clear()
+
+        assert captured_prompts
+        prompt = captured_prompts[0]
+        assert "FRAMEWORK APPLICATION AND EVIDENCE GATING" in prompt
+        assert "call `apply_framework" in prompt
+        assert "INSUFFICIENT_EVIDENCE" in prompt
+        assert "do not fill the gap with generic advice" in prompt
 
     @pytest.mark.asyncio
     async def test_tool_use_directive_appended_after_original_prompt(self):

@@ -1,6 +1,8 @@
 import json
 import logging
+import re
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
@@ -39,6 +41,182 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/minis", tags=["chat"])
+
+
+_FRAMEWORK_STOPWORDS = {
+    "about",
+    "after",
+    "before",
+    "could",
+    "does",
+    "doing",
+    "from",
+    "have",
+    "here",
+    "into",
+    "just",
+    "make",
+    "should",
+    "that",
+    "their",
+    "there",
+    "this",
+    "what",
+    "when",
+    "with",
+    "would",
+}
+
+
+def _load_principles_payload(raw: Any) -> dict[str, Any] | None:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return payload if isinstance(payload, dict) else None
+    return None
+
+
+def _coerce_float(raw: Any, default: float = 0.5) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(1.0, value))
+
+
+def _coerce_int(raw: Any, default: int = 0) -> int:
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _string_list(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str) and raw.strip():
+        return [raw.strip()]
+    return []
+
+
+def _framework_tokens(text: str) -> set[str]:
+    tokens = set(re.findall(r"[a-z0-9_]{3,}", text.lower()))
+    return {token for token in tokens if token not in _FRAMEWORK_STOPWORDS}
+
+
+def _framework_match_text(framework: dict[str, Any]) -> str:
+    parts = [
+        framework.get("condition"),
+        framework.get("trigger"),
+        framework.get("action"),
+        framework.get("tradeoff"),
+        framework.get("escalation_threshold"),
+        framework.get("approval_policy"),
+        framework.get("block_policy"),
+        framework.get("expression_policy"),
+        " ".join(_string_list(framework.get("decision_order"))),
+        " ".join(_string_list(framework.get("value_ids"))),
+        " ".join(_string_list(framework.get("exceptions"))),
+    ]
+    return " ".join(str(part) for part in parts if part)
+
+
+def _active_decision_frameworks(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    df_payload = payload.get("decision_frameworks")
+    if not isinstance(df_payload, dict):
+        return []
+    raw = df_payload.get("frameworks")
+    if not isinstance(raw, list):
+        return []
+    return [fw for fw in raw if isinstance(fw, dict) and not fw.get("retired")]
+
+
+def _framework_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return active rich frameworks plus legacy flat principles as candidates."""
+    entries: list[dict[str, Any]] = []
+    active_framework_ids: set[str] = set()
+
+    for fw in _active_decision_frameworks(payload):
+        framework_id = str(fw.get("framework_id") or "").strip()
+        if framework_id:
+            active_framework_ids.add(framework_id)
+        entries.append({**fw, "_kind": "decision_framework"})
+
+    raw_principles = payload.get("principles")
+    if isinstance(raw_principles, list):
+        for index, principle in enumerate(raw_principles, start=1):
+            if not isinstance(principle, dict):
+                continue
+            framework_id = str(principle.get("framework_id") or "").strip()
+            if framework_id and framework_id in active_framework_ids:
+                continue
+            entries.append(
+                {
+                    "framework_id": framework_id or f"principle:{index}",
+                    "condition": principle.get("trigger") or "",
+                    "action": principle.get("action") or "",
+                    "tradeoff": principle.get("value") or "",
+                    "value_ids": [principle.get("value")]
+                    if isinstance(principle.get("value"), str)
+                    else [],
+                    "confidence": principle.get("confidence", principle.get("intensity", 0.5)),
+                    "revision": principle.get("revision", 0),
+                    "evidence_ids": principle.get("evidence_ids")
+                    or principle.get("evidence")
+                    or [],
+                    "evidence_provenance": principle.get("evidence_provenance") or [],
+                    "support_count": principle.get("support_count"),
+                    "_kind": "principle",
+                }
+            )
+
+    return entries
+
+
+def _format_framework_provenance(framework: dict[str, Any]) -> list[str]:
+    provenance_items = framework.get("evidence_provenance")
+    if not isinstance(provenance_items, list):
+        provenance_items = []
+
+    lines: list[str] = []
+    for item in provenance_items[:3]:
+        if not isinstance(item, dict):
+            continue
+        bits = [
+            str(item.get("id") or "").strip(),
+            str(item.get("source_type") or "").strip(),
+            str(item.get("item_type") or "").strip(),
+            str(item.get("evidence_date") or item.get("created_at") or "").strip(),
+        ]
+        source_uri = str(item.get("source_uri") or "").strip()
+        visibility = str(item.get("visibility") or "").strip()
+        contamination_status = str(
+            item.get("ai_contamination_status") or item.get("contamination_status") or ""
+        ).strip()
+        provenance_confidence = item.get("provenance_confidence")
+        line = " / ".join(bit for bit in bits if bit)
+        suffixes = []
+        if visibility:
+            suffixes.append(f"visibility={visibility}")
+        if contamination_status:
+            suffixes.append(f"contamination={contamination_status}")
+        if provenance_confidence is not None:
+            suffixes.append(f"provenance_confidence={provenance_confidence}")
+        if source_uri:
+            suffixes.append(f"uri={source_uri}")
+        if suffixes:
+            line = f"{line} ({', '.join(suffixes)})" if line else ", ".join(suffixes)
+        if line:
+            lines.append(line)
+
+    evidence_ids = _string_list(framework.get("evidence_ids"))
+    if evidence_ids and not lines:
+        lines.append(f"evidence_ids={', '.join(evidence_ids[:5])}")
+    return lines
 
 
 def _build_chat_tools(mini: Mini, session: AsyncSession | None = None) -> list[AgentTool]:
@@ -226,16 +404,9 @@ def _build_chat_tools(mini: Mini, session: AsyncSession | None = None) -> list[A
 
     async def search_principles(query: str) -> str:
         """Search the principles matrix for decision rules, values, and hot takes."""
-        if not mini.principles_json:
+        p_data = _load_principles_payload(getattr(mini, "principles_json", None))
+        if not p_data:
             return "No principles available."
-        try:
-            p_data = (
-                mini.principles_json
-                if isinstance(mini.principles_json, dict)
-                else json.loads(mini.principles_json)
-            )
-        except (json.JSONDecodeError, TypeError):
-            return "Principles data is corrupted."
 
         principles = p_data.get("principles", [])
 
@@ -267,6 +438,118 @@ def _build_chat_tools(mini: Mini, session: AsyncSession | None = None) -> list[A
 
         return "\n\n".join(parts)
 
+    async def apply_framework(situation: str) -> str:
+        """Apply evidence-backed decision frameworks to a novel user situation."""
+        p_data = _load_principles_payload(getattr(mini, "principles_json", None))
+        if not p_data:
+            return (
+                "INSUFFICIENT_EVIDENCE: No stored decision frameworks or principles are "
+                "available for this mini. Do not answer from generic best practices; tell "
+                "the user the prediction is gated until framework evidence exists."
+            )
+
+        entries = _framework_entries(p_data)
+        if not entries:
+            return (
+                "INSUFFICIENT_EVIDENCE: The principles payload contains no active decision "
+                "frameworks or legacy principles to apply. Do not fabricate a persona-specific "
+                "stance."
+            )
+
+        situation_tokens = _framework_tokens(situation)
+        if not situation_tokens:
+            return (
+                "INSUFFICIENT_CONTEXT: The situation is too underspecified to match against "
+                "stored frameworks. Ask for the concrete technology, change, tradeoff, or "
+                "decision being evaluated."
+            )
+
+        scored: list[tuple[int, float, int, dict[str, Any], set[str]]] = []
+        for entry in entries:
+            match_text = _framework_match_text(entry)
+            entry_tokens = _framework_tokens(match_text)
+            matched = situation_tokens & entry_tokens
+            if not matched:
+                continue
+            confidence = _coerce_float(entry.get("confidence"), default=0.5)
+            revision = _coerce_int(entry.get("revision"), default=0)
+            scored.append((len(matched), confidence, revision, entry, matched))
+
+        if not scored:
+            return (
+                "INSUFFICIENT_EVIDENCE: No stored framework matched this situation. Do not "
+                "fall back to generic advice. Qualify that the mini lacks evidence for this "
+                "specific decision and ask for more evidence or a closer situation."
+            )
+
+        scored.sort(key=lambda item: (-item[0], -item[1], -item[2]))
+        selected = scored[:5]
+        strongest = selected[0][3]
+        strongest_action = (
+            str(strongest.get("block_policy") or "").strip()
+            or str(strongest.get("approval_policy") or "").strip()
+            or str(strongest.get("action") or "").strip()
+            or "qualify the answer using this framework, not generic advice"
+        )
+
+        lines = [
+            "FRAMEWORK_APPLICATION",
+            f"Situation: {situation}",
+            f"Prediction anchor: {strongest_action}",
+            (
+                "Instruction: In the final answer, explain the prediction from these "
+                "evidence-backed frameworks/values. If the user's facts are insufficient, "
+                "qualify or gate instead of filling gaps."
+            ),
+            "",
+            "Applicable frameworks:",
+        ]
+
+        for rank, (match_count, confidence, revision, framework, matched) in enumerate(
+            selected,
+            start=1,
+        ):
+            framework_id = str(framework.get("framework_id") or f"framework:{rank}")
+            condition = str(
+                framework.get("condition") or framework.get("trigger") or "Unspecified trigger"
+            ).strip()
+            action = (
+                str(framework.get("action") or "").strip()
+                or "; ".join(_string_list(framework.get("decision_order")))
+                or str(framework.get("block_policy") or "").strip()
+                or str(framework.get("approval_policy") or "").strip()
+                or "No explicit action recorded"
+            )
+            tradeoff = str(framework.get("tradeoff") or "").strip()
+            value_ids = _string_list(framework.get("value_ids"))
+            value_text = ", ".join(value_ids) if value_ids else "No explicit value id recorded"
+            support_count = framework.get("support_count")
+            provenance_lines = _format_framework_provenance(framework)
+            provenance_text = (
+                "; ".join(provenance_lines)
+                if provenance_lines
+                else "No evidence provenance attached; treat as lower-grade support."
+            )
+
+            lines.extend(
+                [
+                    (
+                        f"{rank}. {framework_id} "
+                        f"(kind={framework.get('_kind', 'framework')}, "
+                        f"confidence={confidence:.2f}, revision={revision}, "
+                        f"matched_terms={', '.join(sorted(matched))})"
+                    ),
+                    f"   Condition: {condition}",
+                    f"   Action/prediction: {action}",
+                    f"   Value/tradeoff: {tradeoff or value_text}",
+                    f"   Match strength: {match_count} term(s)",
+                    f"   Support count: {support_count if support_count is not None else 'unknown'}",
+                    f"   Provenance: {provenance_text}",
+                ]
+            )
+
+        return "\n".join(lines)
+
     async def get_my_decision_frameworks(
         min_confidence: float = 0.0,
         limit: int = 10,
@@ -279,13 +562,8 @@ def _build_chat_tools(mini: Mini, session: AsyncSession | None = None) -> list[A
         """
         from app.synthesis.framework_views import format_decision_frameworks
 
-        try:
-            p_data = (
-                mini.principles_json
-                if isinstance(mini.principles_json, dict)
-                else __import__("json").loads(mini.principles_json or "{}")
-            )
-        except Exception:
+        p_data = _load_principles_payload(getattr(mini, "principles_json", None))
+        if not p_data:
             return []
         return format_decision_frameworks(p_data, min_confidence=min_confidence, limit=limit)
 
@@ -383,6 +661,30 @@ def _build_chat_tools(mini: Mini, session: AsyncSession | None = None) -> list[A
                 "required": ["query"],
             },
             handler=search_principles,
+        ),
+        AgentTool(
+            name="apply_framework",
+            description=(
+                "Apply the mini's stored decision frameworks and values to a novel "
+                "situation. Use this for 'what would you do/say/choose', tradeoff, "
+                "architecture, technology-choice, review-like, opinion, and values "
+                "questions. If no evidence-backed framework matches, this tool returns "
+                "an explicit insufficient-evidence gate instead of generic advice."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "situation": {
+                        "type": "string",
+                        "description": (
+                            "The concrete situation, decision, proposal, or tradeoff to "
+                            "evaluate using stored frameworks."
+                        ),
+                    },
+                },
+                "required": ["situation"],
+            },
+            handler=apply_framework,
         ),
         AgentTool(
             name="get_my_decision_frameworks",
@@ -503,11 +805,21 @@ async def chat_with_mini(
         "- User asks what you work on → call `search_memories(query='projects work')` first\n"
         "- User asks about a specific technology → call `search_knowledge_graph(query='<technology>')` first\n"
         "- User asks how you decide X or what frameworks you use → call `get_my_decision_frameworks()` first\n\n"
+        "- User asks what you would do, choose, reject, approve, or say in a novel situation "
+        "→ call `apply_framework(situation='<full user situation>')` first\n\n"
         "Skipping tools = generic, inauthentic responses. Using tools = authentic, specific, credible.\n"
         "NEVER respond without searching first. The search takes one call. Do it.\n\n"
+        "# FRAMEWORK APPLICATION AND EVIDENCE GATING\n"
+        "For decision, tradeoff, architecture, technology-choice, review-like, opinion, "
+        "and values questions, the primary task is framework application, not persona voice. "
+        "Call `apply_framework` before answering. Explain from stored framework/value evidence "
+        "and provenance. If `apply_framework` returns `INSUFFICIENT_EVIDENCE` or "
+        "`INSUFFICIENT_CONTEXT`, do not fill the gap with generic advice; explicitly say the "
+        "mini lacks enough evidence to predict this person's stance and ask for the missing "
+        "facts or evidence.\n\n"
         "# DEEP SYNTHESIS FOR OPINIONS AND VALUES\n"
         "For questions about OPINIONS, VALUES, or 'hottest takes', search thoroughly. Do NOT answer from a single search result. Cross-reference multiple memories.\n"
-        "Make at least 6-8 search calls (e.g. `search_memories`, `search_principles`, `search_evidence`) before answering deep synthesis questions to construct a comprehensive view.\n\n"
+        "Make at least 6-8 search calls (e.g. `apply_framework`, `search_memories`, `search_principles`, `search_evidence`) before answering deep synthesis questions to construct a comprehensive view.\n\n"
         "# PRIVACY — PARAPHRASE PRIVATE SOURCES\n\n"
         "Evidence items carry a `source_privacy` field ('public' or 'private').\n\n"
         "- **PRIVATE** evidence (`source_privacy='private'`, e.g. Claude Code sessions from a local machine) "

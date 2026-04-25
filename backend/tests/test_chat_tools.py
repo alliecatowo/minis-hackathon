@@ -98,13 +98,13 @@ class TestGetMyDecisionFrameworksToolRegistration:
         names = {t.name for t in tools}
         assert "get_my_decision_frameworks" in names
 
-    def test_total_tool_count_is_seven(self):
-        """Adding get_my_decision_frameworks bumps the count from 6 to 7."""
+    def test_total_tool_count_is_eight(self):
+        """Framework profile plus application tools are both registered."""
         from app.routes.chat import _build_chat_tools
 
         mini = _make_mini()
         tools = _build_chat_tools(mini)
-        assert len(tools) == 7
+        assert len(tools) == 8
 
     def test_schema_has_optional_params(self):
         from app.routes.chat import _build_chat_tools
