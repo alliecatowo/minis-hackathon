@@ -12,13 +12,15 @@ import asyncio
 import json
 import logging
 import random
+import uuid
 from collections.abc import Callable, Coroutine
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.ingestion.delta import get_latest_external_ids
+from app.ingestion.ai_contamination import ClassifierFn, score_evidence_batch
 from app.ingestion.hashing import hash_evidence_content
 from app.models.evidence import Evidence, ExplorerProgress
 from app.models.mini import Mini
@@ -51,6 +53,7 @@ import app.synthesis.explorers.devto_explorer  # noqa: F401
 import app.synthesis.explorers.website_explorer  # noqa: F401
 
 logger = logging.getLogger(__name__)
+_AI_LIKE_STATUS = "ai_like"
 
 # Type alias for progress callbacks
 ProgressCallback = Callable[[PipelineEvent], Coroutine[Any, Any, None]]
@@ -79,6 +82,13 @@ def _evidence_item_hash_metadata(item: EvidenceItem) -> dict[str, object]:
     if envelope:
         hash_metadata["_envelope"] = envelope
     return hash_metadata
+
+
+def _usable_evidence_condition():
+    return or_(
+        Evidence.ai_contamination_status.is_(None),
+        Evidence.ai_contamination_status != _AI_LIKE_STATUS,
+    )
 
 
 # ── Token budget (ALLIE-405) ─────────────────────────────────────────────────
@@ -270,6 +280,9 @@ async def _store_evidence_items_in_db(
     source_name: str,
     items: list[EvidenceItem],
     session_factory: Any,
+    *,
+    username: str = "",
+    contamination_classifier: ClassifierFn | None = None,
 ) -> tuple[int, int]:
     """Upsert a list of EvidenceItem objects into the Evidence table.
 
@@ -288,6 +301,7 @@ async def _store_evidence_items_in_db(
     now = datetime.now(timezone.utc)
     inserted = 0
     updated = 0
+    touched_evidence_ids: list[str] = []
 
     async with session_factory() as session:
         async with session.begin():
@@ -304,36 +318,37 @@ async def _store_evidence_items_in_db(
                 existing = (await session.execute(stmt)).scalar_one_or_none()
 
                 if existing is None:
-                    session.add(
-                        Evidence(
-                            mini_id=mini_id,
-                            source_type=item.source_type,
-                            item_type=item.item_type,
-                            content=item.content,
-                            context=item.context,
-                            metadata_json=item.metadata,
-                            source_privacy=item.privacy,
-                            retention_policy=item.retention_policy,
-                            retention_expires_at=item.retention_expires_at,
-                            source_authorization=item.source_authorization,
-                            authorization_revoked_at=item.authorization_revoked_at,
-                            access_classification=item.access_classification or item.privacy,
-                            lifecycle_audit_json=item.lifecycle_audit,
-                            source_uri=item.source_uri,
-                            author_id=item.author_id,
-                            audience_id=item.audience_id,
-                            target_id=item.target_id,
-                            scope_json=item.scope,
-                            raw_body=item.raw_body,
-                            raw_body_ref=item.raw_body_ref,
-                            raw_context_json=item.raw_context,
-                            provenance_json=item.provenance,
-                            external_id=item.external_id,
-                            evidence_date=item.evidence_date,
-                            last_fetched_at=now,
-                            content_hash=new_hash,
-                        )
+                    evidence = Evidence(
+                        id=str(uuid.uuid4()),
+                        mini_id=mini_id,
+                        source_type=item.source_type,
+                        item_type=item.item_type,
+                        content=item.content,
+                        context=item.context,
+                        metadata_json=item.metadata,
+                        source_privacy=item.privacy,
+                        retention_policy=item.retention_policy,
+                        retention_expires_at=item.retention_expires_at,
+                        source_authorization=item.source_authorization,
+                        authorization_revoked_at=item.authorization_revoked_at,
+                        access_classification=item.access_classification or item.privacy,
+                        lifecycle_audit_json=item.lifecycle_audit,
+                        source_uri=item.source_uri,
+                        author_id=item.author_id,
+                        audience_id=item.audience_id,
+                        target_id=item.target_id,
+                        scope_json=item.scope,
+                        raw_body=item.raw_body,
+                        raw_body_ref=item.raw_body_ref,
+                        raw_context_json=item.raw_context,
+                        provenance_json=item.provenance,
+                        external_id=item.external_id,
+                        evidence_date=item.evidence_date,
+                        last_fetched_at=now,
+                        content_hash=new_hash,
                     )
+                    session.add(evidence)
+                    touched_evidence_ids.append(evidence.id)
                     inserted += 1
                 elif existing.content_hash != new_hash:
                     existing.content = item.content
@@ -359,6 +374,13 @@ async def _store_evidence_items_in_db(
                     existing.raw_context_json = item.raw_context
                     existing.provenance_json = item.provenance
                     existing.explored = False  # re-explore mutated items
+                    existing.ai_contamination_score = None
+                    existing.ai_contamination_confidence = None
+                    existing.ai_contamination_status = None
+                    existing.ai_contamination_reasoning = None
+                    existing.ai_contamination_provenance_json = None
+                    existing.ai_contamination_checked_at = None
+                    touched_evidence_ids.append(existing.id)
                     updated += 1
                 else:
                     # Unchanged — just refresh timestamp
@@ -373,7 +395,56 @@ async def _store_evidence_items_in_db(
             )
             session.add(prog)
 
+    if touched_evidence_ids and username:
+        try:
+            counts = await score_evidence_batch(
+                mini_id,
+                touched_evidence_ids,
+                session_factory,
+                username=username,
+                **(
+                    {"classifier": contamination_classifier}
+                    if contamination_classifier is not None
+                    else {}
+                ),
+            )
+            logger.info(
+                "AI-contamination scoring for mini %s source %s: %s",
+                mini_id,
+                source_name,
+                counts,
+            )
+        except Exception:
+            logger.warning(
+                "AI-contamination scoring failed for mini %s source %s",
+                mini_id,
+                source_name,
+                exc_info=True,
+            )
+
     return inserted, updated
+
+
+async def _build_usable_evidence_text(
+    mini_id: str,
+    source_name: str,
+    session_factory: Any,
+) -> str:
+    """Build fallback evidence text while excluding confirmed contaminated rows."""
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(Evidence.content)
+                .where(
+                    Evidence.mini_id == mini_id,
+                    Evidence.source_type == source_name,
+                    _usable_evidence_condition(),
+                )
+                .order_by(Evidence.created_at.desc())
+                .limit(200)
+            )
+        ).scalars().all()
+    return "\n\n---\n\n".join(content for content in rows if content)
 
 
 async def _build_structured_from_db(
@@ -560,6 +631,7 @@ async def _build_synthetic_reports_from_db(
         evidence_stmt = select(Evidence.source_type, Evidence.context, Evidence.content).where(
             Evidence.mini_id == mini_id,
             Evidence.context != "general",
+            _usable_evidence_condition(),
         )
         evidence_rows = await session.execute(evidence_stmt)
         context_evidence_rows = evidence_rows.all()
@@ -838,6 +910,7 @@ async def run_pipeline(
                         source_name=source_name,
                         items=collected,
                         session_factory=session_factory,
+                        username=username,
                     )
                     logger.info(
                         "Fetch for '%s' (mini %s): %d inserted, %d updated, %d skipped (unchanged)",
@@ -850,9 +923,16 @@ async def run_pipeline(
 
                 # Build a synthetic IngestionResult so the rest of the pipeline
                 # (explorer wiring, evidence_cache) still works unchanged.
-                combined_evidence = "\n\n---\n\n".join(
-                    item.content for item in collected if item.content
-                )
+                if mini_id is not None:
+                    combined_evidence = await _build_usable_evidence_text(
+                        mini_id,
+                        source_name,
+                        session_factory,
+                    )
+                else:
+                    combined_evidence = "\n\n---\n\n".join(
+                        item.content for item in collected if item.content
+                    )
                 result = IngestionResult(
                     source_name=source_name,
                     identifier=identifier,

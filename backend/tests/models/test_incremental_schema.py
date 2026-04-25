@@ -54,6 +54,10 @@ CREATE TABLE IF NOT EXISTS evidence (
     last_fetched_at TEXT,
     content_hash TEXT,
     ai_contamination_score REAL,
+    ai_contamination_confidence REAL,
+    ai_contamination_status TEXT,
+    ai_contamination_reasoning TEXT,
+    ai_contamination_provenance_json TEXT,
     ai_contamination_checked_at TEXT,
     context TEXT NOT NULL DEFAULT 'general'
 )
@@ -197,6 +201,19 @@ class TestEvidenceIncrementalColumns:
             assert col is not None
             assert col.nullable is True
 
+    def test_ai_contamination_verdict_columns_exist(self):
+        for name in [
+            "ai_contamination_score",
+            "ai_contamination_confidence",
+            "ai_contamination_status",
+            "ai_contamination_reasoning",
+            "ai_contamination_provenance_json",
+            "ai_contamination_checked_at",
+        ]:
+            col = Evidence.__table__.columns.get(name)
+            assert col is not None
+            assert col.nullable is True
+
     def test_review_grade_envelope_defaults_none(self):
         ev = Evidence(
             id=str(uuid.uuid4()),
@@ -214,6 +231,12 @@ class TestEvidenceIncrementalColumns:
         assert ev.raw_body_ref is None
         assert ev.raw_context_json is None
         assert ev.provenance_json is None
+        assert ev.ai_contamination_score is None
+        assert ev.ai_contamination_confidence is None
+        assert ev.ai_contamination_status is None
+        assert ev.ai_contamination_reasoning is None
+        assert ev.ai_contamination_provenance_json is None
+        assert ev.ai_contamination_checked_at is None
 
     def test_can_set_all_new_fields(self):
         now = datetime.now(timezone.utc)
@@ -231,6 +254,12 @@ class TestEvidenceIncrementalColumns:
             scope_json={"type": "repo", "id": "acme/app"},
             raw_body="raw commit message",
             provenance_json={"collector": "github"},
+            ai_contamination_score=0.1,
+            ai_contamination_confidence=0.9,
+            ai_contamination_status="human",
+            ai_contamination_reasoning="matches baseline",
+            ai_contamination_provenance_json={"baseline_evidence_ids": ["ev-1"]},
+            ai_contamination_checked_at=now,
         )
         assert ev.external_id == "abc123"
         assert ev.last_fetched_at == now
@@ -240,6 +269,12 @@ class TestEvidenceIncrementalColumns:
         assert ev.scope_json == {"type": "repo", "id": "acme/app"}
         assert ev.raw_body == "raw commit message"
         assert ev.provenance_json == {"collector": "github"}
+        assert ev.ai_contamination_score == 0.1
+        assert ev.ai_contamination_confidence == 0.9
+        assert ev.ai_contamination_status == "human"
+        assert ev.ai_contamination_reasoning == "matches baseline"
+        assert ev.ai_contamination_provenance_json == {"baseline_evidence_ids": ["ev-1"]}
+        assert ev.ai_contamination_checked_at == now
 
 
 # ---------------------------------------------------------------------------

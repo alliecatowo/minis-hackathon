@@ -76,6 +76,10 @@ class Evidence(Base):
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # AI contamination detection (ALLIE-444) — 0.0 = authentic, 1.0 = AI-generated; NULL = unscored
     ai_contamination_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_contamination_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_contamination_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ai_contamination_reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_contamination_provenance_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     ai_contamination_checked_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -130,7 +134,11 @@ class Evidence(Base):
                 else None
             ),
             "raw_context": self.raw_context_json,
-            "ai_contamination_confidence": self.ai_contamination_score,
+            "ai_contamination_score": self.ai_contamination_score,
+            "ai_contamination_confidence": self.ai_contamination_confidence,
+            "ai_contamination_status": self.ai_contamination_status,
+            "ai_contamination_reasoning": self.ai_contamination_reasoning,
+            "ai_contamination_provenance": self.ai_contamination_provenance_json,
             "provenance": self.provenance_json,
             "provenance_confidence": (
                 self.provenance_json.get("confidence")

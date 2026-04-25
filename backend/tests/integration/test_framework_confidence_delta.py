@@ -79,6 +79,10 @@ CREATE TABLE IF NOT EXISTS evidence (
     last_fetched_at TEXT,
     content_hash TEXT,
     ai_contamination_score FLOAT,
+    ai_contamination_confidence FLOAT,
+    ai_contamination_status TEXT,
+    ai_contamination_reasoning TEXT,
+    ai_contamination_provenance_json TEXT,
     ai_contamination_checked_at TEXT
 )
 """

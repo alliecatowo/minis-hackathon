@@ -16,7 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.models import ModelTier, get_model
@@ -28,6 +28,7 @@ from app.models.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+_AI_LIKE_STATUS = "ai_like"
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +364,10 @@ async def infer_personality_typology(
                     "discussion_comment",
                     "stackoverflow_answer",
                 ]
+            ),
+            or_(
+                Evidence.ai_contamination_status.is_(None),
+                Evidence.ai_contamination_status != _AI_LIKE_STATUS,
             ),
         )
         .order_by(Evidence.created_at.desc())

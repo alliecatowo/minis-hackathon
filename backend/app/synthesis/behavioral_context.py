@@ -19,13 +19,14 @@ import json
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.evidence import Evidence, ExplorerQuote
 from app.models.schemas import BehavioralContext, BehavioralContextEntry
 
 logger = logging.getLogger(__name__)
+_AI_LIKE_STATUS = "ai_like"
 
 # Minimum number of evidence items in a bucket before we bother analyzing it.
 MIN_ITEMS_PER_CONTEXT = 3
@@ -243,7 +244,13 @@ async def infer_behavioral_context(
         Evidence.context,
         Evidence.content,
         Evidence.source_type,
-    ).where(Evidence.mini_id == mini_id)
+    ).where(
+        Evidence.mini_id == mini_id,
+        or_(
+            Evidence.ai_contamination_status.is_(None),
+            Evidence.ai_contamination_status != _AI_LIKE_STATUS,
+        ),
+    )
     rows = await db_session.execute(stmt)
     evidence_rows = rows.all()
 
