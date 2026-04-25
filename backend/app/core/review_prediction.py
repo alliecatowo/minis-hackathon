@@ -196,6 +196,8 @@ _FRAMEWORK_SIGNAL_STOPWORDS = {
     "how",
     "why",
     "should",
+    "would",
+}
 _FRAMEWORK_ARCHITECTURE_TERMS = {
     "architecture",
     "architectural",
@@ -247,8 +249,6 @@ _FRAMEWORK_LOCAL_NORM_TERMS = {
     "existing",
     "convention",
     "norm",
-}
-    "would",
 }
 
 
@@ -384,6 +384,89 @@ def _cohere_framework_signal_reason(
     matched_terms: set[str],
 ) -> str:
     if matched_terms:
+        terms = ", ".join(sorted(matched_terms))
+        return f"Matched request terms [{terms}] to this framework condition/action."
+    return "This high-confidence framework is one of the top learned rules in this mini."
+
+
+def _temporal_stability_bonus(temporal_span: dict[str, Any]) -> float:
+    first_seen = _parse_iso_datetime(temporal_span.get("first_seen_at"))
+    last_reinforced = _parse_iso_datetime(temporal_span.get("last_reinforced_at"))
+    if not first_seen or not last_reinforced:
+        return 0.0
+    span_days = max(0, (last_reinforced - first_seen).days)
+    if span_days >= _TEMPORAL_STABILITY_WINDOW_LONG_DAYS:
+        return _TEMPORAL_DURABILITY_LONG_BONUS
+    if span_days >= _TEMPORAL_STABILITY_WINDOW_SHORT_DAYS:
+        return _TEMPORAL_DURABILITY_SHORT_BONUS
+    return 0.0
+
+
+def _request_scope_tokens(body: ArtifactReviewRequestBaseV1) -> set[str]:
+    tokens: set[str] = set()
+    for path in body.changed_files:
+        normalized = (path or "").replace("\\", "/").lower()
+        if not normalized:
+            continue
+        for token in _tokenize(normalized):
+            if len(token) > 2:
+                tokens.add(token)
+        path_segments = [segment for segment in normalized.split("/") if segment]
+        for segment in path_segments:
+            if segment and len(segment) > 2:
+                tokens.add(segment)
+
+    repo = _normalize_repo_name(body.repo_name)
+    if repo:
+        tokens.add(repo)
+        for segment in repo.split("/"):
+            if segment:
+                tokens.add(segment)
+    return tokens
+
+
+def _framework_scope_match(raw: dict[str, Any], request_scope_tokens: set[str]) -> bool:
+    if str(raw.get("specificity_level", "")).strip() != "scope_local":
+        return False
+    text = " ".join(
+        str(raw.get(key, ""))
+        for key in ("condition", "action", "decision_order", "value_ids", "name")
+    )
+    framework_scope_tokens = _tokenise_text(text)
+    return bool(request_scope_tokens & framework_scope_tokens)
+
+
+def _build_framework_scope_metadata(
+    visible_signals: list[ReviewPredictionFrameworkSignalV1],
+) -> ReviewFrameworkTemporalBalanceV1:
+    visible_stable_framework_ids = [
+        signal.framework_id
+        for signal in visible_signals
+        if signal.temporal_stability_bonus > 0.0
+    ]
+    visible_project_preference_ids = [
+        signal.framework_id
+        for signal in visible_signals
+        if signal.scope_match_boost > 0.0
+    ]
+    stable_frameworks_preserved = bool(visible_stable_framework_ids)
+    if visible_stable_framework_ids and visible_project_preference_ids:
+        rationale = (
+            "Scoped signals lead but durable temporal frameworks are preserved in visibility."
+        )
+    elif visible_stable_framework_ids:
+        rationale = "Durable temporal frameworks remain visible with no competing scoped preferences."
+    else:
+        rationale = "No durable temporal frameworks were active for visibility balancing."
+    confidence = 0.95 if stable_frameworks_preserved else 0.6
+    return ReviewFrameworkTemporalBalanceV1(
+        visible_stable_framework_ids=visible_stable_framework_ids,
+        visible_project_preference_ids=visible_project_preference_ids,
+        stable_frameworks_preserved=stable_frameworks_preserved,
+        rationale=rationale,
+        confidence=confidence,
+    )
+
 
 def _resolve_framework_conflicts(
     signals: list[ReviewPredictionFrameworkSignalV1],
@@ -422,7 +505,9 @@ def _resolve_framework_conflicts(
         if policy.context in {"hotfix", "incident"}:
             if "shipping_speed" in dimensions:
                 context_boost += 0.2
-                reasons.append(f"{policy.context} pressure favors restoring service over broadening scope")
+                reasons.append(
+                    f"{policy.context} pressure favors restoring service over broadening scope"
+                )
             if "architecture" in dimensions:
                 context_boost -= 0.12
                 reasons.append("architecture concerns are preserved but deferred under delivery pressure")
@@ -508,26 +593,23 @@ def _resolve_framework_conflicts(
         provenance_ids=_dedupe(provenance_ids),
         decisions=decisions,
     )
-        terms = ", ".join(sorted(matched_terms))
-        return f"Matched request terms [{terms}] to this framework condition/action."
-    return "This high-confidence framework is one of the top learned rules in this mini."
 
 
 def _build_framework_signals(
     mini: Any,
     body: ArtifactReviewRequestBaseV1,
-) -> list[ReviewPredictionFrameworkSignalV1]:
+) -> tuple[list[ReviewPredictionFrameworkSignalV1], ReviewFrameworkTemporalBalanceV1 | None]:
     request_text = _build_request_text(body)
     request_tokens = _tokenise_text(request_text)
     if not request_tokens:
         request_tokens = set()
+    request_scope_tokens = _request_scope_tokens(body)
 
     frameworks = _extract_decision_frameworks(getattr(mini, "principles_json", None))
     if not frameworks:
-        return []
+        return [], None
 
-    scored: list[tuple[int, float, int, ReviewPredictionFrameworkSignalV1]] = []
-    fallback: list[tuple[float, int, ReviewPredictionFrameworkSignalV1]] = []
+    scored: list[tuple[int, float, int, bool, bool, ReviewPredictionFrameworkSignalV1]] = []
     for raw in frameworks:
         framework_id = str(raw.get("framework_id", "")).strip()
         if not framework_id:
@@ -537,7 +619,18 @@ def _build_framework_signals(
         matched_terms = request_tokens & fw_tokens
         matched_count = len(matched_terms)
 
-        confidence = _coerce_confidence(raw.get("confidence"), default=0.5)
+        raw_confidence = _coerce_confidence(raw.get("confidence"), default=0.5)
+        temporal_span = raw.get("temporal_span")
+        temporal_boost = (
+            _temporal_stability_bonus(temporal_span) if isinstance(temporal_span, dict) else 0.0
+        )
+        scope_match_boost = (
+            _SCOPE_LOCAL_BOOST
+            if _framework_scope_match(raw, request_scope_tokens)
+            else 0.0
+        )
+        confidence = _coerce_confidence(raw_confidence + temporal_boost + scope_match_boost)
+        is_stable_framework = temporal_boost > 0.0
         raw_revision = raw.get("revision")
         revision_count = _coerce_int(raw_revision, default=0)
         revision = revision_count if raw_revision is not None else None
@@ -580,33 +673,49 @@ def _build_framework_signals(
             evidence_ids=evidence_ids,
             evidence_provenance=evidence_provenance,
             provenance_ids=provenance_ids,
+            temporal_stability_bonus=temporal_boost,
+            scope_match_boost=scope_match_boost,
         )
 
-        scored.append((matched_count, confidence, revision_count, framework_signal))
-        if matched_count == 0:
-            fallback.append((confidence, revision_count, framework_signal))
+        scored.append(
+            (
+                matched_count,
+                confidence,
+                revision_count,
+                is_stable_framework,
+                bool(scope_match_boost),
+                framework_signal,
+            )
+        )
 
     matched = [entry for entry in scored if entry[0] > 0]
-    ranked_fallback = sorted(fallback, key=lambda item: (item[0], item[1]), reverse=True)
-
     ordered = sorted(
-        matched,
-        key=lambda item: (item[0], item[1], item[2]),
+        matched if matched else scored,
+        key=lambda item: (item[0], item[1], item[2], not item[3], item[5].scope_match_boost),
         reverse=True,
     )
-    if ordered:
-        return [entry[3] for entry in ordered[:_FRAMEWORK_SIGNAL_COUNT]]
+    if not ordered:
+        return [], None
+    visible: list[tuple[int, float, int, bool, bool, ReviewPredictionFrameworkSignalV1]] = ordered[
+        :_FRAMEWORK_SIGNAL_COUNT
+    ]
 
-    ordered_fallback = sorted(
-        ranked_fallback,
-        key=lambda item: (item[0], item[1]),
-        reverse=True,
-    )
-    return [
-        entry[2]
-        for entry in ordered_fallback
-        if entry[0] >= 0.7 or entry[1] >= 1
-    ][:_FRAMEWORK_SIGNAL_COUNT]
+    if visible:
+        has_stable = any(entry[3] for entry in visible)
+        stable_candidates = [entry for entry in ordered if entry[3]]
+        if stable_candidates and not has_stable:
+            replacement = stable_candidates[0]
+            visible[-1] = replacement
+            visible = sorted(
+                visible,
+                key=lambda item: (item[0], item[1], item[2], item[5].scope_match_boost),
+                reverse=True,
+            )[:_FRAMEWORK_SIGNAL_COUNT]
+
+    framework_signals = [entry[5] for entry in visible]
+    if not framework_signals:
+        return [], None
+    return framework_signals, _build_framework_scope_metadata(framework_signals)
 
 def _engineering_value(values: dict[str, Any], name: str) -> float:
     engineering_values = values.get("engineering_values", [])
@@ -1831,7 +1940,7 @@ def _build_artifact_review_fields(
         evidence_pool,
         same_repo_precedent=same_repo_precedent,
     )
-    framework_signals = _build_framework_signals(mini, body)
+    framework_signals, framework_temporal_balance = _build_framework_signals(mini, body)
     assessment = _build_private_assessment(
         mini,
         body,
@@ -1849,6 +1958,7 @@ def _build_artifact_review_fields(
             title=body.title,
         ),
         "framework_signals": framework_signals,
+        "framework_temporal_balance": framework_temporal_balance,
         "private_assessment": assessment,
         "delivery_policy": policy,
         "expressed_feedback": expressed_feedback,
@@ -1948,9 +2058,3 @@ async def build_review_prediction_v1_with_precedent(
         body,
         same_repo_precedent=same_repo_precedent,
     )
-    framework_conflict_resolution = _resolve_framework_conflicts(
-        framework_signals,
-        body=body,
-        policy=policy,
-    )
-        "framework_conflict_resolution": framework_conflict_resolution,
