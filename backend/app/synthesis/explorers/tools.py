@@ -447,6 +447,7 @@ def build_explorer_tools(
         page: int = 1,
         page_size: int = 20,
         signal_mode: str = "all",
+        max_contamination: float = 0.75,
     ) -> str:
         if signal_mode not in _SIGNAL_MODE_ENUM:
             return json.dumps(
@@ -457,6 +458,13 @@ def build_explorer_tools(
                     )
                 }
             )
+
+        def _passes_contamination(row: Evidence) -> bool:
+            """Return True if row is below the contamination threshold."""
+            score = getattr(row, "ai_contamination_score", None)
+            if not isinstance(score, (int, float)):
+                return True
+            return float(score) <= max_contamination
 
         offset = (page - 1) * page_size
         if signal_mode == "all":
@@ -472,7 +480,7 @@ def build_explorer_tools(
                 .limit(page_size)
             )
             result = await db_session.execute(stmt)
-            rows = result.scalars().all()
+            rows = [r for r in result.scalars().all() if _passes_contamination(r)]
 
             count_stmt = (
                 select(func.count())
@@ -491,7 +499,10 @@ def build_explorer_tools(
                 _usable_evidence_condition(),
             )
             result = await db_session.execute(stmt)
-            prioritized = _prioritize_rows(result.scalars().all(), signal_mode)
+            prioritized = _prioritize_rows(
+                [r for r in result.scalars().all() if _passes_contamination(r)],
+                signal_mode,
+            )
             total = len(prioritized)
             rows = prioritized[offset : offset + page_size]
 
@@ -503,6 +514,7 @@ def build_explorer_tools(
                 "page_size": page_size,
                 "total": total,
                 "signal_mode": signal_mode,
+                "max_contamination": max_contamination,
             }
         )
 
@@ -512,6 +524,7 @@ def build_explorer_tools(
         query: str,
         source_type: str | None = None,
         signal_mode: str = "all",
+        max_contamination: float = 0.75,
     ) -> str:
         if signal_mode not in _SIGNAL_MODE_ENUM:
             return json.dumps(
@@ -522,6 +535,13 @@ def build_explorer_tools(
                     )
                 }
             )
+
+        def _passes_contamination(row: Evidence) -> bool:
+            """Return True if row is below the contamination threshold."""
+            score = getattr(row, "ai_contamination_score", None)
+            if not isinstance(score, (int, float)):
+                return True
+            return float(score) <= max_contamination
 
         conditions = [
             Evidence.mini_id == mini_id,
@@ -535,7 +555,7 @@ def build_explorer_tools(
             50 if signal_mode == "all" else _SIGNAL_SEARCH_CANDIDATE_LIMIT
         )
         result = await db_session.execute(stmt)
-        rows = result.scalars().all()
+        rows = [r for r in result.scalars().all() if _passes_contamination(r)]
 
         if signal_mode != "all":
             rows = _prioritize_rows(rows, signal_mode)[:50]
@@ -547,6 +567,7 @@ def build_explorer_tools(
                 "query": query,
                 "count": len(items),
                 "signal_mode": signal_mode,
+                "max_contamination": max_contamination,
             }
         )
 
@@ -888,6 +909,14 @@ def build_explorer_tools(
                             "to surface higher-signal evidence before chronological browsing."
                         ),
                     },
+                    "max_contamination": {
+                        "type": "number",
+                        "description": (
+                            "Maximum ai_contamination_score to include (0.0–1.0). "
+                            "Default 0.75 excludes likely-AI-generated items. "
+                            "Set to 1.0 to include all items regardless of contamination score."
+                        ),
+                    },
                 },
                 "required": ["source_type"],
             },
@@ -914,6 +943,14 @@ def build_explorer_tools(
                             "Optional prioritization mode. Use conflicts_first or approvals_first "
                             "to rank matched evidence by conflict/approval signal; use *_only "
                             "to filter to those signals."
+                        ),
+                    },
+                    "max_contamination": {
+                        "type": "number",
+                        "description": (
+                            "Maximum ai_contamination_score to include (0.0–1.0). "
+                            "Default 0.75 excludes likely-AI-generated items. "
+                            "Set to 1.0 to include all items regardless of contamination score."
                         ),
                     },
                 },

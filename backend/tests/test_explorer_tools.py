@@ -622,3 +622,149 @@ class TestSignalPrioritization:
         assert _build_signal_metadata(current)["high_signal_score"] == _build_signal_metadata(
             legacy
         )["high_signal_score"]
+
+
+# ---------------------------------------------------------------------------
+# AI contamination filter — max_contamination param (MINI-238)
+# ---------------------------------------------------------------------------
+
+
+class TestContaminationFilter:
+    """Verify that browse_evidence and search_evidence honour max_contamination."""
+
+    def _make_evidence_row(
+        self,
+        *,
+        row_id: str,
+        contamination_score: float | None,
+        item_type: str = "review",
+        source_type: str = "github",
+        content: str = "some evidence text",
+    ):
+        row = MagicMock()
+        row.id = row_id
+        row.item_type = item_type
+        row.source_type = source_type
+        row.content = content
+        row.explored = False
+        row.source_privacy = "public"
+        row.metadata_json = None
+        row.created_at = None
+        row.evidence_date = None
+        row.ai_contamination_score = contamination_score
+        row.ai_contamination_confidence = None
+        row.ai_contamination_status = (
+            "ai_like"
+            if contamination_score is not None and contamination_score > 0.75
+            else ("human" if contamination_score is not None and contamination_score < 0.35 else None)
+        )
+        row.ai_contamination_reasoning = None
+        row.ai_contamination_provenance_json = None
+        return row
+
+    @pytest.mark.asyncio
+    async def test_browse_evidence_excludes_high_contamination_by_default(self, mock_session):
+        """Items with score > 0.75 are excluded at the default max_contamination=0.75."""
+        clean_row = self._make_evidence_row(row_id="ev-clean", contamination_score=0.1)
+        dirty_row = self._make_evidence_row(row_id="ev-dirty", contamination_score=0.9)
+
+        browse_result = MagicMock()
+        browse_result.scalars.return_value.all.return_value = [clean_row, dirty_row]
+        count_result = MagicMock()
+        count_result.scalar.return_value = 2
+        mock_session.execute = AsyncMock(side_effect=[browse_result, count_result])
+
+        tools = build_explorer_tools("mini-1", "github", mock_session)
+        tool = next(t for t in tools if t.name == "browse_evidence")
+        data = json.loads(await tool.handler(source_type="github"))
+
+        returned_ids = [item["id"] for item in data["items"]]
+        assert "ev-clean" in returned_ids
+        assert "ev-dirty" not in returned_ids
+        assert data["max_contamination"] == 0.75
+
+    @pytest.mark.asyncio
+    async def test_browse_evidence_includes_all_when_max_contamination_is_1(self, mock_session):
+        """Setting max_contamination=1.0 allows all items through."""
+        clean_row = self._make_evidence_row(row_id="ev-clean", contamination_score=0.1)
+        dirty_row = self._make_evidence_row(row_id="ev-dirty", contamination_score=0.9)
+
+        browse_result = MagicMock()
+        browse_result.scalars.return_value.all.return_value = [clean_row, dirty_row]
+        count_result = MagicMock()
+        count_result.scalar.return_value = 2
+        mock_session.execute = AsyncMock(side_effect=[browse_result, count_result])
+
+        tools = build_explorer_tools("mini-1", "github", mock_session)
+        tool = next(t for t in tools if t.name == "browse_evidence")
+        data = json.loads(await tool.handler(source_type="github", max_contamination=1.0))
+
+        returned_ids = [item["id"] for item in data["items"]]
+        assert "ev-clean" in returned_ids
+        assert "ev-dirty" in returned_ids
+
+    @pytest.mark.asyncio
+    async def test_browse_evidence_passes_unscored_items(self, mock_session):
+        """Items with no contamination score (None) pass through the filter."""
+        unscored_row = self._make_evidence_row(row_id="ev-unscored", contamination_score=None)
+
+        browse_result = MagicMock()
+        browse_result.scalars.return_value.all.return_value = [unscored_row]
+        count_result = MagicMock()
+        count_result.scalar.return_value = 1
+        mock_session.execute = AsyncMock(side_effect=[browse_result, count_result])
+
+        tools = build_explorer_tools("mini-1", "github", mock_session)
+        tool = next(t for t in tools if t.name == "browse_evidence")
+        data = json.loads(await tool.handler(source_type="github"))
+
+        assert len(data["items"]) == 1
+        assert data["items"][0]["id"] == "ev-unscored"
+
+    @pytest.mark.asyncio
+    async def test_search_evidence_excludes_high_contamination_by_default(self, mock_session):
+        """search_evidence filters out items above max_contamination=0.75 by default."""
+        clean_row = self._make_evidence_row(row_id="ev-clean", contamination_score=0.2)
+        dirty_row = self._make_evidence_row(row_id="ev-dirty", contamination_score=0.85)
+
+        search_result = MagicMock()
+        search_result.scalars.return_value.all.return_value = [clean_row, dirty_row]
+        mock_session.execute = AsyncMock(return_value=search_result)
+
+        tools = build_explorer_tools("mini-1", "github", mock_session)
+        tool = next(t for t in tools if t.name == "search_evidence")
+        data = json.loads(await tool.handler(query="evidence"))
+
+        returned_ids = [item["id"] for item in data["matches"]]
+        assert "ev-clean" in returned_ids
+        assert "ev-dirty" not in returned_ids
+        assert data["max_contamination"] == 0.75
+
+    @pytest.mark.asyncio
+    async def test_search_evidence_strict_threshold_excludes_borderline(self, mock_session):
+        """Tightening max_contamination to 0.5 excludes scores above that."""
+        borderline_row = self._make_evidence_row(row_id="ev-border", contamination_score=0.6)
+
+        search_result = MagicMock()
+        search_result.scalars.return_value.all.return_value = [borderline_row]
+        mock_session.execute = AsyncMock(return_value=search_result)
+
+        tools = build_explorer_tools("mini-1", "github", mock_session)
+        tool = next(t for t in tools if t.name == "search_evidence")
+        data = json.loads(await tool.handler(query="evidence", max_contamination=0.5))
+
+        assert data["count"] == 0
+
+    def test_browse_evidence_schema_includes_max_contamination(self, tools):
+        """max_contamination must be documented in the browse_evidence parameter schema."""
+        tool = next(t for t in tools if t.name == "browse_evidence")
+        assert "max_contamination" in tool.parameters["properties"]
+        prop = tool.parameters["properties"]["max_contamination"]
+        assert prop["type"] == "number"
+
+    def test_search_evidence_schema_includes_max_contamination(self, tools):
+        """max_contamination must be documented in the search_evidence parameter schema."""
+        tool = next(t for t in tools if t.name == "search_evidence")
+        assert "max_contamination" in tool.parameters["properties"]
+        prop = tool.parameters["properties"]["max_contamination"]
+        assert prop["type"] == "number"

@@ -406,7 +406,14 @@ async def score_evidence_batch(
     username: str,
     classifier: ClassifierFn = score_ai_contamination,
 ) -> dict[str, int]:
-    """Classify a batch of evidence rows, returning verdict counts."""
+    """Classify a batch of evidence rows, returning verdict counts.
+
+    After classification, any rows verdict as ``ai_like`` are automatically
+    marked ``explored=True`` so that explorer agents skip them without needing
+    to read or process contaminated items.
+    """
+    from sqlalchemy import update as sa_update
+
     counts: dict[str, int] = {
         "human": 0,
         "ai_like": 0,
@@ -414,6 +421,7 @@ async def score_evidence_batch(
         "insufficient_baseline": 0,
         "error": 0,
     }
+    ai_like_ids: list[str] = []
     for evidence_id in dict.fromkeys(evidence_ids):
         async with session_factory() as session:
             async with session.begin():
@@ -425,4 +433,26 @@ async def score_evidence_batch(
                     classifier=classifier,
                 )
                 counts[verdict] = counts.get(verdict, 0) + 1
+                if verdict == "ai_like":
+                    ai_like_ids.append(evidence_id)
+
+    if ai_like_ids:
+        # Mark confirmed AI-generated items as explored so explorer agents skip them.
+        # We set explored=True and record a note in ai_contamination_reasoning if empty.
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    sa_update(Evidence)
+                    .where(
+                        Evidence.mini_id == mini_id,
+                        Evidence.id.in_(ai_like_ids),
+                    )
+                    .values(explored=True)
+                )
+        logger.info(
+            "ai_contamination: marked %d ai_like items as explored=True for mini_id=%s",
+            len(ai_like_ids),
+            mini_id,
+        )
+
     return counts

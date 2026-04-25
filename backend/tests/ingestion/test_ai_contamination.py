@@ -15,6 +15,7 @@ from app.ingestion.ai_contamination import (
     AIDetectionResult,
     AuthorBaseline,
     classify_and_persist_evidence,
+    score_evidence_batch,
 )
 from app.models.evidence import Evidence
 
@@ -213,3 +214,108 @@ async def test_insufficient_baseline_does_not_call_classifier(session_factory):
     assert row.ai_contamination_status == "insufficient_baseline"
     assert row.ai_contamination_score is None
     assert row.ai_contamination_provenance_json["state"] == "insufficient_baseline"
+
+
+# ---------------------------------------------------------------------------
+# score_evidence_batch — ai_like items are marked explored=True (MINI-235)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_score_evidence_batch_marks_ai_like_as_explored(session_factory):
+    """Items classified as ai_like must be marked explored=True so explorers skip them."""
+
+    async def ai_like_classifier(text: str, baseline: AuthorBaseline) -> AIDetectionResult:
+        return AIDetectionResult(
+            verdict="ai_like",
+            score=0.92,
+            confidence=0.85,
+            reasoning="surrogate polish",
+        )
+
+    mini_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        async with session.begin():
+            await _seed(session, mini_id, candidate_content="Definitely AI-generated text.")
+
+    counts = await score_evidence_batch(
+        mini_id,
+        ["candidate"],
+        session_factory,
+        username="alice",
+        classifier=ai_like_classifier,
+    )
+
+    assert counts["ai_like"] == 1
+
+    # The candidate row must now be marked explored=True
+    async with session_factory() as session:
+        row = (
+            await session.execute(select(Evidence).where(Evidence.id == "candidate"))
+        ).scalar_one()
+    assert row.explored is True
+    assert row.ai_contamination_status == "ai_like"
+
+
+@pytest.mark.asyncio
+async def test_score_evidence_batch_human_verdict_does_not_set_explored(session_factory):
+    """Items classified as human must NOT be auto-marked explored — they need processing."""
+
+    async def human_classifier(text: str, baseline: AuthorBaseline) -> AIDetectionResult:
+        return AIDetectionResult(
+            verdict="human",
+            score=0.12,
+            confidence=0.90,
+            reasoning="author voice match",
+        )
+
+    mini_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        async with session.begin():
+            await _seed(session, mini_id, candidate_content="Genuine developer prose.")
+
+    await score_evidence_batch(
+        mini_id,
+        ["candidate"],
+        session_factory,
+        username="alice",
+        classifier=human_classifier,
+    )
+
+    async with session_factory() as session:
+        row = (
+            await session.execute(select(Evidence).where(Evidence.id == "candidate"))
+        ).scalar_one()
+    # explored should remain False — let the explorer process it
+    assert row.explored is False
+    assert row.ai_contamination_status == "human"
+
+
+@pytest.mark.asyncio
+async def test_score_evidence_batch_returns_verdict_counts(session_factory):
+    """score_evidence_batch returns a dict with verdict counts."""
+
+    async def human_classifier(text: str, baseline: AuthorBaseline) -> AIDetectionResult:
+        return AIDetectionResult(
+            verdict="human",
+            score=0.10,
+            confidence=0.90,
+            reasoning="fits",
+        )
+
+    mini_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        async with session.begin():
+            await _seed(session, mini_id)
+
+    counts = await score_evidence_batch(
+        mini_id,
+        ["candidate"],
+        session_factory,
+        username="alice",
+        classifier=human_classifier,
+    )
+
+    assert isinstance(counts, dict)
+    assert counts["human"] == 1
+    assert counts.get("ai_like", 0) == 0
