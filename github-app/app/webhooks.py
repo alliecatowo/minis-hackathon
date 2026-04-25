@@ -38,6 +38,10 @@ logger = logging.getLogger(__name__)
 
 # Pattern to match @mentions of minis: @username-mini
 MENTION_PATTERN = re.compile(r"@(\w[\w-]*)" + re.escape(settings.mini_mention_suffix))
+REVIEW_REQUEST_PATTERN = re.compile(
+    r"\b(?:pre-?review|review|reviewer\s+mode)\b",
+    re.IGNORECASE,
+)
 
 
 def _pr_author_context(pr: dict) -> tuple[str | None, str | None]:
@@ -45,6 +49,11 @@ def _pr_author_context(pr: dict) -> tuple[str | None, str | None]:
     author_login = author.get("login")
     author_association = pr.get("author_association")
     return author_login, author_association
+
+
+def _is_explicit_review_request(body: str) -> bool:
+    """Return true only when the user asked the mini to act as a reviewer."""
+    return bool(REVIEW_REQUEST_PATTERN.search(body or ""))
 
 
 async def _get_permission_hint(
@@ -266,6 +275,7 @@ async def handle_issue_comment(payload: dict) -> None:
     delivery_context = infer_delivery_context(pr_details["title"], pr_details.get("body") or "")
     author_login, author_association = _pr_author_context(pr_details)
     author_permission = await _get_permission_hint(installation_id, owner, repo_name, author_login)
+    requested_reviewer_mode = _is_explicit_review_request(body)
 
     for username in mentions:
         mini = await get_mini(username)
@@ -283,6 +293,52 @@ async def handle_issue_comment(payload: dict) -> None:
             author_permission=author_permission,
         )
         logger.info("Generating response for %s's mini on PR #%d", username, pr_number)
+
+        if requested_reviewer_mode:
+            prediction = await get_review_prediction(
+                mini["id"],
+                repo_name=repo_full_name,
+                pr_title=pr_details["title"],
+                pr_body=pr_details.get("body") or "",
+                diff=diff,
+                changed_files=changed_files,
+                author_model=author_model,
+                delivery_context=delivery_context,
+            )
+            review_text = render_review_prediction(
+                prediction,
+                requested_via_review_request=True,
+            )
+            formatted = format_review_comment(username, review_text)
+            posted_review = await post_pr_review(
+                installation_id=installation_id,
+                owner=owner,
+                repo=repo_name,
+                pr_number=pr_number,
+                body=formatted,
+                event="COMMENT",
+            )
+            await record_review_prediction(
+                mini_id=mini["id"],
+                installation_id=installation_id,
+                owner=owner,
+                repo=repo_name,
+                pr_number=pr_number,
+                pr_title=pr_details["title"],
+                pr_html_url=pr_details.get("html_url") or issue.get("html_url"),
+                reviewer_login=username,
+                prediction=prediction,
+                github_review_id=posted_review.get("id"),
+                github_review_state=posted_review.get("state"),
+                author_login=author_login,
+                author_association=author_association,
+            )
+            logger.info(
+                "Posted reviewer-mode mention response for %s's mini on PR #%d",
+                username,
+                pr_number,
+            )
+            continue
 
         response_text = await generate_mention_response(
             mini=mini,
