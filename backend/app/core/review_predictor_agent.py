@@ -215,11 +215,16 @@ def _build_predictor_tools(mini: Mini, session: AsyncSession) -> list[AgentTool]
 
         # Build confidence index from decision_frameworks payload (may be absent for
         # older minis that were synthesized before the framework-delta loop shipped).
+        # Retired frameworks are excluded from scoring.
         confidence_index: dict[str, tuple[float, int]] = {}
+        retired_framework_ids: set[str] = set()
         df_payload = p_data.get("decision_frameworks") or {}
         for fw in (df_payload.get("frameworks") or []):
             fid = fw.get("framework_id")
             if fid:
+                if fw.get("retired", False):
+                    retired_framework_ids.add(fid)
+                    continue
                 confidence_index[fid] = (
                     float(fw.get("confidence", 0.5)),
                     int(fw.get("revision", 0)),
@@ -241,11 +246,14 @@ def _build_predictor_tools(mini: Mini, session: AsyncSession) -> list[AgentTool]
 
         matching: list[dict] = []
         for p in principles:
+            # Skip retired frameworks — they should not influence scoring
+            fid = p.get("framework_id")
+            if fid and fid in retired_framework_ids:
+                continue
             p_str = f"{p.get('trigger', '')} {p.get('action', '')} {p.get('value', '')}".lower()
             kw_score = sum(1 for kw in keywords if kw in p_str)
             if kw_score == 0:
                 continue
-            fid = p.get("framework_id")
             total_score = kw_score + _confidence_modifier(fid)
             matching.append({**p, "_score": total_score, "_fid": fid})
 
