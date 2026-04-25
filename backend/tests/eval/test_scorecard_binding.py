@@ -183,6 +183,10 @@ class TestRunEvalScorecardBinding:
         tf = _write_turns_yaml(tmp_path / "t", "user1")
 
         with (
+            patch(
+                "eval.runner._resolve_mini_id",
+                new=AsyncMock(return_value="mini-id-user1"),
+            ),
             patch("eval.runner._send_chat_turn", new=AsyncMock(return_value="response")),
             patch(
                 "eval.runner.score_response",
@@ -213,6 +217,10 @@ class TestRunEvalScorecardBinding:
         tf = _write_turns_yaml(tmp_path / "t", "user2")
 
         with (
+            patch(
+                "eval.runner._resolve_mini_id",
+                new=AsyncMock(return_value="mini-id-user2"),
+            ),
             patch("eval.runner._send_chat_turn", new=AsyncMock(return_value="response")),
             patch(
                 "eval.runner.score_response",
