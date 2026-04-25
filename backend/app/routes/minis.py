@@ -1,11 +1,14 @@
 import asyncio
+import base64
+import binascii
 import datetime
 import json
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -34,6 +37,7 @@ from app.models.schemas import (
     AtRiskFramework,
     CreateMiniRequest,
     MiniDetail,
+    MiniListResponse,
     MiniPublic,
     PatchAdvisorRequestV1,
     PatchAdvisorV1,
@@ -73,6 +77,9 @@ _DATASET_RATE_LIMIT_SECONDS = 600  # 10 minutes
 
 router = APIRouter(prefix="/minis", tags=["minis"])
 
+_MINI_LIST_DEFAULT_LIMIT = 20
+_MINI_LIST_MAX_LIMIT = 100
+
 
 async def _build_artifact_review_response(
     mini: Mini,
@@ -108,6 +115,44 @@ async def _build_patch_advisor_response(
     session: AsyncSession,
 ) -> PatchAdvisorV1:
     return await build_patch_advisor_v1_with_precedent(mini, body, session)
+
+
+def _encode_mini_cursor(mini: Mini) -> str:
+    created_at = mini.created_at
+    if isinstance(created_at, datetime.datetime):
+        created_at_value = created_at.isoformat()
+    else:
+        created_at_value = str(created_at)
+    payload = json.dumps(
+        {"created_at": created_at_value, "id": mini.id},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_mini_cursor(cursor: str) -> tuple[datetime.datetime, str]:
+    try:
+        padded = cursor + ("=" * (-len(cursor) % 4))
+        raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+        payload = json.loads(raw.decode("utf-8"))
+        created_at_raw = payload["created_at"]
+        mini_id = payload["id"]
+        if not isinstance(created_at_raw, str) or not isinstance(mini_id, str):
+            raise ValueError
+        created_at = datetime.datetime.fromisoformat(created_at_raw.replace("Z", "+00:00"))
+    except (
+        binascii.Error,
+        KeyError,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid cursor for minis list",
+        ) from None
+    return created_at, mini_id
 
 
 @router.get("/sources")
@@ -246,27 +291,69 @@ async def create_mini(
     return MiniSummary.model_validate(mini)
 
 
-@router.get("")
+@router.get("", response_model=MiniListResponse)
 async def list_minis(
-    mine: bool = Query(False),
+    mine: Annotated[
+        bool,
+        Query(description="List only minis owned by the authenticated user."),
+    ] = False,
+    limit: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=_MINI_LIST_MAX_LIMIT,
+            description="Maximum number of minis to return.",
+        ),
+    ] = _MINI_LIST_DEFAULT_LIMIT,
+    cursor: Annotated[
+        str | None,
+        Query(
+            max_length=512,
+            description=(
+                "Opaque pagination cursor returned as next_cursor. "
+                "Results are ordered by created_at desc, then id desc."
+            ),
+        ),
+    ] = None,
     session: AsyncSession = Depends(get_session),
     user: User | None = Depends(get_optional_user),
 ):
-    """List minis. Use ?mine=true to list only your own (requires auth)."""
+    """List minis with stable cursor pagination.
+
+    Sort order is deterministic: newest created_at first, then id descending.
+    Use ?mine=true to list only your own minis (requires auth).
+    """
+    cursor_filter = None
+    if cursor is not None:
+        cursor_created_at, cursor_id = _decode_mini_cursor(cursor)
+        cursor_filter = or_(
+            Mini.created_at < cursor_created_at,
+            and_(Mini.created_at == cursor_created_at, Mini.id < cursor_id),
+        )
+
+    stmt = select(Mini)
     if mine:
         if user is None:
             raise HTTPException(
                 status_code=401, detail="Authentication required to list your minis"
             )
-        result = await session.execute(
-            select(Mini).where(Mini.owner_id == user.id).order_by(Mini.created_at.desc())
-        )
+        stmt = stmt.where(Mini.owner_id == user.id)
     else:
-        result = await session.execute(
-            select(Mini).where(Mini.visibility == "public").order_by(Mini.created_at.desc())
-        )
-    minis = result.scalars().all()
-    return [MiniSummary.model_validate(m) for m in minis]
+        stmt = stmt.where(Mini.visibility == "public")
+    if cursor_filter is not None:
+        stmt = stmt.where(cursor_filter)
+
+    stmt = stmt.order_by(Mini.created_at.desc(), Mini.id.desc()).limit(limit + 1)
+    result = await session.execute(stmt)
+    rows = list(result.scalars().all())
+    page_rows = rows[:limit]
+    has_more = len(rows) > limit
+    next_cursor = _encode_mini_cursor(page_rows[-1]) if has_more and page_rows else None
+    return MiniListResponse(
+        data=[MiniSummary.model_validate(m) for m in page_rows],
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
 
 
 # NOTE: /by-username route MUST be defined before /{id} to avoid path conflicts

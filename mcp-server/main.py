@@ -411,9 +411,10 @@ async def list_minis(mine: bool = False) -> list[dict[str, Any]]:
         f"/minis?mine={'true' if mine else 'false'}",
         require_auth=mine,
     )
-    if not isinstance(result, list):
+    minis = result.get("data") if isinstance(result, dict) else result
+    if not isinstance(minis, list):
         raise BackendError("Expected a mini list from the backend.")
-    return result
+    return minis
 
 
 @mcp.tool()

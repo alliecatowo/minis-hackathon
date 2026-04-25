@@ -2305,8 +2305,9 @@ class TestMinisRoutesMore:
         session.execute = AsyncMock(return_value=result)
 
         resp = await list_minis(mine=True, session=session, user=user)
-        assert len(resp) == 1
-        assert resp[0].username == "ada"
+        assert len(resp.data) == 1
+        assert resp.data[0].username == "ada"
+        assert resp.has_more is False
 
 
 # ---------------------------------------------------------------------------

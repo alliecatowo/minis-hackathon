@@ -73,15 +73,19 @@ def test_list_happy_path_uses_hosted_api(monkeypatch):
         return _response(
             "GET",
             url,
-            json=[
-                {
-                    "id": "mini-1",
-                    "username": "octocat",
-                    "display_name": "Octo Cat",
-                    "status": "ready",
-                    "created_at": "2026-04-25T12:00:00Z",
-                }
-            ],
+            json={
+                "data": [
+                    {
+                        "id": "mini-1",
+                        "username": "octocat",
+                        "display_name": "Octo Cat",
+                        "status": "ready",
+                        "created_at": "2026-04-25T12:00:00Z",
+                    }
+                ],
+                "next_cursor": None,
+                "has_more": False,
+            },
         )
 
     monkeypatch.setattr(minis_cli.httpx, "get", fake_get)

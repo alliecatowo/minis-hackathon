@@ -167,6 +167,12 @@ class MiniSummary(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class MiniListResponse(BaseModel):
+    data: list[MiniSummary]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
 class MiniDetailValue(BaseModel):
     name: str
     description: str
