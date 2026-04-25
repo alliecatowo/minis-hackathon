@@ -540,6 +540,44 @@ def _framework_signal_has_explicit_match(signal: ReviewPredictionFrameworkSignal
     )
 
 
+def _framework_value_label(signal: ReviewPredictionFrameworkSignalV1) -> str:
+    if signal.value_ids:
+        return "/".join(signal.value_ids)
+    return signal.name
+
+
+def _framework_evidence_strength(
+    raw: dict[str, Any],
+    *,
+    temporal_boost: float,
+    scope_match_boost: float,
+) -> float:
+    evidence_count = len(_string_list(raw.get("evidence_ids")))
+    provenance_payload = raw.get("evidence_provenance")
+    provenance_count = (
+        len([item for item in provenance_payload if isinstance(item, dict)])
+        if isinstance(provenance_payload, list)
+        else 0
+    )
+    counter_count = len(_string_list(raw.get("counter_evidence_ids")))
+    revision_count = _coerce_int(raw.get("revision"), default=0)
+
+    strength = 0.22
+    strength += min(evidence_count, 5) * 0.08
+    strength += min(provenance_count, 3) * 0.07
+    strength += min(revision_count, 4) * 0.03
+    strength += min(temporal_boost, 0.12)
+    strength += min(scope_match_boost, 0.08)
+    strength -= min(counter_count, 3) * 0.08
+
+    if evidence_count == 0 and provenance_count == 0:
+        strength = min(strength, 0.40)
+    elif evidence_count < 2 and provenance_count == 0:
+        strength = min(strength, 0.58)
+
+    return round(_coerce_confidence(strength), 2)
+
+
 def _framework_text_for_application(signal: ReviewPredictionFrameworkSignalV1) -> str:
     return f"{signal.framework_id} {signal.name} {signal.summary} {signal.reason}".lower()
 
@@ -654,6 +692,26 @@ def _resolve_framework_conflicts(
 
     runner_up = scored[len(winners)][0] if len(scored) > len(winners) else top_score
     confidence = _coerce_confidence(0.58 + max(0.0, top_score - runner_up))
+    winner_values = _dedupe(
+        _framework_value_label(signal)
+        for _score, signal, _dimensions, _reasons in winners
+    )
+    deferred_values = _dedupe(
+        _framework_value_label(signal)
+        for _score, signal, _dimensions, _reasons in scored
+        if signal.framework_id in deferred_ids
+    )
+    suppressed_values = _dedupe(
+        _framework_value_label(signal)
+        for _score, signal, _dimensions, _reasons in scored
+        if signal.framework_id in suppressed_ids
+    )
+    if winner_values and (deferred_values or suppressed_values):
+        loser_values = deferred_values or suppressed_values
+        rationale_parts.insert(
+            0,
+            f"value synthesis: chose {' / '.join(winner_values)} over {' / '.join(loser_values)} for this context",
+        )
 
     return ReviewFrameworkConflictResolutionV1(
         winning_framework_ids=winning_ids,
@@ -803,6 +861,7 @@ def _build_framework_signals(
         )
         if raw.get("action"):
             summary = f"{summary}; {str(raw.get('action')).strip()}"
+        value_ids = _string_list(raw.get("value_ids"))
 
         reason = _cohere_framework_signal_reason(text_for_matching, matched_terms)
         evidence_ids = _string_list(raw.get("evidence_ids"))
@@ -816,6 +875,11 @@ def _build_framework_signals(
             for item in evidence_provenance
             if isinstance(item, dict) and isinstance(item.get("id"), str) and item.get("id")
         ]
+        evidence_strength = _framework_evidence_strength(
+            raw,
+            temporal_boost=temporal_boost,
+            scope_match_boost=scope_match_boost,
+        )
 
         framework_signal = ReviewPredictionFrameworkSignalV1(
             framework_id=framework_id,
@@ -828,6 +892,8 @@ def _build_framework_signals(
             evidence_ids=evidence_ids,
             evidence_provenance=evidence_provenance,
             provenance_ids=provenance_ids,
+            value_ids=value_ids,
+            evidence_strength=evidence_strength,
             temporal_stability_bonus=temporal_boost,
             scope_match_boost=scope_match_boost,
         )
@@ -904,28 +970,55 @@ def _build_novelty_signal(
         level = "direct_precedent"
         confidence_modifier = 0.04
         confidence = min(0.95, 0.68 + min(precedent_count, 6) * 0.04)
+        evidence_quality = min(0.95, 0.68 + min(precedent_count, 6) * 0.04)
         rationale = (
             f"Prediction has {precedent_count} same-repo review cycle(s), so it can anchor on direct precedent before transferring frameworks."
         )
     elif matched_framework_ids and non_input_evidence:
         level = "framework_transfer"
         max_framework_confidence = max(signal.confidence for signal in explicit_frameworks)
-        confidence_modifier = -0.03 if missing_context else 0.0
-        confidence = _coerce_confidence(max_framework_confidence - max(0, len(missing_context) - 2) * 0.03)
+        evidence_quality = max(signal.evidence_strength for signal in explicit_frameworks)
+        non_input_source_quality = min(
+            1.0,
+            len({item.source for item in non_input_evidence}) / 4.0,
+        )
+        missing_penalty = max(0, len(missing_context) - 2) * 0.03
+        confidence_modifier = (
+            -0.02
+            if evidence_quality >= 0.70
+            else -0.08
+            if evidence_quality >= 0.45
+            else -0.16
+        )
+        if missing_context:
+            confidence_modifier -= min(0.08, len(missing_context) * 0.02)
+        confidence = _coerce_confidence(
+            0.15
+            + (max_framework_confidence * 0.35)
+            + (evidence_quality * 0.40)
+            + (non_input_source_quality * 0.10)
+            - missing_penalty
+        )
         rationale = (
-            "Novel input matched learned framework trigger(s); prediction transfers the reviewer framework rather than copying a prior example."
+            "Novel input matched learned framework trigger(s); prediction transfers the reviewer framework rather than copying a prior example. "
+            f"Transfer confidence is calibrated by framework evidence quality {evidence_quality:.2f}."
         )
     else:
         level = "under_evidenced"
         if non_input_evidence:
             confidence_modifier = -0.08
             confidence = 0.45
+            evidence_quality = min(
+                0.45,
+                0.18 + len({item.source for item in non_input_evidence}) * 0.08,
+            )
             rationale = (
                 "No matched decision framework was available; prediction can use review evidence but must not imply framework-level certainty."
             )
         else:
             confidence_modifier = -0.18
             confidence = 0.35
+            evidence_quality = 0.0
             rationale = (
                 "Missing matched framework and non-input review evidence; keep uncertainty explicit instead of inventing reviewer-specific feedback."
             )
@@ -937,6 +1030,7 @@ def _build_novelty_signal(
         generalization_rationale=rationale,
         confidence_modifier=confidence_modifier,
         confidence=round(confidence, 2),
+        evidence_quality=round(evidence_quality, 2),
     )
 
 
@@ -2239,6 +2333,53 @@ def _append_framework_applications(
         existing_keys.add(key)
 
 
+def _apply_under_evidenced_guard(
+    *,
+    novelty: ReviewPredictionNoveltyV1 | None,
+    evidence_pool: list[ReviewPredictionEvidenceV1],
+    blocking_issues: list[ReviewPredictionSignalV1],
+    non_blocking_issues: list[ReviewPredictionSignalV1],
+    open_questions: list[ReviewPredictionSignalV1],
+) -> None:
+    if novelty is None or novelty.level != "under_evidenced":
+        return
+
+    non_input_sources = {item.source for item in evidence_pool if item.source != "input"}
+    weak_sources = {"memory", "evidence"}
+    if non_input_sources and not non_input_sources.issubset(weak_sources):
+        return
+    if len(non_input_sources) >= 2 or novelty.evidence_quality >= 0.42:
+        return
+
+    demoted = [
+        signal.model_copy(
+            update={
+                "confidence": min(signal.confidence, novelty.confidence),
+                "specificity": "insufficient",
+                "rationale": _append_sentence(
+                    signal.rationale,
+                    "Demoted from predicted feedback to an uncertainty question because there is not enough review-fidelity evidence to claim this reviewer would block on it.",
+                ),
+            }
+        )
+        for signal in [*blocking_issues, *non_blocking_issues]
+    ]
+    blocking_issues.clear()
+    non_blocking_issues.clear()
+    open_questions.extend(demoted)
+
+    if "insufficient-review-evidence" not in {signal.key for signal in open_questions}:
+        open_questions.append(
+            ReviewPredictionSignalV1(
+                key="insufficient-review-evidence",
+                summary="Insufficient reviewer-specific evidence to predict a hard review response.",
+                rationale=novelty.generalization_rationale,
+                confidence=min(novelty.confidence, 0.4),
+                specificity="insufficient",
+            )
+        )
+
+
 def _build_private_assessment(
     mini: Any,
     body: ArtifactReviewRequestBaseV1,
@@ -2451,6 +2592,14 @@ def _build_private_assessment(
             non_blocking_issues=non_blocking_issues,
             open_questions=open_questions,
         )
+
+    _apply_under_evidenced_guard(
+        novelty=novelty,
+        evidence_pool=evidence_pool,
+        blocking_issues=blocking_issues,
+        non_blocking_issues=non_blocking_issues,
+        open_questions=open_questions,
+    )
 
     evidence_bonus = min(len(evidence_pool), 4) * 0.08
     request_bonus = 0.15 if len(request_text) >= 120 else 0.05

@@ -372,6 +372,8 @@ class ReviewPredictionFrameworkSignalV1(BaseModel):
         default_factory=list
     )
     provenance_ids: list[str] = Field(default_factory=list)
+    value_ids: list[str] = Field(default_factory=list)
+    evidence_strength: float = Field(default=0.5, ge=0.0, le=1.0)
     temporal_stability_bonus: float = Field(default=0.0, ge=0.0)
     scope_match_boost: float = Field(default=0.0, ge=0.0)
 
@@ -407,6 +409,7 @@ class ReviewPredictionNoveltyV1(BaseModel):
     generalization_rationale: str = "No reusable framework or precedent was available."
     confidence_modifier: float = Field(default=-0.18, ge=-1.0, le=1.0)
     confidence: float = Field(default=0.35, ge=0.0, le=1.0)
+    evidence_quality: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class ReviewPredictionRationaleStepV1(BaseModel):
