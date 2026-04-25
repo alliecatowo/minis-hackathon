@@ -68,6 +68,7 @@ def build_agreement_scorecard_summary(
         "cycles_count": metrics["count"],
         "approval_accuracy": metrics["approval_accuracy"],
         "blocker_precision": metrics["blocker_precision"],
+        "blocker_recall": metrics["blocker_recall"],
         "comment_overlap": metrics["comment_overlap"],
         "trend": _build_trend(cycles),
     }

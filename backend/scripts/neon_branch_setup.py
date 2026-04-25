@@ -26,8 +26,20 @@ def create_neon_branch(project_id, api_key, branch_name):
     print(f"Creating Neon branch: {branch_name}...")
     with httpx.Client() as client:
         response = client.post(url, headers=headers, json=payload)
-        
-        if response.status_code == 409:
+
+        if response.status_code in (409, 422):
+            # 409: branch already exists
+            # 422: API currently returns this for some duplicate-name conflicts.
+            # Treat both as an idempotent "already exists" signal so reruns of
+            # this workflow remain stable.
+            if response.status_code == 422:
+                try:
+                    error_text = response.json().get("message", "")
+                    if "already exists" not in error_text.lower():
+                        response.raise_for_status()
+                except Exception:
+                    response.raise_for_status()
+
             print(f"Branch {branch_name} already exists. Fetching details...")
             # If it already exists, we might need to find it and get its connection string
             # For simplicity in this script, we'll try to list branches and find it
