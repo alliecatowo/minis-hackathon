@@ -3,12 +3,20 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+import pytest
 from typer.testing import CliRunner
 
 import cli as minis_cli
 
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_auth_env(monkeypatch, tmp_path):
+    monkeypatch.delenv("MINIS_TOKEN", raising=False)
+    monkeypatch.delenv("MINIS_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("MINIS_AUTH_TOKEN_FILE", str(tmp_path / "missing-token"))
 
 
 def _response(
@@ -48,9 +56,6 @@ class _FakeStream:
 
 
 def test_create_requires_auth_before_calling_api(monkeypatch):
-    monkeypatch.delenv("MINIS_TOKEN", raising=False)
-    monkeypatch.delenv("MINIS_AUTH_TOKEN", raising=False)
-
     def unexpected_post(*args, **kwargs):
         raise AssertionError("API should not be called without auth")
 
@@ -61,6 +66,25 @@ def test_create_requires_auth_before_calling_api(monkeypatch):
     assert result.exit_code == 1
     assert "Authentication required" in result.output
     assert "MINIS_TOKEN" in result.output
+
+
+def test_auth_headers_read_mcp_token_file(monkeypatch, tmp_path):
+    token_file = tmp_path / "mcp-token"
+    token_file.write_text("file-token\n", encoding="utf-8")
+    monkeypatch.delenv("MINIS_TOKEN", raising=False)
+    monkeypatch.delenv("MINIS_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("MINIS_AUTH_TOKEN_FILE", str(token_file))
+
+    assert minis_cli._auth_headers()["Authorization"] == "Bearer file-token"
+
+
+def test_env_token_takes_precedence_over_mcp_token_file(monkeypatch, tmp_path):
+    token_file = tmp_path / "mcp-token"
+    token_file.write_text("file-token\n", encoding="utf-8")
+    monkeypatch.setenv("MINIS_TOKEN", "env-token")
+    monkeypatch.setenv("MINIS_AUTH_TOKEN_FILE", str(token_file))
+
+    assert minis_cli._auth_headers()["Authorization"] == "Bearer env-token"
 
 
 def test_list_happy_path_uses_hosted_api(monkeypatch):

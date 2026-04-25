@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from enum import Enum
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -23,6 +24,7 @@ if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 
 DEFAULT_API_BASE = "https://minis-api.fly.dev/api"
+DEFAULT_TOKEN_PATH = Path.home() / ".config" / "minis" / "mcp-token"
 
 app = typer.Typer(help="Minis CLI — manage your developer personality clones via the hosted API.")
 
@@ -44,7 +46,7 @@ class ReviewDeliveryContext(str, Enum):
 
 
 def _auth_headers() -> dict[str, str]:
-    """Get auth headers from MINIS_TOKEN or MINIS_AUTH_TOKEN."""
+    """Get auth headers from env tokens or the MCP auth token file."""
     token = _auth_token()
     headers = {"Accept": "application/json"}
     if not token:
@@ -54,7 +56,15 @@ def _auth_headers() -> dict[str, str]:
 
 
 def _auth_token() -> str:
-    return (os.environ.get("MINIS_TOKEN") or os.environ.get("MINIS_AUTH_TOKEN") or "").strip()
+    env_token = (os.environ.get("MINIS_TOKEN") or os.environ.get("MINIS_AUTH_TOKEN") or "").strip()
+    if env_token:
+        return env_token
+
+    token_file = Path(os.environ.get("MINIS_AUTH_TOKEN_FILE", str(DEFAULT_TOKEN_PATH))).expanduser()
+    try:
+        return token_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def _require_auth_token(action: str) -> None:
@@ -62,7 +72,8 @@ def _require_auth_token(action: str) -> None:
         return
     console.print(
         f"[red]Authentication required to {action}.[/red] "
-        "Set MINIS_TOKEN (or MINIS_AUTH_TOKEN) to a Minis API bearer token."
+        "Set MINIS_TOKEN (or MINIS_AUTH_TOKEN) to a Minis API bearer token, "
+        "or run `cd mcp-server && uv run minis-mcp auth login`."
     )
     raise typer.Exit(1)
 
