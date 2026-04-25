@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.core.feature_flags import FLAGS
 from app.core.rate_limit import check_rate_limit
 from app.core.review_prediction import (
+    build_patch_advisor_v1_with_precedent,
     build_unavailable_artifact_review_v1,
     build_unavailable_review_prediction_v1,
 )
@@ -33,6 +34,8 @@ from app.models.schemas import (
     CreateMiniRequest,
     MiniDetail,
     MiniPublic,
+    PatchAdvisorRequestV1,
+    PatchAdvisorV1,
     RetireFrameworkResponse,
     ReviewCycleOutcomeUpdateRequest,
     ReviewCyclePredictionUpsertRequest,
@@ -89,6 +92,14 @@ async def _build_review_prediction_response(
         body,
         reason="REVIEW_PREDICTOR_LLM_ENABLED is disabled",
     )
+
+
+async def _build_patch_advisor_response(
+    mini: Mini,
+    body: PatchAdvisorRequestV1,
+    session: AsyncSession,
+) -> PatchAdvisorV1:
+    return await build_patch_advisor_v1_with_precedent(mini, body, session)
 
 
 @router.get("/sources")
@@ -493,6 +504,22 @@ async def get_trusted_artifact_review(
     return await _build_artifact_review_response(mini, body, session)
 
 
+@router.post("/trusted/{mini_id}/patch-advisor", response_model=PatchAdvisorV1)
+async def get_trusted_patch_advisor(
+    mini_id: str,
+    body: PatchAdvisorRequestV1,
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_trusted_service),
+):
+    """Build framework-backed patch guidance for trusted coding integrations."""
+    result = await session.execute(select(Mini).where(Mini.id == mini_id))
+    mini = result.scalar_one_or_none()
+    if not mini:
+        raise HTTPException(status_code=404, detail="Mini not found")
+
+    return await _build_patch_advisor_response(mini, body, session)
+
+
 async def _require_owned_mini(
     session: AsyncSession,
     mini_id: str,
@@ -589,6 +616,23 @@ async def get_artifact_review(
 
     require_mini_access(mini, user)
     return await _build_artifact_review_response(mini, body, session)
+
+
+@router.post("/{id}/patch-advisor", response_model=PatchAdvisorV1)
+async def get_patch_advisor(
+    id: str,
+    body: PatchAdvisorRequestV1,
+    session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(get_optional_user),
+):
+    """Build framework-backed patch guidance for coding agents."""
+    result = await session.execute(select(Mini).where(Mini.id == id))
+    mini = result.scalar_one_or_none()
+    if not mini:
+        raise HTTPException(status_code=404, detail="Mini not found")
+
+    require_mini_access(mini, user)
+    return await _build_patch_advisor_response(mini, body, session)
 
 
 @router.get("/{id}/agreement-scorecard-summary", response_model=AgreementScorecardSummary)

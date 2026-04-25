@@ -499,6 +499,86 @@ async def predict_review(
     }
 
 
+@mcp.tool()
+async def advise_patch(
+    identifier: str,
+    title: str | None = None,
+    description: str | None = None,
+    diff_summary: str | None = None,
+    changed_files: list[str] | None = None,
+    repo_name: str | None = None,
+    author_model: str = "unknown",
+    delivery_context: str = "normal",
+) -> dict[str, Any]:
+    """Turn a mini's decision frameworks into patch guidance for a coding agent.
+
+    The tool returns explicit guidance on what to change, what not to change,
+    risks, expected reviewer objections, and framework/evidence provenance.
+    If the mini has no decision-framework evidence yet, the response is gated
+    instead of falling back to generic coding advice.
+    """
+
+    _validate_review_prediction_input(
+        title=title,
+        description=description,
+        diff_summary=diff_summary,
+        changed_files=changed_files,
+        author_model=author_model,
+        delivery_context=delivery_context,
+    )
+
+    mini_id = await _resolve_mini_id(identifier)
+    result = await _request_json(
+        "POST",
+        f"/minis/{mini_id}/patch-advisor",
+        json_body={
+            "repo_name": repo_name,
+            "title": title,
+            "description": description,
+            "diff_summary": diff_summary,
+            "changed_files": changed_files or [],
+            "author_model": author_model,
+            "delivery_context": delivery_context,
+        },
+    )
+    if not isinstance(result, dict):
+        raise BackendError("Expected a structured patch advisor artifact from the backend.")
+
+    if result.get("advice_available") is False or result.get("mode") == "gated":
+        return {
+            "mini_id": mini_id,
+            "reviewer_username": result.get("reviewer_username"),
+            "advice_available": False,
+            "mode": result.get("mode", "gated"),
+            "unavailable_reason": result.get("unavailable_reason")
+            or "patch advisor is gated",
+            "change_plan": [],
+            "do_not_change": [],
+            "risks": [],
+            "expected_reviewer_objections": [],
+            "evidence_references": [],
+            "advisor": result,
+        }
+
+    return {
+        "mini_id": mini_id,
+        "reviewer_username": result.get("reviewer_username"),
+        "advice_available": result.get("advice_available", True),
+        "mode": result.get("mode", "framework"),
+        "unavailable_reason": result.get("unavailable_reason"),
+        "change_plan": result.get("change_plan", []),
+        "do_not_change": result.get("do_not_change", []),
+        "risks": result.get("risks", []),
+        "expected_reviewer_objections": result.get(
+            "expected_reviewer_objections",
+            [],
+        ),
+        "evidence_references": result.get("evidence_references", []),
+        "framework_signals": result.get("framework_signals", []),
+        "advisor": result,
+    }
+
+
 _BADGE_HIGH_THRESHOLD = 0.7
 _BADGE_LOW_THRESHOLD = 0.3
 

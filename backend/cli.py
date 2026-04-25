@@ -272,6 +272,91 @@ def _render_pre_review_report(username: str, base_ref: str, prediction: dict[str
             console.print(f"- {question.get('summary') or question.get('rationale') or 'Unknown question'}")
 
 
+def _render_patch_advisor_report(username: str, base_ref: str, advisor: dict[str, object]) -> None:
+    if advisor.get("advice_available") is False or advisor.get("mode") == "gated":
+        reason = advisor.get("unavailable_reason") or "patch advisor is gated"
+        console.print(
+            Panel(
+                RichText.assemble(
+                    ("Mini: ", "dim"),
+                    (f"{username}\n", "bold cyan"),
+                    ("Base: ", "dim"),
+                    (f"{base_ref}\n", "bold white"),
+                    ("Advisor: ", "dim"),
+                    ("unavailable", "bold yellow"),
+                ),
+                title="Patch advisor gated",
+                border_style="yellow",
+            )
+        )
+        console.print(f"[yellow]No patch guidance was produced:[/yellow] {reason}")
+        return
+
+    review_prediction = advisor.get("review_prediction", {})
+    expressed_feedback = (
+        review_prediction.get("expressed_feedback", {})
+        if isinstance(review_prediction, dict)
+        else {}
+    )
+    summary = expressed_feedback.get("summary") or "Framework-backed patch guidance."
+    console.print(
+        Panel(
+            RichText.assemble(
+                ("Mini: ", "dim"),
+                (f"{username}\n", "bold cyan"),
+                ("Base: ", "dim"),
+                (f"{base_ref}\n", "bold white"),
+                ("Mode: ", "dim"),
+                (str(advisor.get("mode") or "framework"), "bold white"),
+            ),
+            title="Patch advisor",
+            border_style="blue",
+        )
+    )
+    console.print(f"[bold]Summary:[/bold] {summary}")
+
+    sections = [
+        ("Change plan", "change_plan"),
+        ("Do not change", "do_not_change"),
+        ("Risks", "risks"),
+        ("Expected reviewer objections", "expected_reviewer_objections"),
+    ]
+    for title, key in sections:
+        items = advisor.get(key, []) or []
+        if not isinstance(items, list) or not items:
+            continue
+        table = Table(title=title)
+        table.add_column("Key", style="cyan")
+        table.add_column("Confidence", justify="right")
+        table.add_column("Summary")
+        table.add_column("Framework")
+        for item in items[:8]:
+            if not isinstance(item, dict):
+                continue
+            confidence = item.get("confidence")
+            confidence_str = (
+                f"{float(confidence):.0%}" if isinstance(confidence, int | float) else "-"
+            )
+            table.add_row(
+                str(item.get("key") or "unknown"),
+                confidence_str,
+                str(item.get("summary") or ""),
+                str(item.get("framework_id") or ""),
+            )
+        console.print(table)
+
+    evidence_refs = advisor.get("evidence_references", []) or []
+    if isinstance(evidence_refs, list) and evidence_refs:
+        console.print("[bold]Evidence references:[/bold]")
+        for ref in evidence_refs[:5]:
+            if not isinstance(ref, dict):
+                continue
+            evidence_ids = ", ".join(str(item) for item in ref.get("evidence_ids", [])[:3])
+            console.print(
+                f"- {ref.get('framework_id')}: {evidence_ids or 'no evidence ids'}"
+            )
+
+
 @app.command("list")
 def list_minis():
     """List all minis in a table."""
@@ -473,6 +558,90 @@ def pre_review(
         raise typer.Exit(1)
 
     _render_pre_review_report(username, resolved_base, prediction_response.json())
+
+
+@app.command("patch-advisor")
+def patch_advisor(
+    username: str,
+    base: str | None = typer.Option(
+        None,
+        "--base",
+        help="Git ref to compare your current work against. Defaults to origin HEAD/main/master.",
+    ),
+    title: str | None = typer.Option(
+        None,
+        "--title",
+        help="Optional title override sent to the patch-advisor backend.",
+    ),
+    description: str | None = typer.Option(
+        None,
+        "--description",
+        help="Optional description override sent to the patch-advisor backend.",
+    ),
+    author_model: ReviewAuthorModel = typer.Option(
+        ReviewAuthorModel.unknown,
+        "--author-model",
+        help="How the mini should model your relationship to the author.",
+    ),
+    context: ReviewDeliveryContext = typer.Option(
+        ReviewDeliveryContext.normal,
+        "--context",
+        help="Delivery context for the patch guidance.",
+    ),
+):
+    """Ask a mini for framework-backed patch guidance for your local diff."""
+    try:
+        resolved_base, request = _collect_pre_review_request(
+            base_ref=base,
+            title=title,
+            description=description,
+            author_model=author_model,
+            delivery_context=context,
+        )
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    headers = _auth_headers()
+
+    try:
+        mini_response = httpx.get(
+            f"{API_BASE}/minis/by-username/{username}",
+            headers=headers,
+            timeout=10,
+        )
+        mini_response.raise_for_status()
+    except httpx.ConnectError:
+        console.print("[red]Cannot connect to API. Is the backend running?[/red]")
+        raise typer.Exit(1)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            console.print(f"[red]Mini '{username}' not found.[/red]")
+        else:
+            console.print(f"[red]API error: {exc.response.status_code}[/red]")
+        raise typer.Exit(1)
+
+    mini = mini_response.json()
+    if mini.get("status") != "ready":
+        console.print(f"[red]Mini '{username}' is not ready (status: {mini.get('status')}).[/red]")
+        raise typer.Exit(1)
+
+    try:
+        advisor_response = httpx.post(
+            f"{API_BASE}/minis/{mini['id']}/patch-advisor",
+            json=request,
+            headers=headers,
+            timeout=30,
+        )
+        advisor_response.raise_for_status()
+    except httpx.ConnectError:
+        console.print("[red]Cannot connect to API. Is the backend running?[/red]")
+        raise typer.Exit(1)
+    except httpx.HTTPStatusError as exc:
+        console.print(f"[red]API error: {exc.response.status_code} — {exc.response.text}[/red]")
+        raise typer.Exit(1)
+
+    _render_patch_advisor_report(username, resolved_base, advisor_response.json())
 
 
 def _precision_recall_f1(

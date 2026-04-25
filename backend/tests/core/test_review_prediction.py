@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from app.core.review_prediction import (
     build_artifact_review_v1,
+    build_patch_advisor_v1,
     build_review_prediction_v1,
     load_same_repo_precedent,
     _derive_delivery_policy,
@@ -16,6 +17,7 @@ from app.core.review_prediction import (
 )
 from app.models.schemas import (
     ArtifactReviewRequestV1,
+    PatchAdvisorRequestV1,
     ReviewPredictionPrivateAssessmentV1,
     ReviewPredictionRequestV1,
     ReviewPredictionSignalV1,
@@ -207,6 +209,53 @@ def _conflicting_framework_payload() -> dict[str, Any]:
             ],
         }
     }
+
+
+def test_patch_advisor_returns_framework_backed_coding_contract():
+    mini = _mini(principles_json=_decision_framework_payload())
+    body = PatchAdvisorRequestV1(
+        repo_name="acme/widgets",
+        title="Refactor auth retry path",
+        description="Touches auth token refresh.",
+        diff_summary="Adds async queue retry around token refresh failures.",
+        changed_files=["backend/app/auth.py"],
+        author_model="senior_peer",
+    )
+
+    artifact = build_patch_advisor_v1(mini, body)
+
+    assert artifact.version == "patch_advisor_v1"
+    assert artifact.advice_available is True
+    assert artifact.mode == "framework"
+    assert artifact.review_prediction is not None
+    assert artifact.framework_signals
+    assert artifact.change_plan
+    assert artifact.do_not_change
+    assert artifact.risks
+    assert artifact.expected_reviewer_objections
+    assert artifact.evidence_references
+    assert artifact.evidence_references[0].framework_id
+    assert artifact.evidence_references[0].evidence_ids
+    assert all(item.framework_id for item in artifact.change_plan)
+
+
+def test_patch_advisor_gates_when_no_decision_framework_evidence():
+    mini = _mini(principles_json=None)
+    body = PatchAdvisorRequestV1(
+        title="Refactor auth retry path",
+        diff_summary="Touches auth token refresh and queue retries.",
+        changed_files=["backend/app/auth.py"],
+    )
+
+    artifact = build_patch_advisor_v1(mini, body)
+
+    assert artifact.version == "patch_advisor_v1"
+    assert artifact.advice_available is False
+    assert artifact.mode == "gated"
+    assert artifact.review_prediction is None
+    assert artifact.change_plan == []
+    assert artifact.evidence_references == []
+    assert "No decision-framework evidence" in artifact.unavailable_reason
 
 
 def _decision_framework_temporal_balance_payload() -> dict[str, Any]:

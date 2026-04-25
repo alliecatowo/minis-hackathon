@@ -310,6 +310,92 @@ class MinisMcpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["likely_blockers"], [])
         self.assertEqual(result["open_questions"], [])
 
+    async def test_advise_patch_returns_framework_guidance_and_raw_artifact(self):
+        async def fake_request_json(method, path, **kwargs):
+            if (method, path) == ("GET", "/minis/by-username/torvalds"):
+                return {"id": "5f3f7d6d-b362-4ce7-b9da-c1fd67dbd5bd"}
+
+            self.assertEqual((method, path), ("POST", "/minis/5f3f7d6d-b362-4ce7-b9da-c1fd67dbd5bd/patch-advisor"))
+            self.assertEqual(
+                kwargs["json_body"],
+                {
+                    "repo_name": "acme/widgets",
+                    "title": "Refactor auth retries",
+                    "description": "Touches auth token refresh and queue retries.",
+                    "diff_summary": "Adds retry logic around token refresh failures.",
+                    "changed_files": ["backend/app/auth.py"],
+                    "author_model": "senior_peer",
+                    "delivery_context": "normal",
+                },
+            )
+            return {
+                "version": "patch_advisor_v1",
+                "advice_available": True,
+                "mode": "framework",
+                "reviewer_username": "torvalds",
+                "change_plan": [{"key": "change-tests", "framework_id": "fw-tests"}],
+                "do_not_change": [{"key": "do-not-fw-tests"}],
+                "risks": [{"key": "risk-tests"}],
+                "expected_reviewer_objections": [{"key": "objection-tests"}],
+                "evidence_references": [
+                    {"framework_id": "fw-tests", "evidence_ids": ["ev-1"]}
+                ],
+                "framework_signals": [{"framework_id": "fw-tests"}],
+            }
+
+        original = main._request_json
+        main._request_json = fake_request_json
+        try:
+            result = await main.advise_patch.fn(
+                "torvalds",
+                title="Refactor auth retries",
+                description="Touches auth token refresh and queue retries.",
+                diff_summary="Adds retry logic around token refresh failures.",
+                changed_files=["backend/app/auth.py"],
+                repo_name="acme/widgets",
+                author_model="senior_peer",
+                delivery_context="normal",
+            )
+        finally:
+            main._request_json = original
+
+        self.assertTrue(result["advice_available"])
+        self.assertEqual(result["mode"], "framework")
+        self.assertEqual(result["change_plan"][0]["framework_id"], "fw-tests")
+        self.assertEqual(result["evidence_references"][0]["evidence_ids"], ["ev-1"])
+        self.assertEqual(result["advisor"]["version"], "patch_advisor_v1")
+
+    async def test_advise_patch_returns_gated_artifact_without_generic_guidance(self):
+        async def fake_request_json(method, path, **kwargs):
+            if (method, path) == ("GET", "/minis/by-username/torvalds"):
+                return {"id": "5f3f7d6d-b362-4ce7-b9da-c1fd67dbd5bd"}
+
+            return {
+                "version": "patch_advisor_v1",
+                "advice_available": False,
+                "mode": "gated",
+                "unavailable_reason": "No decision-framework evidence is available.",
+                "reviewer_username": "torvalds",
+                "change_plan": [],
+                "do_not_change": [],
+                "risks": [],
+                "expected_reviewer_objections": [],
+                "evidence_references": [],
+            }
+
+        original = main._request_json
+        main._request_json = fake_request_json
+        try:
+            result = await main.advise_patch.fn("torvalds", title="Refactor auth")
+        finally:
+            main._request_json = original
+
+        self.assertFalse(result["advice_available"])
+        self.assertEqual(result["mode"], "gated")
+        self.assertEqual(result["change_plan"], [])
+        self.assertEqual(result["risks"], [])
+        self.assertIn("No decision-framework evidence", result["unavailable_reason"])
+
     async def test_predict_review_requires_change_context(self):
         with self.assertRaisesRegex(
             main.BackendError,

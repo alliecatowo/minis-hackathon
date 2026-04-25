@@ -14,6 +14,10 @@ from app.models.schemas import (
     ArtifactSummaryV1,
     BehavioralContext,
     MotivationsProfile,
+    PatchAdvisorEvidenceReferenceV1,
+    PatchAdvisorGuidanceV1,
+    PatchAdvisorRequestV1,
+    PatchAdvisorV1,
     ReviewPredictionFrameworkSignalV1,
     ReviewPredictionExpressionDeltaV1,
     ReviewFrameworkConflictDecisionV1,
@@ -2723,6 +2727,325 @@ def build_unavailable_review_prediction_v1(
     return ReviewPredictionV1.model_validate(
         build_unavailable_artifact_review_v1(mini, body, reason=reason).model_dump()
         | {"version": "review_prediction_v1"}
+    )
+
+
+def _patch_advisor_signal_framework(
+    signal: ReviewPredictionSignalV1,
+    framework_signals: list[ReviewPredictionFrameworkSignalV1],
+) -> ReviewPredictionFrameworkSignalV1 | None:
+    if not framework_signals:
+        return None
+    if signal.framework_id:
+        for framework_signal in framework_signals:
+            if framework_signal.framework_id == signal.framework_id:
+                return framework_signal
+    return framework_signals[0]
+
+
+def _patch_advisor_guidance(
+    *,
+    key: str,
+    summary: str,
+    rationale: str,
+    confidence: float,
+    framework_signal: ReviewPredictionFrameworkSignalV1 | None,
+    evidence: list[ReviewPredictionEvidenceV1] | None = None,
+) -> PatchAdvisorGuidanceV1:
+    evidence_ids: list[str] = []
+    provenance_ids: list[str] = []
+    framework_id: str | None = None
+    revision: int | None = None
+    if framework_signal:
+        framework_id = framework_signal.framework_id
+        revision = framework_signal.revision
+        evidence_ids = framework_signal.evidence_ids
+        provenance_ids = framework_signal.provenance_ids
+        rationale = _append_sentence(
+            rationale,
+            f"Framework {framework_signal.framework_id}: {framework_signal.reason}",
+        )
+
+    return PatchAdvisorGuidanceV1(
+        key=key,
+        summary=summary,
+        rationale=rationale,
+        confidence=_coerce_confidence(confidence),
+        framework_id=framework_id,
+        revision=revision,
+        evidence=evidence or [],
+        evidence_ids=evidence_ids,
+        provenance_ids=provenance_ids,
+    )
+
+
+def _patch_advisor_change_plan(
+    review_prediction: ReviewPredictionV1,
+) -> list[PatchAdvisorGuidanceV1]:
+    framework_signals = review_prediction.framework_signals
+    assessment = review_prediction.private_assessment
+    guidance: list[PatchAdvisorGuidanceV1] = []
+
+    for signal in assessment.blocking_issues:
+        framework_signal = _patch_advisor_signal_framework(signal, framework_signals)
+        guidance.append(
+            _patch_advisor_guidance(
+                key=f"change-{signal.key}",
+                summary=f"Change the patch to address: {signal.summary}",
+                rationale=signal.rationale,
+                confidence=signal.confidence,
+                framework_signal=framework_signal,
+                evidence=signal.evidence,
+            )
+        )
+
+    for signal in assessment.open_questions:
+        framework_signal = _patch_advisor_signal_framework(signal, framework_signals)
+        guidance.append(
+            _patch_advisor_guidance(
+                key=f"answer-{signal.key}",
+                summary=f"Make the patch or PR description answer: {signal.summary}",
+                rationale=signal.rationale,
+                confidence=signal.confidence,
+                framework_signal=framework_signal,
+                evidence=signal.evidence,
+            )
+        )
+
+    for signal in assessment.positive_signals:
+        framework_signal = _patch_advisor_signal_framework(signal, framework_signals)
+        guidance.append(
+            _patch_advisor_guidance(
+                key=f"preserve-{signal.key}",
+                summary=f"Preserve this strength while editing: {signal.summary}",
+                rationale=signal.rationale,
+                confidence=signal.confidence,
+                framework_signal=framework_signal,
+                evidence=signal.evidence,
+            )
+        )
+
+    return guidance[:8]
+
+
+def _patch_advisor_do_not_change(
+    body: PatchAdvisorRequestV1,
+    framework_signals: list[ReviewPredictionFrameworkSignalV1],
+    raw_frameworks: list[dict[str, Any]],
+) -> list[PatchAdvisorGuidanceV1]:
+    framework_by_id = {
+        str(raw.get("framework_id")): raw
+        for raw in raw_frameworks
+        if raw.get("framework_id")
+    }
+    guidance: list[PatchAdvisorGuidanceV1] = []
+    files = ", ".join(body.changed_files[:3])
+    for framework_signal in framework_signals[:3]:
+        raw = framework_by_id.get(framework_signal.framework_id, {})
+        exceptions = _string_list(raw.get("exceptions")) or _string_list(raw.get("counterexamples"))
+        if exceptions:
+            summary = f"Do not apply {framework_signal.framework_id} outside its exceptions: {exceptions[0]}"
+        elif files:
+            summary = (
+                f"Do not broaden the patch beyond {files} unless needed to satisfy "
+                f"{framework_signal.framework_id}."
+            )
+        else:
+            summary = f"Do not ignore the review rule captured by {framework_signal.framework_id}."
+
+        guidance.append(
+            _patch_advisor_guidance(
+                key=f"do-not-{framework_signal.framework_id}",
+                summary=summary,
+                rationale=framework_signal.summary,
+                confidence=framework_signal.confidence,
+                framework_signal=framework_signal,
+            )
+        )
+    return guidance
+
+
+def _patch_advisor_risks(
+    review_prediction: ReviewPredictionV1,
+) -> list[PatchAdvisorGuidanceV1]:
+    risks: list[PatchAdvisorGuidanceV1] = []
+    framework_signals = review_prediction.framework_signals
+    for signal in [
+        *review_prediction.private_assessment.blocking_issues,
+        *review_prediction.private_assessment.open_questions,
+    ]:
+        framework_signal = _patch_advisor_signal_framework(signal, framework_signals)
+        risks.append(
+            _patch_advisor_guidance(
+                key=f"risk-{signal.key}",
+                summary=signal.summary,
+                rationale=signal.rationale,
+                confidence=signal.confidence,
+                framework_signal=framework_signal,
+                evidence=signal.evidence,
+            )
+        )
+    return risks[:6]
+
+
+def _patch_advisor_objections(
+    review_prediction: ReviewPredictionV1,
+) -> list[PatchAdvisorGuidanceV1]:
+    objections: list[PatchAdvisorGuidanceV1] = []
+    framework_signals = review_prediction.framework_signals
+    signal_by_key: dict[str, ReviewPredictionSignalV1] = {}
+    for signal in [
+        *review_prediction.private_assessment.blocking_issues,
+        *review_prediction.private_assessment.non_blocking_issues,
+        *review_prediction.private_assessment.open_questions,
+    ]:
+        signal_by_key[signal.key] = signal
+
+    for comment in review_prediction.expressed_feedback.comments:
+        key = comment.issue_key or comment.summary[:40]
+        signal = signal_by_key.get(key)
+        framework_signal = (
+            _patch_advisor_signal_framework(signal, framework_signals)
+            if signal
+            else (framework_signals[0] if framework_signals else None)
+        )
+        objections.append(
+            _patch_advisor_guidance(
+                key=f"objection-{key}",
+                summary=comment.summary,
+                rationale=comment.rationale,
+                confidence=signal.confidence if signal else 0.6,
+                framework_signal=framework_signal,
+                evidence=signal.evidence if signal else [],
+            )
+        )
+
+    if objections:
+        return objections[:6]
+
+    for signal in review_prediction.private_assessment.blocking_issues[:3]:
+        framework_signal = _patch_advisor_signal_framework(signal, framework_signals)
+        objections.append(
+            _patch_advisor_guidance(
+                key=f"objection-{signal.key}",
+                summary=signal.summary,
+                rationale=signal.rationale,
+                confidence=signal.confidence,
+                framework_signal=framework_signal,
+                evidence=signal.evidence,
+            )
+        )
+    return objections
+
+
+def _patch_advisor_evidence_references(
+    framework_signals: list[ReviewPredictionFrameworkSignalV1],
+) -> list[PatchAdvisorEvidenceReferenceV1]:
+    return [
+        PatchAdvisorEvidenceReferenceV1(
+            framework_id=signal.framework_id,
+            summary=signal.summary,
+            reason=signal.reason,
+            confidence=signal.confidence,
+            revision=signal.revision,
+            evidence_ids=signal.evidence_ids,
+            provenance_ids=signal.provenance_ids,
+            evidence_provenance=signal.evidence_provenance,
+        )
+        for signal in framework_signals
+    ]
+
+
+def build_unavailable_patch_advisor_v1(
+    mini: Any,
+    body: PatchAdvisorRequestV1,
+    *,
+    reason: str,
+) -> PatchAdvisorV1:
+    return PatchAdvisorV1(
+        advice_available=False,
+        mode="gated",
+        unavailable_reason=reason,
+        reviewer_username=getattr(mini, "username", "unknown"),
+        repo_name=body.repo_name,
+        artifact_summary=ArtifactSummaryV1(
+            artifact_type=body.artifact_type,
+            title=body.title,
+        ),
+        framework_signals=[],
+        change_plan=[],
+        do_not_change=[],
+        risks=[],
+        expected_reviewer_objections=[],
+        evidence_references=[],
+        review_prediction=None,
+    )
+
+
+def build_patch_advisor_v1(
+    mini: Any,
+    body: PatchAdvisorRequestV1,
+    *,
+    same_repo_precedent: dict[str, Any] | None = None,
+) -> PatchAdvisorV1:
+    raw_frameworks = _extract_decision_frameworks(getattr(mini, "principles_json", None))
+    if not raw_frameworks:
+        return build_unavailable_patch_advisor_v1(
+            mini,
+            body,
+            reason="No decision-framework evidence is available for this mini.",
+        )
+
+    review_body = ReviewPredictionRequestV1.model_validate(body.model_dump())
+    review_prediction = build_review_prediction_v1(
+        mini,
+        review_body,
+        same_repo_precedent=same_repo_precedent,
+    )
+    if not review_prediction.framework_signals:
+        return build_unavailable_patch_advisor_v1(
+            mini,
+            body,
+            reason="Decision-framework evidence exists but no active framework signal was usable.",
+        )
+
+    return PatchAdvisorV1(
+        reviewer_username=getattr(mini, "username", "unknown"),
+        repo_name=body.repo_name,
+        artifact_summary=ArtifactSummaryV1(
+            artifact_type=body.artifact_type,
+            title=body.title,
+        ),
+        framework_signals=review_prediction.framework_signals,
+        change_plan=_patch_advisor_change_plan(review_prediction),
+        do_not_change=_patch_advisor_do_not_change(
+            body,
+            review_prediction.framework_signals,
+            raw_frameworks,
+        ),
+        risks=_patch_advisor_risks(review_prediction),
+        expected_reviewer_objections=_patch_advisor_objections(review_prediction),
+        evidence_references=_patch_advisor_evidence_references(
+            review_prediction.framework_signals
+        ),
+        review_prediction=review_prediction,
+    )
+
+
+async def build_patch_advisor_v1_with_precedent(
+    mini: Any,
+    body: PatchAdvisorRequestV1,
+    session: AsyncSession,
+) -> PatchAdvisorV1:
+    same_repo_precedent = await load_same_repo_precedent(
+        session,
+        getattr(mini, "id", None),
+        body.repo_name,
+    )
+    return build_patch_advisor_v1(
+        mini,
+        body,
+        same_repo_precedent=same_repo_precedent,
     )
 
 

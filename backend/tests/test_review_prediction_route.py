@@ -67,6 +67,36 @@ def _mini(**overrides) -> SimpleNamespace:
         "sources_used": None,
         "system_prompt": None,
         "evidence_cache": "review: add tests before merge",
+        "principles_json": {
+            "decision_frameworks": {
+                "version": "decision_frameworks_v1",
+                "frameworks": [
+                    {
+                        "framework_id": "fw-tests",
+                        "condition": "risky backend changes lack tests",
+                        "priority": "high",
+                        "tradeoff": "coverage vs speed",
+                        "escalation_threshold": "high",
+                        "counterexamples": [],
+                        "evidence_ids": ["ev-framework-tests-1"],
+                        "evidence_provenance": [
+                            {
+                                "id": "prov-tests-1",
+                                "source_type": "review",
+                                "item_type": "comment",
+                            }
+                        ],
+                        "counter_evidence_ids": [],
+                        "confidence": 0.9,
+                        "specificity_level": "global",
+                        "value_ids": ["quality"],
+                        "motivation_ids": ["craftsmanship"],
+                        "decision_order": ["if risky path", "require tests"],
+                        "revision": 2,
+                    }
+                ],
+            }
+        },
         "status": "ready",
         "created_at": "2024-01-01T00:00:00Z",
         "updated_at": "2024-01-01T00:00:00Z",
@@ -295,3 +325,68 @@ async def test_review_prediction_endpoint_rejects_non_pr_artifacts(app, monkeypa
         )
 
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_patch_advisor_endpoint_returns_framework_backed_artifact(app):
+    from app.core.auth import get_optional_user
+    from app.db import get_session
+
+    mini = _mini()
+    app.dependency_overrides[get_optional_user] = lambda: None
+    app.dependency_overrides[get_session] = lambda: _session_with_mini(mini)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            f"/api/minis/{mini.id}/patch-advisor",
+            json={
+                "title": "Update auth flow",
+                "description": "Touches token validation and queue retries.",
+                "changed_files": ["backend/app/auth.py"],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["version"] == "patch_advisor_v1"
+    assert body["advice_available"] is True
+    assert body["mode"] == "framework"
+    assert body["change_plan"]
+    assert body["do_not_change"]
+    assert body["risks"]
+    assert body["expected_reviewer_objections"]
+    assert body["evidence_references"][0]["framework_id"] == "fw-tests"
+    assert body["evidence_references"][0]["evidence_ids"] == ["ev-framework-tests-1"]
+    assert body["review_prediction"]["version"] == "review_prediction_v1"
+
+
+@pytest.mark.asyncio
+async def test_patch_advisor_endpoint_gates_without_decision_frameworks(app):
+    from app.core.auth import get_optional_user
+    from app.db import get_session
+
+    mini = _mini(principles_json=None)
+    app.dependency_overrides[get_optional_user] = lambda: None
+    app.dependency_overrides[get_session] = lambda: _session_with_mini(mini)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            f"/api/minis/{mini.id}/patch-advisor",
+            json={
+                "title": "Update auth flow",
+                "description": "Touches token validation and queue retries.",
+                "changed_files": ["backend/app/auth.py"],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["version"] == "patch_advisor_v1"
+    assert body["advice_available"] is False
+    assert body["mode"] == "gated"
+    assert "No decision-framework evidence" in body["unavailable_reason"]
+    assert body["change_plan"] == []
+    assert body["evidence_references"] == []
+    assert body["review_prediction"] is None

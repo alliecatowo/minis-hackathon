@@ -422,3 +422,142 @@ def test_pre_review_renders_framework_attribution_without_revision_when_revision
     assert "fw-require-docs" in result.output
     # revision=0 means "validated N×" suffix should NOT appear
     assert "validated" not in result.output
+
+
+def test_patch_advisor_collects_git_context_and_prints_guidance(monkeypatch, tmp_path):
+    repo = _init_repo(tmp_path)
+    (repo / "tracked.txt").write_text("hello\nmore context\n")
+
+    captured: dict[str, object] = {}
+
+    def fake_get(url: str, **kwargs) -> httpx.Response:
+        assert url.endswith("/api/minis/by-username/reviewer")
+        return _response(
+            "GET",
+            url,
+            json={"id": "mini-123", "username": "reviewer", "status": "ready"},
+        )
+
+    def fake_post(url: str, **kwargs) -> httpx.Response:
+        captured["post_url"] = url
+        captured["payload"] = kwargs["json"]
+        return _response(
+            "POST",
+            url,
+            json={
+                "version": "patch_advisor_v1",
+                "advice_available": True,
+                "mode": "framework",
+                "reviewer_username": "reviewer",
+                "change_plan": [
+                    {
+                        "key": "change-tests",
+                        "summary": "Add coverage for the changed path.",
+                        "confidence": 0.9,
+                        "framework_id": "fw-tests",
+                    }
+                ],
+                "do_not_change": [
+                    {
+                        "key": "do-not-fw-tests",
+                        "summary": "Do not broaden the patch scope.",
+                        "confidence": 0.8,
+                        "framework_id": "fw-tests",
+                    }
+                ],
+                "risks": [
+                    {
+                        "key": "risk-runtime",
+                        "summary": "Retry behavior can regress runtime behavior.",
+                        "confidence": 0.77,
+                        "framework_id": "fw-tests",
+                    }
+                ],
+                "expected_reviewer_objections": [
+                    {
+                        "key": "objection-tests",
+                        "summary": "Reviewer will ask for tests.",
+                        "confidence": 0.9,
+                        "framework_id": "fw-tests",
+                    }
+                ],
+                "evidence_references": [
+                    {"framework_id": "fw-tests", "evidence_ids": ["ev-1"]}
+                ],
+                "review_prediction": {
+                    "expressed_feedback": {
+                        "summary": "Likely asks for tests before approval."
+                    }
+                },
+            },
+        )
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(minis_cli.httpx, "get", fake_get)
+    monkeypatch.setattr(minis_cli.httpx, "post", fake_post)
+
+    result = runner.invoke(
+        minis_cli.app,
+        [
+            "patch-advisor",
+            "reviewer",
+            "--base",
+            "HEAD",
+            "--title",
+            "Refactor auth flow",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Patch advisor" in result.output
+    assert "Change plan" in result.output
+    assert "Do not change" in result.output
+    assert "Expected reviewer objections" in result.output
+    assert "fw-tests" in result.output
+    assert "ev-1" in result.output
+    assert captured["post_url"].endswith("/api/minis/mini-123/patch-advisor")
+    assert captured["payload"]["title"] == "Refactor auth flow"
+
+
+def test_patch_advisor_renders_gated_without_generic_guidance(monkeypatch, tmp_path):
+    repo = _init_repo(tmp_path)
+    (repo / "tracked.txt").write_text("hello\nchanged\n")
+
+    def fake_get(url: str, **kwargs) -> httpx.Response:
+        return _response(
+            "GET",
+            url,
+            json={"id": "mini-123", "username": "reviewer", "status": "ready"},
+        )
+
+    def fake_post(url: str, **kwargs) -> httpx.Response:
+        return _response(
+            "POST",
+            url,
+            json={
+                "version": "patch_advisor_v1",
+                "advice_available": False,
+                "mode": "gated",
+                "unavailable_reason": "No decision-framework evidence is available.",
+                "reviewer_username": "reviewer",
+                "change_plan": [],
+                "do_not_change": [],
+                "risks": [],
+                "expected_reviewer_objections": [],
+                "evidence_references": [],
+            },
+        )
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(minis_cli.httpx, "get", fake_get)
+    monkeypatch.setattr(minis_cli.httpx, "post", fake_post)
+
+    result = runner.invoke(
+        minis_cli.app,
+        ["patch-advisor", "reviewer", "--base", "HEAD"],
+    )
+
+    assert result.exit_code == 0
+    assert "Patch advisor gated" in result.output
+    assert "No decision-framework evidence is available." in result.output
+    assert "Change plan" not in result.output

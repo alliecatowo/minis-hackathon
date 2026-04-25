@@ -143,6 +143,10 @@ class ReviewPredictionRequestV1(ArtifactReviewRequestBaseV1):
     artifact_type: Literal["pull_request"] = "pull_request"
 
 
+class PatchAdvisorRequestV1(ArtifactReviewRequestBaseV1):
+    artifact_type: Literal["pull_request"] = "pull_request"
+
+
 class ArtifactReviewRequestV1(ArtifactReviewRequestBaseV1):
     artifact_type: ArtifactReviewTypeV1
 
@@ -509,6 +513,48 @@ class ReviewPredictionV1(ArtifactReviewV1):
     version: Literal["review_prediction_v1"] = "review_prediction_v1"
     framework_signals: list[ReviewPredictionFrameworkSignalV1] = Field(default_factory=list)
     framework_conflict_resolution: ReviewFrameworkConflictResolutionV1 | None = None
+
+
+class PatchAdvisorGuidanceV1(BaseModel):
+    key: str
+    summary: str
+    rationale: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    framework_id: str | None = None
+    revision: int | None = None
+    evidence: list[ReviewPredictionEvidenceV1] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    provenance_ids: list[str] = Field(default_factory=list)
+
+
+class PatchAdvisorEvidenceReferenceV1(BaseModel):
+    framework_id: str
+    summary: str
+    reason: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    revision: int | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
+    provenance_ids: list[str] = Field(default_factory=list)
+    evidence_provenance: list[DecisionFrameworkEvidenceProvenance] = Field(
+        default_factory=list
+    )
+
+
+class PatchAdvisorV1(BaseModel):
+    version: Literal["patch_advisor_v1"] = "patch_advisor_v1"
+    advice_available: bool = True
+    mode: Literal["framework", "gated"] = "framework"
+    unavailable_reason: str | None = None
+    reviewer_username: str
+    repo_name: str | None = None
+    artifact_summary: ArtifactSummaryV1 | None = None
+    framework_signals: list[ReviewPredictionFrameworkSignalV1] = Field(default_factory=list)
+    change_plan: list[PatchAdvisorGuidanceV1] = Field(default_factory=list)
+    do_not_change: list[PatchAdvisorGuidanceV1] = Field(default_factory=list)
+    risks: list[PatchAdvisorGuidanceV1] = Field(default_factory=list)
+    expected_reviewer_objections: list[PatchAdvisorGuidanceV1] = Field(default_factory=list)
+    evidence_references: list[PatchAdvisorEvidenceReferenceV1] = Field(default_factory=list)
+    review_prediction: ReviewPredictionV1 | None = None
 
 
 ReviewArtifactSummaryV1 = ArtifactSummaryV1
