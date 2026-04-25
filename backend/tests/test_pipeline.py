@@ -411,6 +411,7 @@ class TestRunPipelineErrorHandling:
         error_events = [e for e in events if e.stage == "error"]
         assert len(error_events) >= 1
         assert "failed" in error_events[0].status.lower()
+        assert error_events[0].error_code == "FETCH_GITHUB_RUNTIMEERROR"
 
     @pytest.mark.asyncio
     async def test_emits_fetch_started_event(self):

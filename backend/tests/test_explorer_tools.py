@@ -25,6 +25,7 @@ from app.synthesis.explorers.tools import (
     _serialize_evidence_row,
     _signal_sort_timestamp,
     build_explorer_tools,
+    escape_like_query,
 )
 
 
@@ -329,6 +330,9 @@ class TestToolHandlerInvocation:
         data = json.loads(result)
         assert "matches" in data
         assert data["query"] == "test"
+
+    def test_escape_like_query_treats_wildcards_literally(self):
+        assert escape_like_query(r"100%_coverage\\path") == r"100\%\_coverage\\\\path"
 
     @pytest.mark.asyncio
     async def test_read_item_not_found_returns_error_json(self, tools, mock_session):

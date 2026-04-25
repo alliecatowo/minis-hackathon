@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.agent import AgentTool, run_agent
 from app.models.evidence import ExplorerFinding, ExplorerProgress, ExplorerQuote
 from app.models.mini import Mini
+from app.synthesis.explorers.tools import escape_like_query
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,7 @@ async def run_chief_synthesizer(
         """Search findings by text content, optionally filtered by source."""
         stmt = select(ExplorerFinding).where(
             ExplorerFinding.mini_id == mini_id,
-            ExplorerFinding.content.ilike(f"%{query}%"),
+            ExplorerFinding.content.ilike(f"%{escape_like_query(query)}%", escape="\\"),
         )
         if source_type:
             stmt = stmt.where(ExplorerFinding.source_type == source_type)

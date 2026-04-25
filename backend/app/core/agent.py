@@ -62,26 +62,42 @@ def _check_llm_kill_switch(caller: str = "unknown") -> None:
 
 
 def _get_env_var_for_model(model: str) -> str:
-    """Get the environment variable name for the given model's provider.
-
-    Args:
-        model: PydanticAI model string (e.g., "google-gla:gemini-2.5-flash")
-
-    Returns:
-        The environment variable name (e.g., "GOOGLE_API_KEY")
-    """
-    # Defensive bridge: PydanticAI's GoogleProvider requires GOOGLE_API_KEY
-    if os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
-        os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]
-
+    """Return the conventional provider key env var without reading or mutating it."""
     if model.startswith("google-gla:") or model.startswith("gemini:"):
         return "GOOGLE_API_KEY"
-    elif model.startswith("anthropic:"):
+    if model.startswith("anthropic:"):
         return "ANTHROPIC_API_KEY"
-    elif model.startswith("openai:"):
+    if model.startswith("openai:"):
         return "OPENAI_API_KEY"
-    # Fallback for unknown providers
     return "GOOGLE_API_KEY"
+
+
+def _build_model_with_api_key(model: str, api_key: str | None) -> Any:
+    """Return a PydanticAI model instance when a per-request API key is provided."""
+    if not api_key:
+        return model
+
+    provider, sep, model_name = model.partition(":")
+    if not sep or not model_name:
+        raise ValueError(f"Invalid model string for API-key override: {model}")
+
+    if provider in {"google-gla", "gemini"}:
+        from pydantic_ai.models.google import GoogleModel
+        from pydantic_ai.providers.google_gla import GoogleGLAProvider
+
+        return GoogleModel(model_name, provider=GoogleGLAProvider(api_key=api_key))
+    if provider == "anthropic":
+        from pydantic_ai.models.anthropic import AnthropicModel
+        from pydantic_ai.providers.anthropic import AnthropicProvider
+
+        return AnthropicModel(model_name, provider=AnthropicProvider(api_key=api_key))
+    if provider == "openai":
+        from pydantic_ai.models.openai import OpenAIModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+
+        return OpenAIModel(model_name, provider=OpenAIProvider(api_key=api_key))
+
+    raise ValueError(f"Per-request API keys are not supported for provider '{provider}'")
 
 
 @dataclass
@@ -220,8 +236,8 @@ async def run_agent(
     Wraps PydanticAI's Agent.run() to maintain the same interface as the
     old hand-rolled ReAct loop. The agent decides when it's done.
 
-    If api_key is provided, it is temporarily set in the environment for
-    the duration of the agent run, then restored.
+    If api_key is provided, it is passed to the provider client for this
+    specific Agent instance. Global process environment is never mutated.
     """
     _check_llm_kill_switch(caller="run_agent")
     resolved_model = model or get_model(ModelTier.STANDARD)
@@ -266,18 +282,12 @@ async def run_agent(
     history_processors = [processor] if processor else None
 
     agent = Agent(
-        resolved_model,
+        _build_model_with_api_key(resolved_model, api_key),
         instructions=system_prompt,
         tools=tool_list,
         output_type=str,
         history_processors=history_processors,
     )
-
-    # Temporarily set API key in environment if provided
-    env_var_name = _get_env_var_for_model(resolved_model)
-    old_api_key = os.environ.get(env_var_name)
-    if api_key:
-        os.environ[env_var_name] = api_key
 
     try:
         result = await agent.run(
@@ -304,12 +314,6 @@ async def run_agent(
             tool_outputs=tool_outputs,
             turns_used=0,
         )
-    finally:
-        # Restore original API key (or remove the env var if it wasn't set)
-        if old_api_key is not None:
-            os.environ[env_var_name] = old_api_key
-        elif env_var_name in os.environ:
-            del os.environ[env_var_name]
 
 
 async def run_agent_streaming(
@@ -332,8 +336,8 @@ async def run_agent_streaming(
     (tool calls, tool results, text deltas) and translates them into
     AgentEvent objects that the frontend SSE protocol expects.
 
-    If api_key is provided, it is temporarily set in the environment for
-    the duration of the agent run, then restored.
+    If api_key is provided, it is passed to the provider client for this
+    specific Agent instance. Global process environment is never mutated.
     """
     _check_llm_kill_switch(caller="run_agent_streaming")
     resolved_model = model or get_model(ModelTier.STANDARD)
@@ -386,18 +390,12 @@ async def run_agent_streaming(
     history_processors = [processor] if processor else None
 
     agent = Agent(
-        resolved_model,
+        _build_model_with_api_key(resolved_model, api_key),
         instructions=system_prompt,
         tools=tool_list,
         output_type=str,
         history_processors=history_processors,
     )
-
-    # Temporarily set API key in environment if provided
-    env_var_name = _get_env_var_for_model(resolved_model)
-    old_api_key = os.environ.get(env_var_name)
-    if api_key:
-        os.environ[env_var_name] = api_key
 
     try:
         async for event in agent.run_stream_events(
@@ -450,11 +448,5 @@ async def run_agent_streaming(
         logger.error("Streaming agent failed: %s", e)
         yield AgentEvent(type="error", data=str(e))
         return
-    finally:
-        # Restore original API key (or remove the env var if it wasn't set)
-        if old_api_key is not None:
-            os.environ[env_var_name] = old_api_key
-        elif env_var_name in os.environ:
-            del os.environ[env_var_name]
 
     yield AgentEvent(type="done", data="")

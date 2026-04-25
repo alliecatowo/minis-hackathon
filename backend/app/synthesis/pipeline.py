@@ -59,6 +59,21 @@ _AI_LIKE_STATUS = "ai_like"
 ProgressCallback = Callable[[PipelineEvent], Coroutine[Any, Any, None]]
 
 
+class PipelineStageError(RuntimeError):
+    """Pipeline failure with a stable error code for progress consumers."""
+
+    def __init__(self, *, stage: str, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.error_code = error_code
+
+
+def _error_code(prefix: str, source: str | None, exc: BaseException) -> str:
+    error_name = exc.__class__.__name__.upper()
+    source_part = source.upper().replace("-", "_") if source else "GENERAL"
+    return f"{prefix}_{source_part}_{error_name}"
+
+
 def _evidence_item_envelope(item: EvidenceItem) -> dict[str, object]:
     return {
         "source_uri": item.source_uri,
@@ -860,9 +875,23 @@ async def run_pipeline(
         for i, source_name in enumerate(source_names):
             try:
                 source = registry.get_source(source_name)
-            except KeyError:
-                logger.warning("Unknown source: %s, skipping", source_name)
-                continue
+            except KeyError as exc:
+                error_code = "FETCH_UNKNOWN_SOURCE"
+                message = f"Unknown source '{source_name}'"
+                await emit(
+                    PipelineEvent(
+                        stage="fetch",
+                        status="failed",
+                        message=message,
+                        progress=0.05,
+                        error_code=error_code,
+                    )
+                )
+                raise PipelineStageError(
+                    stage="fetch",
+                    error_code=error_code,
+                    message=message,
+                ) from exc
 
             # Use per-source identifier if provided, otherwise fall back to username.
             # claude_code uses a data_dir path as identifier when owner_id is set.
@@ -948,13 +977,28 @@ async def run_pipeline(
                 all_stats[source_name] = result.stats
 
             except Exception as e:
-                logger.warning(
-                    "Fetch for source '%s' failed for %s: %s — skipping",
+                error_code = _error_code("FETCH", source_name, e)
+                logger.exception(
+                    "Fetch for source '%s' failed for %s: %s",
                     source_name,
                     identifier,
                     e,
                 )
-                continue
+                message = f"Fetch failed for {source_name}: {e}"
+                await emit(
+                    PipelineEvent(
+                        stage="fetch",
+                        status="failed",
+                        message=message,
+                        progress=0.05 + (0.15 * i / len(source_names)),
+                        error_code=error_code,
+                    )
+                )
+                raise PipelineStageError(
+                    stage="fetch",
+                    error_code=error_code,
+                    message=message,
+                ) from e
 
             progress = 0.05 + (0.15 * (i + 1) / len(source_names))
             await emit(
@@ -1045,11 +1089,27 @@ async def run_pipeline(
             for i, result_or_exc in enumerate(completed):
                 src = explorer_source_names[i]
                 if isinstance(result_or_exc, Exception):
+                    error_code = _error_code("EXPLORE", src, result_or_exc)
                     logger.error(
                         "Explorer '%s' failed: %s",
                         src,
                         result_or_exc,
                     )
+                    message = f"Explorer failed for {src}: {result_or_exc}"
+                    await emit(
+                        PipelineEvent(
+                            stage="explore",
+                            status="failed",
+                            message=message,
+                            progress=0.4,
+                            error_code=error_code,
+                        )
+                    )
+                    raise PipelineStageError(
+                        stage="explore",
+                        error_code=error_code,
+                        message=message,
+                    ) from result_or_exc
                 else:
                     report: ExplorerReport = result_or_exc
                     # ── Token budget accounting (ALLIE-405) ──────────────────
@@ -1093,6 +1153,7 @@ async def run_pipeline(
                                 status="failed",
                                 message=f"Pipeline stopped: token budget exceeded ({_token_budget.total_tokens} tokens)",
                                 progress=0.4,
+                                error_code="EXPLORE_TOKEN_BUDGET_EXCEEDED",
                             )
                         )
                         raise _tbe
@@ -1489,6 +1550,11 @@ async def run_pipeline(
         )
 
     except Exception as e:
+        error_code = (
+            e.error_code
+            if isinstance(e, PipelineStageError)
+            else _error_code("PIPELINE", None, e)
+        )
         logger.exception("Pipeline failed for %s: %s", username, e)
         await emit(
             PipelineEvent(
@@ -1496,6 +1562,7 @@ async def run_pipeline(
                 status="failed",
                 message=f"Pipeline failed: {str(e)}",
                 progress=0.0,
+                error_code=error_code,
             )
         )
 

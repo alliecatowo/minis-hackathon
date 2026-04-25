@@ -7,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.admin import is_trusted_admin
 from app.core.auth import get_current_user
+from app.core.config import settings
 from app.db import async_session, get_session
+from app.models.mini import Mini
 from app.models.usage import GlobalBudget, LLMUsageEvent, UserBudget
 from app.models.user import User
 
@@ -55,6 +57,15 @@ class LLMUsageDailyRow(BaseModel):
     call_count: int
     input_tokens: int
     output_tokens: int
+
+
+class AdminCostControlsResponse(BaseModel):
+    llm_kill_switch_enabled: bool
+    disable_llm_calls_value: str
+    global_monthly_budget_usd: float
+    global_total_spent_usd: float
+    max_pipeline_tokens_per_mini: int
+    token_budget_exceeded_minis: list[dict[str, str | None]]
 
 
 # --- Helpers ---
@@ -243,3 +254,43 @@ async def get_admin_llm_usage(
 
     rows = await get_last_24h_totals(async_session)
     return [LLMUsageDailyRow(**row) for row in rows]
+
+
+@router.get("/admin/cost-controls", response_model=AdminCostControlsResponse)
+async def get_admin_cost_controls(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return admin-visible LLM cost caps, kill-switch state, and budget failures."""
+    _require_admin(current_user)
+
+    result = await session.execute(select(GlobalBudget).where(GlobalBudget.key == "global"))
+    budget = result.scalar_one_or_none()
+
+    minis_result = await session.execute(
+        select(Mini).where(
+            Mini.status == "failed",
+            Mini.metadata_json.isnot(None),
+        )
+    )
+    exceeded_minis: list[dict[str, str | None]] = []
+    for mini in minis_result.scalars().all():
+        metadata = mini.metadata_json if isinstance(mini.metadata_json, dict) else {}
+        if metadata.get("failure_reason") != "token budget exceeded":
+            continue
+        exceeded_minis.append(
+            {
+                "mini_id": mini.id,
+                "username": mini.username,
+                "failure_reason": metadata.get("failure_reason"),
+            }
+        )
+
+    return AdminCostControlsResponse(
+        llm_kill_switch_enabled=settings.llm_disabled,
+        disable_llm_calls_value=settings.disable_llm_calls,
+        global_monthly_budget_usd=budget.monthly_budget_usd if budget else 100.0,
+        global_total_spent_usd=budget.total_spent_usd if budget else 0.0,
+        max_pipeline_tokens_per_mini=settings.max_pipeline_tokens_per_mini,
+        token_budget_exceeded_minis=exceeded_minis,
+    )

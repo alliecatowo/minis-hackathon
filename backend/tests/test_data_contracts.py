@@ -483,6 +483,7 @@ class TestPipelineEventContract:
         assert hasattr(event, "status")
         assert hasattr(event, "message")
         assert hasattr(event, "progress")
+        assert hasattr(event, "error_code")
 
     def test_pipeline_event_stage_values_used_by_pipeline(self):
         """Verify the stages emitted by run_pipeline are valid PipelineEvent values."""

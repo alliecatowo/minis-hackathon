@@ -14,11 +14,13 @@ import {
   getSettings,
   updateSettings,
   getUsage,
+  getAdminCostControls,
   getAvailableModels,
   getTierModels,
   testApiKey,
   type UserSettings,
   type UsageInfo,
+  type AdminCostControls,
   type ModelInfo,
   type TierModelsResponse,
 } from "@/lib/api";
@@ -475,12 +477,16 @@ function ModelTiersTab() {
 
 function UsageTab() {
   const [usage, setUsage] = useState<UsageInfo | null>(null);
+  const [adminControls, setAdminControls] = useState<AdminCostControls | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getUsage()
-      .then(setUsage)
+    Promise.all([getUsage(), getAdminCostControls()])
+      .then(([usageData, adminData]) => {
+        setUsage(usageData);
+        setAdminControls(adminData);
+      })
       .catch(() => setError("Failed to load usage data"))
       .finally(() => setLoading(false));
   }, []);
@@ -571,6 +577,57 @@ function UsageTab() {
         Limits reset daily at midnight UTC. Add your own API key to remove
         limits.
       </p>
+
+      {adminControls && (
+        <div className="rounded-lg border border-border/60 bg-secondary/30 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">Admin Cost Controls</h3>
+              <p className="text-xs text-muted-foreground">
+                Platform LLM budget, pipeline cap, and kill-switch state.
+              </p>
+            </div>
+            <Badge
+              variant={adminControls.llm_kill_switch_enabled ? "destructive" : "secondary"}
+            >
+              {adminControls.llm_kill_switch_enabled ? "LLM disabled" : "LLM enabled"}
+            </Badge>
+          </div>
+
+          <div className="grid gap-3 text-xs sm:grid-cols-3">
+            <div>
+              <p className="text-muted-foreground">Global spend</p>
+              <p className="font-mono">
+                ${adminControls.global_total_spent_usd.toFixed(2)}
+                <span className="text-muted-foreground">
+                  /${adminControls.global_monthly_budget_usd.toFixed(2)}
+                </span>
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Pipeline token cap</p>
+              <p className="font-mono">
+                {adminControls.max_pipeline_tokens_per_mini.toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Token-budget failures</p>
+              <p className="font-mono">
+                {adminControls.token_budget_exceeded_minis.length}
+              </p>
+            </div>
+          </div>
+
+          {adminControls.token_budget_exceeded_minis.length > 0 && (
+            <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs">
+              Token budget exceeded:{" "}
+              {adminControls.token_budget_exceeded_minis
+                .map((mini) => `@${mini.username}`)
+                .join(", ")}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

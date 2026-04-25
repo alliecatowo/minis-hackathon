@@ -650,6 +650,43 @@ class TestUsageRouteExtra:
                 await update_global_budget(body=body, current_user=user, session=session)
         assert exc_info.value.status_code == 400
 
+    @pytest.mark.asyncio
+    async def test_get_admin_cost_controls_surfaces_kill_switch_and_token_failures(self):
+        """GET /usage/admin/cost-controls returns cost-cap and kill-switch visibility."""
+        from app.core.config import settings
+        from app.models.usage import GlobalBudget
+        from app.routes.usage import get_admin_cost_controls
+
+        user = _user()
+        user.github_username = "adminuser"
+
+        budget = GlobalBudget(monthly_budget_usd=250.0)
+        budget.total_spent_usd = 42.0
+
+        failed_mini = MagicMock()
+        failed_mini.id = "mini-1"
+        failed_mini.username = "octo"
+        failed_mini.metadata_json = {"failure_reason": "token budget exceeded"}
+
+        budget_result = MagicMock()
+        budget_result.scalar_one_or_none.return_value = budget
+        minis_result = MagicMock()
+        minis_result.scalars.return_value.all.return_value = [failed_mini]
+
+        session = _session()
+        session.execute = AsyncMock(side_effect=[budget_result, minis_result])
+
+        with patch.object(settings, "admin_usernames", "adminuser"):
+            with patch.object(settings, "disable_llm_calls", "true"):
+                with patch.object(settings, "max_pipeline_tokens_per_mini", 12345):
+                    resp = await get_admin_cost_controls(current_user=user, session=session)
+
+        assert resp.llm_kill_switch_enabled is True
+        assert resp.global_monthly_budget_usd == 250.0
+        assert resp.global_total_spent_usd == 42.0
+        assert resp.max_pipeline_tokens_per_mini == 12345
+        assert resp.token_budget_exceeded_minis[0]["mini_id"] == "mini-1"
+
 
 # ---------------------------------------------------------------------------
 # routes/export.py (team agents)
@@ -1719,6 +1756,38 @@ class TestCoreAgent:
 
         assert isinstance(result, AgentResult)
         assert result.final_response is None
+
+    @pytest.mark.asyncio
+    async def test_run_agent_api_key_does_not_mutate_environment(self, monkeypatch):
+        """Per-request API keys are passed to the Agent model, not os.environ."""
+        from app.core.agent import run_agent
+
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        mock_result = MagicMock()
+        mock_result.output = "Final answer"
+        mock_usage = MagicMock()
+        mock_usage.requests = 1
+        mock_result.usage.return_value = mock_usage
+
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.run = AsyncMock(return_value=mock_result)
+        mock_agent_class = MagicMock(return_value=mock_agent_instance)
+
+        with patch("app.core.agent.Agent", mock_agent_class):
+            with patch(
+                "app.core.agent._build_model_with_api_key",
+                return_value="openai:gpt-4.1",
+            ) as build_model:
+                await run_agent(
+                    system_prompt="You are helpful.",
+                    user_prompt="Hello",
+                    tools=[],
+                    model="openai:gpt-4.1",
+                    api_key="sk-test",
+                )
+
+        build_model.assert_called_once_with("openai:gpt-4.1", "sk-test")
+        assert "OPENAI_API_KEY" not in __import__("os").environ
 
     @pytest.mark.asyncio
     async def test_run_agent_streaming_yields_events(self):

@@ -525,12 +525,13 @@ async def test_get_mini_dataset_no_soul_doc():
     from app.core.auth import get_optional_user
     from app.db import get_session
 
-    mini = _make_mini(spirit_content=None, visibility="public")
+    owner = _make_user()
+    mini = _make_mini(spirit_content=None, visibility="public", owner_id=owner.id)
 
     session = _make_session()
     session.execute = AsyncMock(return_value=_make_result_with(mini))
 
-    app.dependency_overrides[get_optional_user] = lambda: None
+    app.dependency_overrides[get_optional_user] = lambda: owner
     app.dependency_overrides[get_session] = lambda: session
 
     transport = ASGITransport(app=app)
@@ -539,6 +540,31 @@ async def test_get_mini_dataset_no_soul_doc():
 
     app.dependency_overrides.clear()
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_mini_dataset_public_mini_requires_owner():
+    """GET /api/minis/{id}/dataset denies non-owners even for public minis."""
+    from app.main import app
+    from app.core.auth import get_optional_user
+    from app.db import get_session
+
+    owner = _make_user(user_id="owner-id")
+    non_owner = _make_user(user_id="other-user-id")
+    mini = _make_mini(spirit_content="private soul", visibility="public", owner_id=owner.id)
+
+    session = _make_session()
+    session.execute = AsyncMock(return_value=_make_result_with(mini))
+
+    app.dependency_overrides[get_optional_user] = lambda: non_owner
+    app.dependency_overrides[get_session] = lambda: session
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/api/minis/{mini.id}/dataset")
+
+    app.dependency_overrides.clear()
+    assert r.status_code == 403
 
 
 # ===========================================================================
