@@ -99,7 +99,7 @@ python scripts/minis_claude_plugin_modes.py remote-list
 
 Claude Code command: `/mini-remote-account <check|list|chat|review> [...]`
 
-Remote account mode requires `MINIS_TOKEN` or `MINIS_AUTH_TOKEN`. If auth is missing, stop with setup instructions; do not fall back to public minis or local demo mode.
+Remote account mode requires `uv run minis-mcp auth login`, `MINIS_TOKEN`, `MINIS_AUTH_TOKEN`, or `MINIS_AUTH_TOKEN_FILE`. If auth is missing, stop with setup instructions; do not fall back to public minis or local demo mode.
 
 ## Working with Minis
 

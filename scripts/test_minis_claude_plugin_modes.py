@@ -75,17 +75,27 @@ class MinisClaudePluginModesTests(unittest.TestCase):
             self.assertIn("required", agent_content)
 
     def test_remote_check_gates_when_token_missing(self) -> None:
-        completed = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "remote-check", "--json"],
-            check=False,
-            capture_output=True,
-            text=True,
-            env={"PATH": os.environ.get("PATH", "")},
-        )
+        with tempfile.TemporaryDirectory() as home:
+            completed = subprocess.run(
+                [sys.executable, str(SCRIPT_PATH), "remote-check", "--json"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={"PATH": os.environ.get("PATH", ""), "HOME": home},
+            )
 
         self.assertEqual(completed.returncode, 2)
         self.assertIn('"available": false', completed.stdout)
         self.assertIn("MINIS_TOKEN", completed.stdout)
+
+    def test_remote_setup_accepts_mcp_token_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            token_file = Path(tmp) / "mcp-token"
+            token_file.write_text("token-from-device-auth\n", encoding="utf-8")
+            payload = self.module._remote_setup_payload({"MINIS_AUTH_TOKEN_FILE": str(token_file)})
+
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["auth_source"], str(token_file))
 
 
 if __name__ == "__main__":

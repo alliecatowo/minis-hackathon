@@ -28,11 +28,14 @@ Claude Code command:
 Use this when you want hosted account minis through authenticated API or MCP.
 
 ```bash
-export MINIS_TOKEN=...
-export MINIS_API_BASE=https://minis-api.fly.dev/api
+cd mcp-server
+uv run minis-mcp auth login
+cd ..
 python scripts/minis_claude_plugin_modes.py remote-check
 python scripts/minis_claude_plugin_modes.py remote-list
 ```
+
+`MINIS_TOKEN` and `MINIS_AUTH_TOKEN` also work when you already have a bearer token. `MINIS_AUTH_TOKEN_FILE` can point at a non-default token file.
 
 For MCP clients, pass the same auth into the MCP server:
 
@@ -43,13 +46,14 @@ For MCP clients, pass the same auth into the MCP server:
       "command": "uv",
       "args": ["run", "--directory", "/absolute/path/to/mcp-server", "minis-mcp"],
       "env": {
-        "MINIS_BACKEND_URL": "https://minis-api.fly.dev",
-        "MINIS_AUTH_TOKEN": "<token>"
+        "MINIS_BACKEND_URL": "https://minis.fly.dev"
       }
     }
   }
 }
 ```
+
+Set `MINIS_AUTH_TOKEN` in the MCP env only when you are not using the token file created by `auth login`.
 
 Claude Code command:
 

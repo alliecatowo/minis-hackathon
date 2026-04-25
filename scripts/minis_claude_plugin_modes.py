@@ -20,7 +20,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-DEFAULT_API_BASE = "https://minis-api.fly.dev/api"
+DEFAULT_API_BASE = "https://minis.fly.dev/api"
+DEFAULT_TOKEN_PATH = Path.home() / ".config" / "minis" / "mcp-token"
 DOC_ALLOWLIST = (
     "README.md",
     "CLAUDE.md",
@@ -70,7 +71,26 @@ def _api_base(env: dict[str, str]) -> str:
 
 
 def _auth_token(env: dict[str, str]) -> str:
-    return (env.get("MINIS_TOKEN") or env.get("MINIS_AUTH_TOKEN") or "").strip()
+    env_token = (env.get("MINIS_TOKEN") or env.get("MINIS_AUTH_TOKEN") or "").strip()
+    if env_token:
+        return env_token
+
+    token_file = Path(env.get("MINIS_AUTH_TOKEN_FILE", str(DEFAULT_TOKEN_PATH))).expanduser()
+    try:
+        return token_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _auth_source(env: dict[str, str]) -> str | None:
+    if env.get("MINIS_TOKEN"):
+        return "MINIS_TOKEN"
+    if env.get("MINIS_AUTH_TOKEN"):
+        return "MINIS_AUTH_TOKEN"
+    token_file = Path(env.get("MINIS_AUTH_TOKEN_FILE", str(DEFAULT_TOKEN_PATH))).expanduser()
+    if token_file.is_file():
+        return str(token_file)
+    return None
 
 
 def _json_dump(payload: Any) -> str:
@@ -256,15 +276,18 @@ def _local_demo(args: argparse.Namespace) -> int:
 def _remote_setup_payload(env: dict[str, str]) -> dict[str, Any]:
     api_base = _api_base(env)
     token_present = bool(_auth_token(env))
+    auth_source = _auth_source(env)
     return {
         "mode": "remote-account",
         "available": token_present,
         "api_base": api_base,
         "auth": "configured" if token_present else "missing",
+        "auth_source": auth_source,
         "setup": [
-            "Set MINIS_TOKEN or MINIS_AUTH_TOKEN to a Minis API bearer token.",
-            "Optionally set MINIS_API_BASE or MINIS_BACKEND_URL; defaults to https://minis-api.fly.dev/api.",
-            "For MCP clients, pass MINIS_BACKEND_URL and MINIS_AUTH_TOKEN into the minis MCP server env.",
+            "Run: cd mcp-server && uv run minis-mcp auth login",
+            "Or set MINIS_TOKEN / MINIS_AUTH_TOKEN to a Minis API bearer token.",
+            "Optionally set MINIS_API_BASE or MINIS_BACKEND_URL; defaults to https://minis.fly.dev/api.",
+            "For MCP clients, pass MINIS_BACKEND_URL and let the token file be read, or set MINIS_AUTH_TOKEN.",
         ],
     }
 
@@ -275,10 +298,11 @@ def _remote_setup_text(payload: dict[str, Any]) -> str:
             f"""\
             Remote account mode is configured.
             API: {payload['api_base']}
+            Auth source: {payload['auth_source']}
 
             Claude Code MCP env:
               MINIS_BACKEND_URL={payload['api_base'].removesuffix('/api')}
-              MINIS_AUTH_TOKEN=<configured>
+              MINIS_AUTH_TOKEN=<optional when auth login token file exists>
             """
         ).strip()
     setup_lines = "\n".join(f"- {line}" for line in payload["setup"])
@@ -307,7 +331,10 @@ def _remote_check(args: argparse.Namespace) -> int:
 def _request_json(path: str, *, timeout: float) -> Any:
     token = _auth_token(os.environ)
     if not token:
-        raise SystemExit("remote account API calls require MINIS_TOKEN or MINIS_AUTH_TOKEN")
+        raise SystemExit(
+            "remote account API calls require auth login, MINIS_TOKEN, "
+            "MINIS_AUTH_TOKEN, or MINIS_AUTH_TOKEN_FILE"
+        )
     url = f"{_api_base(os.environ)}{path}"
     request = urllib.request.Request(
         url,
