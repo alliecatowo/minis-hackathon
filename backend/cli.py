@@ -503,7 +503,8 @@ def list_minis(
     if mine:
         _require_auth_token("list your minis")
 
-    minis = _get_json(f"/minis?mine={'true' if mine else 'false'}", require_auth=mine)
+    payload = _get_json(f"/minis?mine={'true' if mine else 'false'}", require_auth=mine)
+    minis = payload.get("data") if isinstance(payload, dict) else payload
     if not isinstance(minis, list):
         console.print("[red]API returned an invalid minis list.[/red]")
         raise typer.Exit(1)

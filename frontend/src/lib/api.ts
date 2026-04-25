@@ -250,6 +250,16 @@ export interface DecisionFrameworksResponse {
   };
 }
 
+interface MiniListResponse {
+  data: Mini[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+function unwrapMiniList(payload: Mini[] | MiniListResponse): Mini[] {
+  return Array.isArray(payload) ? payload : payload.data;
+}
+
 export async function getDecisionFrameworks(
   username: string,
   limit = 10,
@@ -277,7 +287,7 @@ export async function listMinis(): Promise<Mini[]> {
   if (!res.ok) {
     throw new Error("Failed to fetch minis");
   }
-  return res.json();
+  return unwrapMiniList(await res.json());
 }
 
 export async function getMyMinis(): Promise<Mini[]> {
@@ -285,7 +295,7 @@ export async function getMyMinis(): Promise<Mini[]> {
   if (!res.ok) {
     throw new Error("Failed to fetch your minis");
   }
-  return res.json();
+  return unwrapMiniList(await res.json());
 }
 
 export async function deleteMini(id: string): Promise<void> {
