@@ -78,13 +78,16 @@ async def get_optional_user(
     return await _get_user_from_token(token, session)
 
 
+def is_trusted_service_secret(secret_value: str | None) -> bool:
+    """Return whether the provided trusted service secret is valid."""
+    return bool(secret_value) and secrets.compare_digest(
+        secret_value, settings.trusted_service_secret
+    )
+
+
 async def require_trusted_service(
-    x_trusted_service_secret: str | None = Header(
-        default=None, alias="X-Trusted-Service-Secret"
-    ),
+    x_trusted_service_secret: str | None = Header(default=None, alias="X-Trusted-Service-Secret"),
 ) -> None:
     """Require a shared secret for trusted backend-to-backend reads."""
-    if not x_trusted_service_secret or not secrets.compare_digest(
-        x_trusted_service_secret, settings.trusted_service_secret
-    ):
+    if not is_trusted_service_secret(x_trusted_service_secret):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")

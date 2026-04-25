@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.access import require_team_access
-from app.core.auth import get_current_user, get_optional_user
+from app.core.auth import get_current_user, get_optional_user, is_trusted_service_secret
 from app.db import get_session
 from app.models.mini import Mini
 from app.models.team import Team, TeamMember
@@ -13,11 +13,17 @@ from app.models.user import User
 router = APIRouter(prefix="/export", tags=["export"])
 
 
-def _check_visibility(mini: Mini, user: User | None) -> None:
-    """Raise 404 if mini is private and user is not the owner."""
-    if mini.visibility == "private":
-        if user is None or user.id != mini.owner_id:
-            raise HTTPException(status_code=404, detail="Mini not found")
+def _require_clone_export_access(
+    mini: Mini,
+    user: User | None,
+    trusted_service_secret: str | None,
+) -> None:
+    """Allow clone internals export only for owner or trusted service."""
+    if user is not None and user.id == mini.owner_id:
+        return
+    if is_trusted_service_secret(trusted_service_secret):
+        return
+    raise HTTPException(status_code=404, detail="Mini not found")
 
 
 def _generate_subagent_md(mini: Mini) -> str:
@@ -53,6 +59,7 @@ async def export_subagent(
     format: str = "claude_code",
     session: AsyncSession = Depends(get_session),
     user: User | None = Depends(get_optional_user),
+    x_trusted_service_secret: str | None = Header(default=None, alias="X-Trusted-Service-Secret"),
 ):
     """Export a mini as a Claude Code agent definition (.md file)."""
     result = await session.execute(select(Mini).where(Mini.id == mini_id))
@@ -60,7 +67,7 @@ async def export_subagent(
     if not mini:
         raise HTTPException(status_code=404, detail="Mini not found")
 
-    _check_visibility(mini, user)
+    _require_clone_export_access(mini, user, x_trusted_service_secret)
 
     if mini.status != "ready":
         raise HTTPException(status_code=409, detail=f"Mini not ready (status: {mini.status})")
@@ -74,6 +81,7 @@ async def export_soul_doc(
     mini_id: str,
     session: AsyncSession = Depends(get_session),
     user: User | None = Depends(get_optional_user),
+    x_trusted_service_secret: str | None = Header(default=None, alias="X-Trusted-Service-Secret"),
 ):
     """Export a mini's raw spirit document (soul doc)."""
     result = await session.execute(select(Mini).where(Mini.id == mini_id))
@@ -81,7 +89,7 @@ async def export_soul_doc(
     if not mini:
         raise HTTPException(status_code=404, detail="Mini not found")
 
-    _check_visibility(mini, user)
+    _require_clone_export_access(mini, user, x_trusted_service_secret)
 
     if not mini.spirit_content:
         raise HTTPException(status_code=404, detail="No spirit content available")

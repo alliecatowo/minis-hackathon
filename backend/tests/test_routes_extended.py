@@ -1321,12 +1321,13 @@ async def test_export_subagent_not_ready():
     from app.core.auth import get_optional_user
     from app.db import get_session
 
-    mini = _make_mini(status="processing", visibility="public")
+    owner = _make_user()
+    mini = _make_mini(status="processing", visibility="public", owner_id=owner.id)
 
     session = _make_session()
     session.execute = AsyncMock(return_value=_make_result_with(mini))
 
-    app.dependency_overrides[get_optional_user] = lambda: None
+    app.dependency_overrides[get_optional_user] = lambda: owner
     app.dependency_overrides[get_session] = lambda: session
 
     transport = ASGITransport(app=app)
@@ -1338,18 +1339,19 @@ async def test_export_subagent_not_ready():
 
 
 @pytest.mark.asyncio
-async def test_export_subagent_success():
-    """GET /api/export/minis/{mini_id}/subagent returns 200 markdown content."""
+async def test_export_subagent_owner_success():
+    """GET /api/export/minis/{mini_id}/subagent returns 200 for the mini owner."""
     from app.main import app
     from app.core.auth import get_optional_user
     from app.db import get_session
 
-    mini = _make_mini(status="ready", visibility="public")
+    owner = _make_user()
+    mini = _make_mini(status="ready", visibility="public", owner_id=owner.id)
 
     session = _make_session()
     session.execute = AsyncMock(return_value=_make_result_with(mini))
 
-    app.dependency_overrides[get_optional_user] = lambda: None
+    app.dependency_overrides[get_optional_user] = lambda: owner
     app.dependency_overrides[get_session] = lambda: session
 
     transport = ASGITransport(app=app)
@@ -1388,12 +1390,13 @@ async def test_export_soul_doc_no_spirit_content():
     from app.core.auth import get_optional_user
     from app.db import get_session
 
-    mini = _make_mini(spirit_content=None, visibility="public")
+    owner = _make_user()
+    mini = _make_mini(spirit_content=None, visibility="public", owner_id=owner.id)
 
     session = _make_session()
     session.execute = AsyncMock(return_value=_make_result_with(mini))
 
-    app.dependency_overrides[get_optional_user] = lambda: None
+    app.dependency_overrides[get_optional_user] = lambda: owner
     app.dependency_overrides[get_session] = lambda: session
 
     transport = ASGITransport(app=app)
@@ -1405,18 +1408,21 @@ async def test_export_soul_doc_no_spirit_content():
 
 
 @pytest.mark.asyncio
-async def test_export_soul_doc_success():
-    """GET /api/export/minis/{mini_id}/soul-doc returns spirit_content as plaintext."""
+async def test_export_soul_doc_owner_success():
+    """GET /api/export/minis/{mini_id}/soul-doc returns spirit_content for owner."""
     from app.main import app
     from app.core.auth import get_optional_user
     from app.db import get_session
 
-    mini = _make_mini(visibility="public", spirit_content="This is the soul doc.")
+    owner = _make_user()
+    mini = _make_mini(
+        visibility="public", spirit_content="This is the soul doc.", owner_id=owner.id
+    )
 
     session = _make_session()
     session.execute = AsyncMock(return_value=_make_result_with(mini))
 
-    app.dependency_overrides[get_optional_user] = lambda: None
+    app.dependency_overrides[get_optional_user] = lambda: owner
     app.dependency_overrides[get_session] = lambda: session
 
     transport = ASGITransport(app=app)
@@ -1449,6 +1455,59 @@ async def test_export_private_mini_soul_doc_no_auth():
 
     app.dependency_overrides.clear()
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_export_subagent_public_mini_non_owner_denied():
+    """GET /api/export/minis/{mini_id}/subagent returns 404 for non-owner."""
+    from app.main import app
+    from app.core.auth import get_optional_user
+    from app.db import get_session
+
+    owner = _make_user(user_id="owner-id")
+    other_user = _make_user(user_id="other-user-id")
+    mini = _make_mini(status="ready", visibility="public", owner_id=owner.id)
+
+    session = _make_session()
+    session.execute = AsyncMock(return_value=_make_result_with(mini))
+
+    app.dependency_overrides[get_optional_user] = lambda: other_user
+    app.dependency_overrides[get_session] = lambda: session
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/api/export/minis/{mini.id}/subagent")
+
+    app.dependency_overrides.clear()
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_export_soul_doc_public_mini_trusted_service_success():
+    """GET /api/export/minis/{mini_id}/soul-doc returns 200 with trusted secret."""
+    from app.main import app
+    from app.core.auth import get_optional_user
+    from app.core.config import settings
+    from app.db import get_session
+
+    mini = _make_mini(visibility="public", spirit_content="Trusted soul doc.")
+
+    session = _make_session()
+    session.execute = AsyncMock(return_value=_make_result_with(mini))
+
+    app.dependency_overrides[get_optional_user] = lambda: None
+    app.dependency_overrides[get_session] = lambda: session
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(
+            f"/api/export/minis/{mini.id}/soul-doc",
+            headers={"X-Trusted-Service-Secret": settings.trusted_service_secret},
+        )
+
+    app.dependency_overrides.clear()
+    assert r.status_code == 200
+    assert "Trusted soul doc." in r.text
 
 
 @pytest.mark.asyncio
