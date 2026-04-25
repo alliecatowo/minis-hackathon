@@ -183,7 +183,7 @@ class TestSendChatTurn:
         result = await _send_chat_turn(
             client=mock_client,
             base_url="http://test",
-            username="testuser",
+            mini_id="test-mini-id",
             prompt="Hello?",
         )
         assert result == "Hello world"
@@ -222,7 +222,7 @@ class TestSendChatTurn:
         await _send_chat_turn(
             client=mock_client,
             base_url="http://test",
-            username="testuser",
+            mini_id="test-mini-id",
             prompt="Hello?",
             token="my-jwt-token",
         )
@@ -252,7 +252,7 @@ class TestSendChatTurn:
         result = await _send_chat_turn(
             client=mock_client,
             base_url="http://test",
-            username="testuser",
+            mini_id="test-mini-id",
             prompt="Hello?",
         )
         assert result == "plain json response"
@@ -348,6 +348,7 @@ class TestRunEval:
         mock_scorecard = _make_scorecard(overall=4)
 
         with (
+            patch("eval.runner._resolve_mini_id", new=AsyncMock(return_value="test-mini-id")),
             patch(
                 "eval.runner._send_chat_turn", new=AsyncMock(return_value="The mini's answer here.")
             ),
@@ -379,6 +380,7 @@ class TestRunEval:
         mock_scorecard = _make_scorecard()
 
         with (
+            patch("eval.runner._resolve_mini_id", new=AsyncMock(return_value="test-mini-id")),
             patch("eval.runner._send_chat_turn", new=AsyncMock(return_value="response")),
             patch("eval.runner.score_response", new=AsyncMock(return_value=mock_scorecard)),
         ):
@@ -402,9 +404,12 @@ class TestRunEval:
         sf = _write_subject_yaml(subjects_dir, "failuser")
         tf = _write_turns_yaml(turns_dir, "failuser", num_turns=1)
 
-        with patch(
-            "eval.runner._send_chat_turn",
-            new=AsyncMock(side_effect=Exception("connection refused")),
+        with (
+            patch("eval.runner._resolve_mini_id", new=AsyncMock(return_value="test-mini-id")),
+            patch(
+                "eval.runner._send_chat_turn",
+                new=AsyncMock(side_effect=Exception("connection refused")),
+            ),
         ):
             report = await run_eval(
                 subject_files=[sf],
@@ -429,6 +434,7 @@ class TestRunEval:
         tf = _write_turns_yaml(turns_dir, "judgeuser", num_turns=1)
 
         with (
+            patch("eval.runner._resolve_mini_id", new=AsyncMock(return_value="test-mini-id")),
             patch("eval.runner._send_chat_turn", new=AsyncMock(return_value="some response")),
             patch(
                 "eval.runner.score_response", new=AsyncMock(side_effect=Exception("judge failed"))
@@ -479,6 +485,7 @@ class TestRunEval:
         mock_scorecard = _make_scorecard()
 
         with (
+            patch("eval.runner._resolve_mini_id", new=AsyncMock(return_value="test-mini-id")),
             patch("eval.runner._send_chat_turn", new=AsyncMock(return_value="response")),
             patch("eval.runner.score_response", new=AsyncMock(return_value=mock_scorecard)),
         ):
@@ -508,6 +515,7 @@ class TestRunEval:
         scorecards = iter([sc1, sc2])
 
         with (
+            patch("eval.runner._resolve_mini_id", new=AsyncMock(return_value="test-mini-id")),
             patch("eval.runner._send_chat_turn", new=AsyncMock(return_value="resp")),
             patch(
                 "eval.runner.score_response",
@@ -553,6 +561,7 @@ class TestRunEval:
         )
 
         with (
+            patch("eval.runner._resolve_mini_id", new=AsyncMock(return_value="test-mini-id")),
             patch("eval.runner._send_chat_turn", new=AsyncMock(return_value="request changes")),
             patch(
                 "eval.runner.score_response", new=AsyncMock(return_value=scorecard)

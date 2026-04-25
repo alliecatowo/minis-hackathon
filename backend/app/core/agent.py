@@ -279,7 +279,7 @@ async def run_agent_streaming(
     user_prompt: str,
     tools: list[AgentTool],
     history: list[dict] | None = None,
-    max_turns: int = 5,
+    max_turns: int = 20,
     model: str | None = None,
     api_key: str | None = None,
     max_output_tokens: int | None = None,

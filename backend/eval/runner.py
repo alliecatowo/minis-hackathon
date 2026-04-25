@@ -1,6 +1,6 @@
 """Eval runner — orchestrates sending turns to a mini and scoring responses.
 
-For each (subject, golden turn): POST to /api/minis/{username}/chat,
+For each (subject, golden turn): POST to /api/minis/{mini_id}/chat,
 collect the streamed response, score via judge, and aggregate into an EvalReport.
 """
 
@@ -120,11 +120,11 @@ class EvalReport:
 async def _send_chat_turn(
     client: httpx.AsyncClient,
     base_url: str,
-    username: str,
+    mini_id: str,
     prompt: str,
     token: str | None = None,
 ) -> str:
-    """POST to /api/minis/{username}/chat and collect the full response text.
+    """POST to /api/minis/{mini_id}/chat and collect the full response text.
 
     Handles SSE streaming (text/event-stream) by accumulating 'chunk' events,
     and also handles plain JSON responses (for tests / simple endpoints).
@@ -133,7 +133,7 @@ async def _send_chat_turn(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    url = f"{base_url}/api/minis/{username}/chat"
+    url = f"{base_url}/api/minis/{mini_id}/chat"
     payload = {"message": prompt}
 
     collected_text: list[str] = []
@@ -173,6 +173,15 @@ async def _send_chat_turn(
                 collected_text.append(body.decode())
 
     return "".join(collected_text).strip()
+
+
+async def _resolve_mini_id(client: httpx.AsyncClient, base_url: str, username: str) -> str:
+    """Resolve a username to a mini ID."""
+    url = f"{base_url}/api/minis/by-username/{username}"
+    resp = await client.get(url)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["id"]
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +357,13 @@ async def run_eval(
             gtf = turns_by_subject[username]
             summary = SubjectSummary(subject=username)
 
+            # 0. Resolve mini ID once per subject.
+            try:
+                mini_id = await _resolve_mini_id(client, base_url, username)
+            except Exception as exc:
+                logger.error("Failed to resolve mini ID for %s: %s", username, exc)
+                continue
+
             for turn in gtf.turns:
                 logger.info("Evaluating %s / %s ...", username, turn.id)
 
@@ -356,7 +372,7 @@ async def run_eval(
                     mini_response = await _send_chat_turn(
                         client=client,
                         base_url=base_url,
-                        username=username,
+                        mini_id=mini_id,
                         prompt=turn.prompt,
                         token=token,
                     )
