@@ -166,7 +166,9 @@ class TestLLMUsageLimits:
 
         _, kwargs = mock_agent.run.call_args
         limits = kwargs["usage_limits"]
-        assert limits.request_limit == 2
+        # request_limit must be None — token budgets are the cost cap,
+        # not request count (which PydanticAI counts per HTTP call, not per turn).
+        assert limits.request_limit is None
         assert limits.input_tokens_limit == 123
         assert limits.output_tokens_limit == 45
         assert limits.total_tokens_limit == 160
