@@ -41,11 +41,21 @@ PROVIDER_DEFAULTS: dict[Provider, dict[ModelTier, str]] = {
         ModelTier.THINKING: "anthropic:claude-sonnet-4-6",
     },
     Provider.OPENAI: {
-        # 2026-05-09: $20 credits added; trying gpt-5/o3 stack again.
-        # FAST sits on 10M-free/day mini pool. STANDARD + THINKING on the 1M-free top pool.
-        ModelTier.FAST: "openai:gpt-5-mini",
+        # Cost-optimized mix (see docs/audits/2026-05-09-openai-pricing.md):
+        #
+        # | Tier      | Model                  | Input $/1M | Output $/1M | Free quota   |
+        # |-----------|------------------------|-----------:|------------:|--------------|
+        # | FAST      | gpt-4.1-nano           |      $0.10 |       $0.40 | 10M/day pool |
+        # | STANDARD  | gpt-5                  |      $2.00 |       $8.00 | 1M/day pool  |
+        # | THINKING  | o4-mini                |      $1.10 |       $4.40 | 10M/day pool |
+        # | EMBEDDING | text-embedding-3-small |      $0.02 |           — | —            |
+        #
+        # FAST: gpt-4.1-nano replaces non-existent "gpt-5-mini" (caused silent errors).
+        # STANDARD: gpt-5 stays — same price as gpt-4.1 with better tool-calling quality.
+        # THINKING: o4-mini replaces o3 ($10/$40/1M); 9x cheaper for narrative essay synthesis.
+        ModelTier.FAST: "openai:gpt-4.1-nano",
         ModelTier.STANDARD: "openai:gpt-5",
-        ModelTier.THINKING: "openai:o3",
+        ModelTier.THINKING: "openai:o4-mini",
         ModelTier.EMBEDDING: "openai:text-embedding-3-small",
     },
 }
