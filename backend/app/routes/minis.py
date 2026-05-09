@@ -950,8 +950,12 @@ async def list_mini_repos(
         try:
             repos = json.loads(cached.data_json)
         except json.JSONDecodeError:
-            # Invalid JSON in cache, use empty list
-            pass
+            logger.warning(
+                "repos_cache_json_decode_error mini_id=%s ingestion_data_id=%s",
+                id,
+                cached.id,
+                exc_info=True,
+            )
 
     # Get repo configs
     result = await session.execute(select(MiniRepoConfig).where(MiniRepoConfig.mini_id == id))
@@ -1196,7 +1200,8 @@ def _build_at_risk_frameworks(
     if isinstance(principles_json, str):
         try:
             principles_json = _json.loads(principles_json)
-        except Exception:
+        except json.JSONDecodeError:
+            logger.warning("at_risk_frameworks_json_decode_error", exc_info=True)
             return []
 
     all_frameworks = format_decision_frameworks(principles_json, include_retired=False)
@@ -1318,7 +1323,10 @@ async def retire_framework(
     if isinstance(p_json, str):
         try:
             p_json = _json.loads(p_json)
-        except Exception:
+        except json.JSONDecodeError:
+            logger.warning(
+                "retire_framework_principles_json_decode_error mini_id=%s", id, exc_info=True
+            )
             p_json = {}
     if not isinstance(p_json, dict):
         p_json = {}
