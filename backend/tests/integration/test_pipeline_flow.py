@@ -308,10 +308,6 @@ class TestPipelineDryRun:
                 AsyncMock(return_value=soul_doc),
             ),
             patch(
-                "app.synthesis.pipeline.run_chief_synthesis",
-                AsyncMock(return_value=soul_doc),
-            ),
-            patch(
                 "app.synthesis.pipeline._store_evidence_items_in_db",
                 AsyncMock(return_value=(3, 0)),
             ),
@@ -692,12 +688,6 @@ class TestPipelineDryRun:
             stack.enter_context(
                 patch(
                     "app.synthesis.pipeline.run_chief_synthesizer",
-                    AsyncMock(return_value="Soul doc"),
-                )
-            )
-            stack.enter_context(
-                patch(
-                    "app.synthesis.pipeline.run_chief_synthesis",
                     AsyncMock(return_value="Soul doc"),
                 )
             )
