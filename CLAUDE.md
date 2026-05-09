@@ -25,6 +25,13 @@ AI personality clones ("minis") built from GitHub profiles and authorized digita
 
 Voice/personality is the demo. Framework cloning is the product. See [`docs/VISION.md`](./docs/VISION.md).
 
+## Recent Changes (2026-05-09)
+
+- **Langfuse v4 upgrade & enable by default** ([docs/audits/](./docs/audits/) for details) — Langfuse tracing now enabled in dev/prod, upgraded to modern v4 API, all four pipeline stages traced.
+- **mise auto-env** — `mise.toml` now auto-loads `backend/.env`, no manual `source` needed.
+
+See audit files in `docs/audits/2026-05-09-*` for technical details.
+
 Canonical GitHub repo for current project work is `alliecatowo/minis-ai`. Do not open PRs or attach new Linear/GitHub references to `alliecatowo/minis`, `alliecatowo/my-minis`, `minis-v2`, or the old `alliecatowo/minis-hackathon` surface unless a Linear issue explicitly says so.
 
 ## Commands
@@ -90,6 +97,12 @@ cd backend && fly deploy               # Deploy backend to Fly.io
 - `e2e/` — Playwright smoke tests (`smoke.spec.ts`, `create-mini.spec.ts`, `regenerate.spec.ts`) against live URLs (ALLIE-381).
 
 Tooling is managed by mise (see `mise.toml`): pnpm, uv, node 22, python 3.13.
+
+## Observability
+
+**Langfuse tracing** — All LLM calls are traced to [Langfuse](https://us.cloud.langfuse.com). Enabled by default (`LANGFUSE_ENABLED=true`). Use the Langfuse MCP when debugging fidelity issues or analyzing LLM costs. Traces include all four pipeline stages (FETCH, EXPLORE, SYNTHESIZE, SAVE).
+
+**Environment auto-load** — `mise.toml` now auto-loads `backend/.env` via `[env]._.file`. No need to manually `source` backend/.env before running mise tasks — just `mise run <task>` and env vars are available.
 
 ## Pre-commit Hooks
 
@@ -429,6 +442,10 @@ mise run dev
 - `DATABASE_URL` — PostgreSQL connection (`postgresql+asyncpg://...`)
 - `JWT_SECRET`, `SERVICE_JWT_SECRET` — Auth secrets (defaults provided for dev)
 - `ENCRYPTION_KEY` — Explicit key material for encrypted user secrets; required outside development
+- `LANGFUSE_ENABLED` — Optional: `true` / `false` to enable Langfuse tracing (default `true`)
+- `LANGFUSE_PUBLIC_KEY` — Langfuse public API key (required if LANGFUSE_ENABLED=true)
+- `LANGFUSE_SECRET_KEY` — Langfuse secret API key (required if LANGFUSE_ENABLED=true)
+- `LANGFUSE_HOST` — Langfuse API host (default `https://us.cloud.langfuse.com`)
 - `DEFAULT_PROVIDER` — Optional: `gemini` (default), `anthropic`, or `openai`
 - `REPO_AGENT_MAX` — Optional: max repos to clone and explore per mini (default `5`)
 - `REPO_AGENT_CONCURRENCY` — Optional: max concurrent clone+explore tasks (default `4`)

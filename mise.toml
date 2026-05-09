@@ -1,3 +1,6 @@
+[env]
+_.file = "backend/.env"
+
 [tools]
 pnpm = "latest"
 uv = "latest"
