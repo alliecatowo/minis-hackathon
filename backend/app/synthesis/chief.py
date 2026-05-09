@@ -849,27 +849,12 @@ async def run_chief_synthesizer(
     db_session: AsyncSession,
     model: str | None = None,
 ) -> str:
-    """Run the chief synthesizer agent with DB-driven tools.
-
-    The synthesizer reads findings, quotes, knowledge graph, and principles
-    from the database via tools, then writes soul document sections.
-
-    Args:
-        mini_id: The database ID of the Mini being synthesized.
-        db_session: An async SQLAlchemy session for DB queries.
-        model: Optional LLM model override.
-
-    Returns:
-        The complete soul document as a markdown string.
-    """
-    # Fan-out orchestrator is the production path when we have a real async SQLAlchemy session.
-    # Keep the legacy implementation below as a compatibility fallback for tests that inject mocks.
-    if isinstance(db_session, AsyncSession) or getattr(db_session, "__chief_fanout__", False):
-        return await _run_chief_synthesizer_fanout(
-            mini_id=mini_id,
-            db_session=db_session,
-            model=model,
-        )
+    """Run the chief synthesizer agent with DB-driven tools."""
+    return await _run_chief_synthesizer_fanout(
+        mini_id=mini_id,
+        db_session=db_session,
+        model=model,
+    )
 
     # Load the mini to get username and existing data
     result = await db_session.execute(select(Mini).where(Mini.id == mini_id))

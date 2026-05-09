@@ -533,6 +533,124 @@ async def _build_usable_evidence_text(
     return "\n\n---\n\n".join(content for content in rows if content)
 
 
+def _format_personality_typology_narrative(typology: Any) -> tuple[str, float]:
+    """Format PersonalityTypology as a narrative essay for ExplorerNarrative."""
+    lines: list[str] = []
+    lines.append("# Personality Typology Narrative\n")
+    if typology.summary:
+        lines.append(typology.summary + "\n")
+    for fw in typology.frameworks or []:
+        lines.append(f"## {fw.framework}: {fw.profile}")
+        if fw.summary:
+            lines.append(fw.summary)
+        for dim in fw.dimensions or []:
+            label = getattr(dim, "label", None) or getattr(dim, "dimension", "")
+            score = getattr(dim, "score", None)
+            reasoning = getattr(dim, "reasoning", None) or getattr(dim, "description", "")
+            score_str = f" (score={score:.2f})" if score is not None else ""
+            lines.append(f"- **{label}**{score_str}: {reasoning}")
+        lines.append("")
+    confidence = max(
+        (fw.confidence for fw in (typology.frameworks or []) if fw.confidence is not None),
+        default=0.6,
+    )
+    return "\n".join(lines), min(confidence, 1.0)
+
+
+def _format_behavioral_context_narrative(ctx: Any) -> tuple[str, float]:
+    """Format BehavioralContext as narrative for audience_modulation aspect.
+
+    Behavioral context maps situational register shifts by audience — the same
+    conceptual scope as audience_modulation — so we merge them rather than adding
+    a new aspect.
+    """
+    lines: list[str] = []
+    lines.append("# Behavioral Context Narrative (Audience & Situational Modulation)\n")
+    if ctx.summary:
+        lines.append(ctx.summary + "\n")
+    for entry in ctx.contexts or []:
+        lines.append(f"## Context: {entry.context}")
+        lines.append(entry.summary)
+        if entry.communication_style:
+            lines.append(f"Register: {entry.communication_style}")
+        if entry.decision_style:
+            lines.append(f"Decision style: {entry.decision_style}")
+        if entry.behaviors:
+            lines.append("Behaviors: " + "; ".join(entry.behaviors))
+        if entry.motivators:
+            lines.append("Motivators: " + "; ".join(entry.motivators))
+        if entry.stressors:
+            lines.append("Stressors: " + "; ".join(entry.stressors))
+        lines.append("")
+    context_count = len(ctx.contexts or [])
+    confidence = 0.7 if context_count >= 3 else 0.5 if context_count >= 1 else 0.3
+    return "\n".join(lines), confidence
+
+
+def _format_motivations_narrative(motiv: Any) -> tuple[str, float]:
+    """Format MotivationsProfile as a narrative essay for ExplorerNarrative."""
+    lines: list[str] = []
+    lines.append("# Motivations & Drivers Narrative\n")
+    if motiv.summary:
+        lines.append(motiv.summary + "\n")
+    by_cat: dict[str, list[Any]] = {}
+    for m in motiv.motivations or []:
+        by_cat.setdefault(m.category, []).append(m)
+    category_labels = {
+        "short_term_goal": "Near-term Goals",
+        "medium_term_goal": "Medium-term Ambitions",
+        "terminal_value": "Terminal Values",
+        "anti_goal": "Anti-goals",
+    }
+    for cat, label in category_labels.items():
+        items = by_cat.get(cat, [])
+        if not items:
+            continue
+        lines.append(f"## {label}")
+        for m in items:
+            lines.append(f"- {m.value} (confidence={m.confidence:.2f})")
+        lines.append("")
+    if motiv.motivation_chains:
+        lines.append("## Motivation → Framework → Behavior Chains")
+        for chain in motiv.motivation_chains:
+            lines.append(
+                f"- {chain.motivation} → {chain.implied_framework} → {chain.observed_behavior}"
+            )
+        lines.append("")
+    motivation_count = len(motiv.motivations or [])
+    confidence = 0.75 if motivation_count >= 5 else 0.6 if motivation_count >= 2 else 0.4
+    return "\n".join(lines), confidence
+
+
+async def _persist_inference_narrative(
+    mini_id: str,
+    aspect: str,
+    narrative: str,
+    confidence: float,
+    session_factory: Any,
+) -> None:
+    """Insert an ExplorerNarrative row produced by a pre-chief inference pass."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    async with session_factory() as session:
+        stmt = (
+            pg_insert(ExplorerNarrative)
+            .values(
+                mini_id=mini_id,
+                aspect=aspect,
+                narrative=narrative,
+                confidence=confidence,
+                evidence_ids=[],
+                explorer_source="synthesis_inference",
+            )
+            .on_conflict_do_update(
+                index_elements=["mini_id", "aspect", "explorer_source"],
+                set_={"narrative": narrative, "confidence": confidence},
+            )
+        )
+        await session.execute(stmt)
+        await session.commit()
+
 async def _build_structured_from_db(
     mini_id: str,
     session_factory: Any,
@@ -1336,10 +1454,113 @@ async def run_pipeline(
             )
         )
 
+        # ── Pre-chief behavioral inferences ─────────────────────────────
+        # Run BEFORE chief synthesis so their narratives land in ExplorerNarrative
+        # and chief's fan-out agents can read them alongside explorer-produced narratives.
+        # All three are non-blocking — logged + skipped on failure.
+        personality_typology = None
+        behavioral_ctx = None
+        motivations_profile = None
+
+        if mini_id is not None:
+            try:
+                from app.synthesis.personality import infer_personality_typology
+
+                async with session_factory() as typology_session:
+                    personality_typology = await infer_personality_typology(
+                        mini_id=mini_id,
+                        db_session=typology_session,
+                        username=username,
+                    )
+                logger.info(
+                    "personality_typology inferred for mini_id=%s: %d frameworks",
+                    mini_id,
+                    len(personality_typology.frameworks) if personality_typology else 0,
+                )
+                if personality_typology:
+                    narrative, conf = _format_personality_typology_narrative(personality_typology)
+                    await _persist_inference_narrative(
+                        mini_id=mini_id,
+                        aspect="personality_typology",
+                        narrative=narrative,
+                        confidence=conf,
+                        session_factory=session_factory,
+                    )
+            except Exception:
+                logger.warning(
+                    "personality_typology inference failed for mini_id=%s — continuing",
+                    mini_id,
+                    exc_info=True,
+                )
+
+            try:
+                from app.synthesis.behavioral_context import infer_behavioral_context
+
+                async with session_factory() as bctx_session:
+                    behavioral_ctx = await infer_behavioral_context(
+                        mini_id=mini_id,
+                        db_session=bctx_session,
+                        username=username,
+                    )
+                logger.info(
+                    "behavioral_context inferred for mini_id=%s (%d contexts)",
+                    mini_id,
+                    len(behavioral_ctx.contexts) if behavioral_ctx else 0,
+                )
+                if behavioral_ctx:
+                    # Merge behavioral context into audience_modulation aspect — same
+                    # conceptual scope (situational register shifts by audience/surface).
+                    narrative, conf = _format_behavioral_context_narrative(behavioral_ctx)
+                    await _persist_inference_narrative(
+                        mini_id=mini_id,
+                        aspect="audience_modulation",
+                        narrative=narrative,
+                        confidence=conf,
+                        session_factory=session_factory,
+                    )
+            except Exception:
+                logger.warning(
+                    "behavioral_context inference failed for mini_id=%s — continuing",
+                    mini_id,
+                    exc_info=True,
+                )
+
+            try:
+                from app.synthesis.motivations import infer_motivations
+
+                async with session_factory() as motiv_session:
+                    motivations_profile = await infer_motivations(
+                        mini_id=mini_id,
+                        db_session=motiv_session,
+                        username=username,
+                    )
+                logger.info(
+                    "motivations inferred for mini_id=%s: %d motivations, %d chains",
+                    mini_id,
+                    len(motivations_profile.motivations) if motivations_profile else 0,
+                    len(motivations_profile.motivation_chains) if motivations_profile else 0,
+                )
+                if motivations_profile:
+                    narrative, conf = _format_motivations_narrative(motivations_profile)
+                    await _persist_inference_narrative(
+                        mini_id=mini_id,
+                        aspect="motivations_drivers",
+                        narrative=narrative,
+                        confidence=conf,
+                        session_factory=session_factory,
+                    )
+            except Exception:
+                logger.warning(
+                    "motivations inference failed for mini_id=%s — continuing",
+                    mini_id,
+                    exc_info=True,
+                )
+
         # ── Use DB-driven synthesizer when mini_id is available ──────────
         if mini_id is not None:
             # DB path: run_chief_synthesizer reads directly from ExplorerFinding /
-            # ExplorerQuote tables populated by the explorer agents above.
+            # ExplorerQuote tables populated by the explorer agents above,
+            # plus the pre-chief inference narratives inserted above.
             async with session_factory() as synth_session:
                 spirit_content = await run_chief_synthesizer(
                     mini_id=mini_id,
@@ -1409,85 +1630,6 @@ async def run_pipeline(
                 bio = profile.get("bio") or bio
                 avatar_url = profile.get("avatar_url") or avatar_url
                 break
-
-        # ── Personality typology inference (ALLIE-430) ───────────────────
-        # Run after chief synthesis so all explorer findings/quotes are in DB.
-        # Never blocks the pipeline — logged + skipped on failure.
-        personality_typology = None
-        if mini_id is not None:
-            try:
-                from app.synthesis.personality import infer_personality_typology
-
-                async with session_factory() as typology_session:
-                    personality_typology = await infer_personality_typology(
-                        mini_id=mini_id,
-                        db_session=typology_session,
-                        username=username,
-                    )
-                logger.info(
-                    "personality_typology inferred for mini_id=%s: %d frameworks",
-                    mini_id,
-                    len(personality_typology.frameworks) if personality_typology else 0,
-                )
-            except Exception:
-                logger.warning(
-                    "personality_typology inference failed for mini_id=%s — continuing",
-                    mini_id,
-                    exc_info=True,
-                )
-
-        # ── Behavioral context inference (ALLIE-431) ────────────────────
-        # Run after the soul doc is assembled.  Failure is non-blocking —
-        # pipeline continues and behavioral_context_json stays None.
-        behavioral_ctx = None
-        if mini_id is not None:
-            try:
-                from app.synthesis.behavioral_context import infer_behavioral_context
-
-                async with session_factory() as bctx_session:
-                    behavioral_ctx = await infer_behavioral_context(
-                        mini_id=mini_id,
-                        db_session=bctx_session,
-                        username=username,
-                    )
-                logger.info(
-                    "behavioral_context inferred for mini_id=%s (%d contexts)",
-                    mini_id,
-                    len(behavioral_ctx.contexts) if behavioral_ctx else 0,
-                )
-            except Exception:
-                logger.warning(
-                    "behavioral_context inference failed for mini_id=%s — continuing",
-                    mini_id,
-                    exc_info=True,
-                )
-
-        # ── Motivations inference (ALLIE-429) ───────────────────────────
-        # Run after behavioral context.  Failure is non-blocking —
-        # pipeline continues and motivations_json stays None.
-        motivations_profile = None
-        if mini_id is not None:
-            try:
-                from app.synthesis.motivations import infer_motivations
-
-                async with session_factory() as motiv_session:
-                    motivations_profile = await infer_motivations(
-                        mini_id=mini_id,
-                        db_session=motiv_session,
-                        username=username,
-                    )
-                logger.info(
-                    "motivations inferred for mini_id=%s: %d motivations, %d chains",
-                    mini_id,
-                    len(motivations_profile.motivations) if motivations_profile else 0,
-                    len(motivations_profile.motivation_chains) if motivations_profile else 0,
-                )
-            except Exception:
-                logger.warning(
-                    "motivations inference failed for mini_id=%s — continuing",
-                    mini_id,
-                    exc_info=True,
-                )
 
         await emit(
             PipelineEvent(
