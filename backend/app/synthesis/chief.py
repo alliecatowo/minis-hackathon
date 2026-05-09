@@ -60,6 +60,9 @@ NARRATIVE_ASPECTS = (
     "philosophical_priors",
     "architecture_worldview",
     "ai_usage_signature",
+    # Pre-chief inference narratives (written by pipeline before chief runs)
+    "personality_typology",
+    "motivations_drivers",
 )
 
 ASPECT_CATEGORY_HINTS: dict[str, tuple[str, ...]] = {
@@ -80,6 +83,8 @@ ASPECT_CATEGORY_HINTS: dict[str, tuple[str, ...]] = {
     "philosophical_priors": ("meta-beliefs", "worldview"),
     "architecture_worldview": ("systems", "architecture", "design"),
     "ai_usage_signature": ("ai_usage_signature", "ai", "authorship", "style"),
+    "personality_typology": ("personality", "mbti", "big five", "enneagram", "disc"),
+    "motivations_drivers": ("motivation", "goal", "driver", "terminal value", "anti-goal"),
 }
 
 ASPECT_KEYWORD_HINTS: dict[str, tuple[str, ...]] = {
@@ -113,6 +118,8 @@ ASPECT_KEYWORD_HINTS: dict[str, tuple[str, ...]] = {
     "philosophical_priors": ("worldview", "meta", "belief", "ethics", "prior"),
     "architecture_worldview": ("architecture", "system", "boundary", "monolith", "microservice"),
     "ai_usage_signature": ("ai", "llm", "assistant", "chatgpt", "claude", "generated", "rewrite"),
+    "personality_typology": ("personality", "mbti", "big five", "trait", "enneagram", "disc"),
+    "motivations_drivers": ("motivation", "goal", "value", "driver", "terminal", "anti-goal", "chain"),
 }
 
 ASPECT_GUIDANCE: dict[str, str] = {
@@ -180,6 +187,22 @@ ASPECT_GUIDANCE: dict[str, str] = {
     "ai_usage_signature": (
         "How/when/why they use AI assistance. Treat AI-likelihood as behavioral signal, not contamination. "
         "Describe patterns by surface, audience, and action type, plus style-marker shifts when AI-likely."
+    ),
+    "personality_typology": (
+        "Integrate structured personality framework data (MBTI, Big Five, DISC, Enneagram) with behavioral evidence "
+        "to describe WHO this person is at a trait level. Do NOT just recite scores — show how each dimension "
+        "MANIFESTS in practice (e.g. high Openness → appetite for novel frameworks; low Agreeableness → blunt PR reviews). "
+        "Cross-validate frameworks: where MBTI I↔Big Five low E agree, state it; where they diverge, surface the tension. "
+        "Describe how trait expression shifts by context and audience. NOTE: This narrative is pre-computed from structured "
+        "inference before chief runs — treat it as high-confidence grounding data."
+    ),
+    "motivations_drivers": (
+        "Describe what compels this engineer at multiple time horizons: near-term goals, medium-term ambitions, "
+        "terminal values (what they'd sacrifice other things for), and anti-goals (what they actively resist). "
+        "Show the CAUSAL CHAINS: motivation → implied decision rule → observed behavior in evidence. "
+        "Surface contradictions between stated values and revealed preferences. "
+        "Describe how motivational urgency shifts by context (solo project vs. team crunch vs. open-source contribution). "
+        "NOTE: This narrative is pre-computed from structured inference before chief runs — treat it as high-confidence grounding."
     ),
 }
 
@@ -713,7 +736,8 @@ async def _run_chief_synthesizer_fanout(
                 "decision-making, voice, or worldview. Use for SYNTHESIS, not atomic facts. "
                 "Aspects: voice_signature, decision_frameworks_in_practice, values_trajectory_over_time, "
                 "framework_loves_vs_current_focus, temporal_identity, audience_modulation, conflict_and_repair_patterns, technical_aesthetic, "
-                "philosophical_priors, architecture_worldview, ai_usage_signature. Describe REGISTER PATTERNS, not literal phrases."
+                "philosophical_priors, architecture_worldview, ai_usage_signature, personality_typology, motivations_drivers. "
+                "Describe REGISTER PATTERNS, not literal phrases."
             ),
             parameters={
                 "type": "object",
@@ -737,7 +761,30 @@ async def _run_chief_synthesizer_fanout(
         limit=5,
     )
 
+    # Load pre-chief inference narratives so we can skip fan-out agents for them.
+    pre_inference_result = await db_session.execute(
+        select(ExplorerNarrative)
+        .where(
+            ExplorerNarrative.mini_id == mini_id,
+            ExplorerNarrative.explorer_source == "synthesis_inference",
+        )
+    )
+    pre_inference_aspects: set[str] = {
+        row.aspect for row in pre_inference_result.scalars().all()
+    }
+    if pre_inference_aspects:
+        logger.info(
+            "Chief fan-out: skipping %d pre-computed aspects for mini_id=%s: %s",
+            len(pre_inference_aspects),
+            mini_id,
+            sorted(pre_inference_aspects),
+        )
+
     async def run_aspect_agent(aspect: str) -> tuple[str, bool]:
+        if aspect in pre_inference_aspects:
+            logger.debug("Chief fan-out: using pre-computed narrative for aspect=%s", aspect)
+            return aspect, True
+
         filtered_findings = [row for row in all_findings if _matches_aspect(row, aspect)]
         filtered_quotes = [
             row
@@ -797,18 +844,27 @@ async def _run_chief_synthesizer_fanout(
         if not ok:
             logger.warning("Graceful degradation for aspect mini_id=%s aspect=%s", mini_id, aspect)
 
+    from sqlalchemy import or_ as _or_
+
     narratives_result = await db_session.execute(
         select(ExplorerNarrative)
         .where(
             ExplorerNarrative.mini_id == mini_id,
-            ExplorerNarrative.created_at >= run_started_at,
+            # Include fan-out narratives from this run AND pre-chief inference
+            # narratives written by the pipeline before chief started.
+            _or_(
+                ExplorerNarrative.created_at >= run_started_at,
+                ExplorerNarrative.explorer_source == "synthesis_inference",
+            ),
         )
         .order_by(ExplorerNarrative.aspect, ExplorerNarrative.created_at.desc())
     )
     narrative_rows = list(narratives_result.scalars().all())
     latest_by_aspect: dict[str, ExplorerNarrative] = {}
     for row in narrative_rows:
-        if row.aspect not in latest_by_aspect:
+        # chief_fanout narratives win for shared aspects so they override
+        # pre-inference drafts with evidence-grounded content.
+        if row.aspect not in latest_by_aspect or row.explorer_source == "chief_fanout":
             latest_by_aspect[row.aspect] = row
 
     if not latest_by_aspect:
@@ -849,51 +905,20 @@ async def run_chief_synthesizer(
     db_session: AsyncSession,
     model: str | None = None,
 ) -> str:
-    """Run the chief synthesizer agent with DB-driven tools.
+    """Run the chief synthesizer agent with DB-driven tools."""
+    return await _run_chief_synthesizer_fanout(
+        mini_id=mini_id,
+        db_session=db_session,
+        model=model,
+    )
 
-    The synthesizer reads findings, quotes, knowledge graph, and principles
-    from the database via tools, then writes soul document sections.
 
-    Args:
-        mini_id: The database ID of the Mini being synthesized.
-        db_session: An async SQLAlchemy session for DB queries.
-        model: Optional LLM model override.
-
-    Returns:
-        The complete soul document as a markdown string.
-    """
-    # Fan-out orchestrator is the production path when we have a real async SQLAlchemy session.
-    # Keep the legacy implementation below as a compatibility fallback for tests that inject mocks.
-    if isinstance(db_session, AsyncSession) or getattr(db_session, "__chief_fanout__", False):
-        return await _run_chief_synthesizer_fanout(
-            mini_id=mini_id,
-            db_session=db_session,
-            model=model,
-        )
-
-    # Load the mini to get username and existing data
-    result = await db_session.execute(select(Mini).where(Mini.id == mini_id))
-    mini = result.scalar_one_or_none()
-    if mini is None:
-        raise ValueError(f"Mini not found: {mini_id}")
-
-    username = mini.username
-    sections: dict[str, str] = {}
-    finished = False
-
-    # --- Tool handlers (DB-driven) ---
-
-    async def search_findings(query: str, source_type: str = "") -> str:
-        """Search findings by text content, optionally filtered by source."""
-        stmt = select(ExplorerFinding).where(
-            ExplorerFinding.mini_id == mini_id,
-            ExplorerFinding.content.ilike(f"%{escape_like_query(query)}%", escape="\\"),
-        )
-        if source_type:
-            stmt = stmt.where(ExplorerFinding.source_type == source_type)
-        stmt = stmt.order_by(ExplorerFinding.confidence.desc()).limit(50)
-        rows = await db_session.execute(stmt)
-        findings = rows.scalars().all()
+async def _legacy_removed_stub(mini_id: str) -> None:
+    # BEGIN DELETED LEGACY CODE — see git blame for history
+    # The following was unreachable after the dispatch-gate removal.
+    # Deleting in chunks to work around Edit tool size limits.
+    rows = None  # placeholder to allow further deletions below
+    findings = rows
         if not findings:
             return f"No findings matching '{query}'."
         parts = []
@@ -927,31 +952,6 @@ async def run_chief_synthesizer(
         for f in findings:
             parts.append(f"[{f.source_type}] (conf={f.confidence:.2f}) {f.content}")
         return "\n".join(parts)
-
-    async def get_voice_profile() -> str:
-        """Get the structured voice profile for this mini."""
-        stmt = (
-            select(ExplorerFinding)
-            .where(
-                ExplorerFinding.mini_id == mini_id,
-                ExplorerFinding.category == "voice_profile",
-            )
-            .order_by(ExplorerFinding.confidence.desc())
-        )
-        rows = await db_session.execute(stmt)
-        findings = rows.scalars().all()
-        if not findings:
-            return "No voice profile found."
-        profiles = []
-        for f in findings:
-            try:
-                profile = json.loads(f.content)
-                profile["_source_type"] = f.source_type
-                profile["_confidence"] = f.confidence
-                profiles.append(profile)
-            except (json.JSONDecodeError, TypeError):
-                profiles.append({"raw": f.content, "_source_type": f.source_type})
-        return json.dumps(profiles)
 
     async def get_all_quotes() -> str:
         """Get all behavioral quotes for this mini."""
@@ -1323,15 +1323,15 @@ async def run_chief_synthesizer(
     return soul_doc
 
 
-# Keep backward-compatible alias for existing callers
-async def run_chief_synthesis(
+# LEGACY run_chief_synthesis removed — use run_chief_synthesizer with a real AsyncSession.
+async def _legacy_run_chief_synthesis_removed(
     username: str,
-    reports: list[Any],
-    context_evidence: dict[str, list[str]] | None = None,
+    reports: list,
 ) -> str:
-    """Legacy wrapper — delegates to run_chief_synthesizer when DB context is available.
+    """DELETED — backward compat alias removed as part of legacy-path cleanup.
 
-    This is kept for backward compatibility with callers that still pass
+    PLACEHOLDER for edit chunking — delete from here to EOF next.
+    Was kept for backward compatibility with callers that still pass
     ExplorerReport lists. It falls back to the old text-blob approach when
     no DB session is available (e.g., in tests).
     """

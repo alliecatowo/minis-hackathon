@@ -101,20 +101,6 @@ _SIGNAL_MODE_ENUM = [
     "approvals_only",
 ]
 
-_FORMALITY_OPTIONS = ["casual", "mixed", "formal"]
-_HUMOR_TYPE_OPTIONS = ["dry_sarcastic", "self_deprecating", "witty", "slapping", "none"]
-_FRUSTRATION_STYLE_OPTIONS = [
-    "terse_silent",
-    "verbose_rant",
-    "sarcastic_deflection",
-    "direct_confrontation",
-]
-_DISAGREEMENT_STYLE_OPTIONS = [
-    "diplomatic",
-    "direct_blunt",
-    "avoidant_then_explode",
-    "evidence_based_argument",
-]
 _REGISTER_LEVEL_OPTIONS = [
     "casual_unfiltered",
     "casual_filtered",
@@ -703,76 +689,6 @@ def build_explorer_tools(
         await _increment_progress("memories_count")
         return json.dumps({"saved": True, "category": category})
 
-    # ── save_voice_profile ─────────────────────────────────────────────────
-
-    async def save_voice_profile(
-        terseness: float = 0.5,
-        formality: str = "mixed",
-        humor_type: str = "none",
-        sentence_length_median: int = 10,
-        profanity_tolerance: float = 0.0,
-        emotional_expressiveness: float = 0.5,
-        exclamation_frequency: float = 0.1,
-        signature_phrases: list[str] | None = None,
-        banned_words: list[str] | None = None,
-        frustration_style: str = "terse_silent",
-        disagreement_style: str = "diplomatic",
-        context_shifts: dict | None = None,
-    ) -> str:
-        errors = []
-        if not 0 <= terseness <= 1:
-            errors.append("terseness must be 0-1")
-        if formality not in _FORMALITY_OPTIONS:
-            errors.append(f"formality must be one of {_FORMALITY_OPTIONS}")
-        if humor_type not in _HUMOR_TYPE_OPTIONS:
-            errors.append(f"humor_type must be one of {_HUMOR_TYPE_OPTIONS}")
-        if not 0 <= profanity_tolerance <= 1:
-            errors.append("profanity_tolerance must be 0-1")
-        if not 0 <= emotional_expressiveness <= 1:
-            errors.append("emotional_expressiveness must be 0-1")
-        if not 0 <= exclamation_frequency <= 1:
-            errors.append("exclamation_frequency must be 0-1")
-        if frustration_style not in _FRUSTRATION_STYLE_OPTIONS:
-            errors.append(f"frustration_style must be one of {_FRUSTRATION_STYLE_OPTIONS}")
-        if disagreement_style not in _DISAGREEMENT_STYLE_OPTIONS:
-            errors.append(f"disagreement_style must be one of {_DISAGREEMENT_STYLE_OPTIONS}")
-        if errors:
-            return json.dumps({"error": "; ".join(errors)})
-
-        phrases = (signature_phrases or [])[:10]
-        banned = (banned_words or [])[:10]
-
-        profile_data = {
-            "terseness": terseness,
-            "formality": formality,
-            "humor_type": humor_type,
-            "sentence_length_median": sentence_length_median,
-            "profanity_tolerance": profanity_tolerance,
-            "emotional_expressiveness": emotional_expressiveness,
-            "exclamation_frequency": exclamation_frequency,
-            "signature_phrases": phrases,
-            "banned_words": banned,
-            "frustration_style": frustration_style,
-            "disagreement_style": disagreement_style,
-            "context_shifts": context_shifts or {},
-        }
-        finding = ExplorerFinding(
-            mini_id=mini_id,
-            source_type=source_type,
-            category="voice_profile",
-            content=json.dumps(profile_data),
-            confidence=0.8,
-        )
-        if session_factory is not None:
-            async with session_factory() as write_session:
-                write_session.add(finding)
-                await write_session.commit()
-        else:
-            db_session.add(finding)
-            await db_session.commit()
-
-        return json.dumps({"saved": True, "category": "voice_profile", "id": finding.id})
-
     # ── save_quote ─────────────────────────────────────────────────────────
 
     async def save_quote(
@@ -1238,72 +1154,6 @@ def build_explorer_tools(
                 "required": ["category", "content"],
             },
             handler=save_memory,
-        ),
-        AgentTool(
-            name="save_voice_profile",
-            description="Save a structured voice/personality profile with quantitative dimensions (terseness, formality, humor type, etc.).",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "terseness": {
-                        "type": "number",
-                        "description": "0=very verbose, 1=one-word answers (default 0.5)",
-                    },
-                    "formality": {
-                        "type": "string",
-                        "enum": _FORMALITY_OPTIONS,
-                        "description": "Communication formality level (default mixed)",
-                    },
-                    "humor_type": {
-                        "type": "string",
-                        "enum": _HUMOR_TYPE_OPTIONS,
-                        "description": "Dominant humor style (default none)",
-                    },
-                    "sentence_length_median": {
-                        "type": "integer",
-                        "description": "Approximate words in typical message (default 10)",
-                    },
-                    "profanity_tolerance": {
-                        "type": "number",
-                        "description": "0=never, 1=frequent profanity (default 0.0)",
-                    },
-                    "emotional_expressiveness": {
-                        "type": "number",
-                        "description": "0=stoic, 1=highly expressive (default 0.5)",
-                    },
-                    "exclamation_frequency": {
-                        "type": "number",
-                        "description": "0=never, 1=exclamation-heavy (default 0.1)",
-                    },
-                    "signature_phrases": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Phrases this person uses repeatedly (max 10)",
-                    },
-                    "banned_words": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Words this person NEVER uses, only from positive evidence (max 10)",
-                    },
-                    "frustration_style": {
-                        "type": "string",
-                        "enum": _FRUSTRATION_STYLE_OPTIONS,
-                        "description": "How they express frustration (default terse_silent)",
-                    },
-                    "disagreement_style": {
-                        "type": "string",
-                        "enum": _DISAGREEMENT_STYLE_OPTIONS,
-                        "description": "How they disagree with others (default diplomatic)",
-                    },
-                    "context_shifts": {
-                        "type": "object",
-                        "description": "Mapping of context (code_review, casual_chat, under_pressure, mentoring) to tone description",
-                        "additionalProperties": {"type": "string"},
-                    },
-                },
-                "required": [],
-            },
-            handler=save_voice_profile,
         ),
         AgentTool(
             name="save_narrative",
