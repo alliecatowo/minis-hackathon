@@ -60,6 +60,9 @@ NARRATIVE_ASPECTS = (
     "philosophical_priors",
     "architecture_worldview",
     "ai_usage_signature",
+    # Pre-chief inference narratives (written by pipeline before chief runs)
+    "personality_typology",
+    "motivations_drivers",
 )
 
 ASPECT_CATEGORY_HINTS: dict[str, tuple[str, ...]] = {
@@ -80,6 +83,8 @@ ASPECT_CATEGORY_HINTS: dict[str, tuple[str, ...]] = {
     "philosophical_priors": ("meta-beliefs", "worldview"),
     "architecture_worldview": ("systems", "architecture", "design"),
     "ai_usage_signature": ("ai_usage_signature", "ai", "authorship", "style"),
+    "personality_typology": ("personality", "mbti", "big five", "enneagram", "disc"),
+    "motivations_drivers": ("motivation", "goal", "driver", "terminal value", "anti-goal"),
 }
 
 ASPECT_KEYWORD_HINTS: dict[str, tuple[str, ...]] = {
@@ -113,6 +118,8 @@ ASPECT_KEYWORD_HINTS: dict[str, tuple[str, ...]] = {
     "philosophical_priors": ("worldview", "meta", "belief", "ethics", "prior"),
     "architecture_worldview": ("architecture", "system", "boundary", "monolith", "microservice"),
     "ai_usage_signature": ("ai", "llm", "assistant", "chatgpt", "claude", "generated", "rewrite"),
+    "personality_typology": ("personality", "mbti", "big five", "trait", "enneagram", "disc"),
+    "motivations_drivers": ("motivation", "goal", "value", "driver", "terminal", "anti-goal", "chain"),
 }
 
 ASPECT_GUIDANCE: dict[str, str] = {
@@ -180,6 +187,22 @@ ASPECT_GUIDANCE: dict[str, str] = {
     "ai_usage_signature": (
         "How/when/why they use AI assistance. Treat AI-likelihood as behavioral signal, not contamination. "
         "Describe patterns by surface, audience, and action type, plus style-marker shifts when AI-likely."
+    ),
+    "personality_typology": (
+        "Integrate structured personality framework data (MBTI, Big Five, DISC, Enneagram) with behavioral evidence "
+        "to describe WHO this person is at a trait level. Do NOT just recite scores — show how each dimension "
+        "MANIFESTS in practice (e.g. high Openness \u2192 appetite for novel frameworks; low Agreeableness \u2192 blunt PR reviews). "
+        "Cross-validate frameworks: where MBTI I\u2194Big Five low E agree, state it; where they diverge, surface the tension. "
+        "Describe how trait expression shifts by context and audience. NOTE: This narrative is pre-computed from structured "
+        "inference before chief runs \u2014 treat it as high-confidence grounding data."
+    ),
+    "motivations_drivers": (
+        "Describe what compels this engineer at multiple time horizons: near-term goals, medium-term ambitions, "
+        "terminal values (what they'd sacrifice other things for), and anti-goals (what they actively resist). "
+        "Show the CAUSAL CHAINS: motivation \u2192 implied decision rule \u2192 observed behavior in evidence. "
+        "Surface contradictions between stated values and revealed preferences. "
+        "Describe how motivational urgency shifts by context (solo project vs. team crunch vs. open-source contribution). "
+        "NOTE: This narrative is pre-computed from structured inference before chief runs \u2014 treat it as high-confidence grounding."
     ),
 }
 
@@ -713,7 +736,8 @@ async def _run_chief_synthesizer_fanout(
                 "decision-making, voice, or worldview. Use for SYNTHESIS, not atomic facts. "
                 "Aspects: voice_signature, decision_frameworks_in_practice, values_trajectory_over_time, "
                 "framework_loves_vs_current_focus, temporal_identity, audience_modulation, conflict_and_repair_patterns, technical_aesthetic, "
-                "philosophical_priors, architecture_worldview, ai_usage_signature. Describe REGISTER PATTERNS, not literal phrases."
+                "philosophical_priors, architecture_worldview, ai_usage_signature, personality_typology, motivations_drivers. "
+                "Describe REGISTER PATTERNS, not literal phrases."
             ),
             parameters={
                 "type": "object",
@@ -737,7 +761,30 @@ async def _run_chief_synthesizer_fanout(
         limit=5,
     )
 
+    # Load pre-chief inference narratives so we can skip fan-out agents for them.
+    pre_inference_result = await db_session.execute(
+        select(ExplorerNarrative)
+        .where(
+            ExplorerNarrative.mini_id == mini_id,
+            ExplorerNarrative.explorer_source == "synthesis_inference",
+        )
+    )
+    pre_inference_aspects: set[str] = {
+        row.aspect for row in pre_inference_result.scalars().all()
+    }
+    if pre_inference_aspects:
+        logger.info(
+            "Chief fan-out: skipping %d pre-computed aspects for mini_id=%s: %s",
+            len(pre_inference_aspects),
+            mini_id,
+            sorted(pre_inference_aspects),
+        )
+
     async def run_aspect_agent(aspect: str) -> tuple[str, bool]:
+        if aspect in pre_inference_aspects:
+            logger.debug("Chief fan-out: using pre-computed narrative for aspect=%s", aspect)
+            return aspect, True
+
         filtered_findings = [row for row in all_findings if _matches_aspect(row, aspect)]
         filtered_quotes = [
             row
@@ -797,18 +844,27 @@ async def _run_chief_synthesizer_fanout(
         if not ok:
             logger.warning("Graceful degradation for aspect mini_id=%s aspect=%s", mini_id, aspect)
 
+    from sqlalchemy import or_ as _or_
+
     narratives_result = await db_session.execute(
         select(ExplorerNarrative)
         .where(
             ExplorerNarrative.mini_id == mini_id,
-            ExplorerNarrative.created_at >= run_started_at,
+            # Include fan-out narratives from this run AND pre-chief inference
+            # narratives written by the pipeline before chief started.
+            _or_(
+                ExplorerNarrative.created_at >= run_started_at,
+                ExplorerNarrative.explorer_source == "synthesis_inference",
+            ),
         )
         .order_by(ExplorerNarrative.aspect, ExplorerNarrative.created_at.desc())
     )
     narrative_rows = list(narratives_result.scalars().all())
     latest_by_aspect: dict[str, ExplorerNarrative] = {}
     for row in narrative_rows:
-        if row.aspect not in latest_by_aspect:
+        # chief_fanout narratives win for shared aspects so they override
+        # pre-inference drafts with evidence-grounded content.
+        if row.aspect not in latest_by_aspect or row.explorer_source == "chief_fanout":
             latest_by_aspect[row.aspect] = row
 
     if not latest_by_aspect:
