@@ -46,6 +46,7 @@ def _make_mini(
     status: str = "ready",
     visibility: str = "public",
     system_prompt: str | None = "You are testdev.",
+    soul_prompt: str | None = None,
     memory_content: str | None = None,
     evidence_cache: str | None = None,
     knowledge_graph_json: dict | None = None,
@@ -60,6 +61,7 @@ def _make_mini(
     mini.status = status
     mini.visibility = visibility
     mini.system_prompt = system_prompt
+    mini.soul_prompt = soul_prompt
     mini.memory_content = memory_content
     mini.evidence_cache = evidence_cache
     mini.knowledge_graph_json = knowledge_graph_json

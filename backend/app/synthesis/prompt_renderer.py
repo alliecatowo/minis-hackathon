@@ -11,6 +11,7 @@ class PromptMiniLike(Protocol):
     """Minimal mini shape needed for runtime prompt rendering."""
 
     system_prompt: str | None
+    soul_prompt: str | None
     spirit_content: str | None
     memory_content: str | None
 
@@ -275,8 +276,21 @@ def render_runtime_system_prompt(
     *,
     system_prompt_prefix: str | None = None,
 ) -> str:
-    """Canonical runtime prompt renderer for chat/team/review surfaces."""
-    original_base_prompt = _as_text(getattr(mini, "system_prompt", ""))
+    """Canonical runtime prompt renderer for chat/team/review surfaces.
+
+    Prefers the new universal+soul split: ``UNIVERSAL_MINI_PROMPT`` constant
+    + per-mini ``soul_prompt``. Falls back to the legacy assembled
+    ``system_prompt`` blob for minis written before the split landed.
+    """
+    from app.synthesis.universal_prompt import UNIVERSAL_MINI_PROMPT
+
+    soul_prompt = _as_text(getattr(mini, "soul_prompt", "")).strip()
+    legacy_system_prompt = _as_text(getattr(mini, "system_prompt", ""))
+
+    if soul_prompt:
+        original_base_prompt = UNIVERSAL_MINI_PROMPT + soul_prompt
+    else:
+        original_base_prompt = legacy_system_prompt
     rendered = original_base_prompt
 
     if preset.strip_voice_samples:

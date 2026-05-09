@@ -89,6 +89,7 @@ def _make_mini(
             "status",
             "visibility",
             "system_prompt",
+            "soul_prompt",
             "spirit_content",
             "memory_content",
             "knowledge_graph_json",
@@ -114,6 +115,7 @@ def _make_mini(
     mini.status = status
     mini.visibility = visibility
     mini.system_prompt = system_prompt
+    mini.soul_prompt = None
     mini.spirit_content = spirit_content
     mini.memory_content = memory_content
     mini.knowledge_graph_json = knowledge_graph_json

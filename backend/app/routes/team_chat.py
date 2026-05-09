@@ -82,7 +82,9 @@ async def team_chat(
         raise HTTPException(status_code=400, detail="Team has no members")
 
     # Filter to ready minis with system prompts
-    ready_minis = [m for m in minis if m.status == "ready" and m.system_prompt]
+    ready_minis = [
+        m for m in minis if m.status == "ready" and (m.soul_prompt or m.system_prompt)
+    ]
     if not ready_minis:
         raise HTTPException(status_code=409, detail="No team members are ready")
 

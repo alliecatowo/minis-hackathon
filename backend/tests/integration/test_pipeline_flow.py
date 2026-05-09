@@ -324,7 +324,11 @@ class TestPipelineDryRun:
                 AsyncMock(return_value=[]),
             ),
             patch(
-                "app.synthesis.pipeline.build_system_prompt",
+                "app.synthesis.pipeline.build_soul_prompt",
+                return_value=system_prompt_text,
+            ),
+            patch(
+                "app.synthesis.pipeline.build_full_system_prompt",
                 return_value=system_prompt_text,
             ),
             patch(
@@ -715,7 +719,13 @@ class TestPipelineDryRun:
             )
             stack.enter_context(
                 patch(
-                    "app.synthesis.pipeline.build_system_prompt",
+                    "app.synthesis.pipeline.build_soul_prompt",
+                    return_value="System prompt",
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "app.synthesis.pipeline.build_full_system_prompt",
                     return_value="System prompt",
                 )
             )

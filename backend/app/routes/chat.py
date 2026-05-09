@@ -1263,7 +1263,7 @@ async def chat_with_mini(
 
     if mini.status != "ready":
         raise HTTPException(status_code=409, detail=f"Mini is not ready (status: {mini.status})")
-    if not mini.system_prompt and not mini.spirit_content:
+    if not mini.soul_prompt and not mini.system_prompt and not mini.spirit_content:
         raise HTTPException(status_code=500, detail="Mini has no system prompt")
 
     # ── Per-IP + per-mini sliding window throttle (ALLIE-405) ────────────────

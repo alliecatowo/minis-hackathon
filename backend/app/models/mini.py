@@ -71,6 +71,11 @@ class Mini(Base):
     behavioral_context_json: Mapped[dict | None] = mapped_column(JSON)
     motivations_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     system_prompt: Mapped[str | None] = mapped_column(Text)
+    # Per-mini SOUL prompt (identity, narratives, decision frameworks, etc).
+    # Composed at chat time with UNIVERSAL_MINI_PROMPT to form the full
+    # runtime system prompt. ``system_prompt`` above is kept as a legacy
+    # bridge containing the assembled universal+soul blob.
+    soul_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     values_json: Mapped[dict | None] = mapped_column(JSON)
     roles_json: Mapped[dict | None] = mapped_column(JSON)
     skills_json: Mapped[dict | None] = mapped_column(JSON)

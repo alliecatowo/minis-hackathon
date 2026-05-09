@@ -30,18 +30,10 @@ from app.plugins.registry import registry
 from app.synthesis.ai_signals import score_ai_authorship
 from app.synthesis.explorers import get_explorer
 from app.synthesis.explorers.base import ExplorerReport
-from app.synthesis.spirit import build_system_prompt
+from app.synthesis.spirit import build_soul_prompt
+from app.synthesis.universal_prompt import build_full_system_prompt
 
-# Chief synthesizer — DB-driven version is preferred; legacy fallback for tests
-try:
-    from app.synthesis.chief import run_chief_synthesizer, run_chief_synthesis
-except ImportError:  # pragma: no cover
-
-    async def run_chief_synthesizer(mini_id, db_session, **kwargs):  # type: ignore[misc]
-        raise NotImplementedError("Chief synthesizer not available")
-
-    async def run_chief_synthesis(username, reports, **kwargs):  # type: ignore[misc]
-        raise NotImplementedError("Chief synthesizer not available")
+from app.synthesis.chief import run_chief_synthesizer, run_chief_synthesis
 
 
 # Import explorer modules to trigger registration
@@ -531,6 +523,124 @@ async def _build_usable_evidence_text(
             .all()
         )
     return "\n\n---\n\n".join(content for content in rows if content)
+
+
+def _format_personality_typology_narrative(typology: Any) -> tuple[str, float]:
+    """Format PersonalityTypology as a narrative essay for ExplorerNarrative."""
+    lines: list[str] = []
+    lines.append("# Personality Typology Narrative\n")
+    if typology.summary:
+        lines.append(typology.summary + "\n")
+    for fw in typology.frameworks or []:
+        lines.append(f"## {fw.framework}: {fw.profile}")
+        if fw.summary:
+            lines.append(fw.summary)
+        for dim in fw.dimensions or []:
+            label = getattr(dim, "label", None) or getattr(dim, "dimension", "")
+            score = getattr(dim, "score", None)
+            reasoning = getattr(dim, "reasoning", None) or getattr(dim, "description", "")
+            score_str = f" (score={score:.2f})" if score is not None else ""
+            lines.append(f"- **{label}**{score_str}: {reasoning}")
+        lines.append("")
+    confidence = max(
+        (fw.confidence for fw in (typology.frameworks or []) if fw.confidence is not None),
+        default=0.6,
+    )
+    return "\n".join(lines), min(confidence, 1.0)
+
+
+def _format_behavioral_context_narrative(ctx: Any) -> tuple[str, float]:
+    """Format BehavioralContext as a narrative essay for ExplorerNarrative.
+
+    Behavioral context is merged into the audience_modulation aspect since it
+    describes situational behavior across audiences — the same conceptual scope.
+    """
+    lines: list[str] = []
+    lines.append("# Behavioral Context Narrative (Audience & Situational Modulation)\n")
+    if ctx.summary:
+        lines.append(ctx.summary + "\n")
+    for entry in ctx.contexts or []:
+        lines.append(f"## Context: {entry.context}")
+        lines.append(entry.summary)
+        if entry.communication_style:
+            lines.append(f"Register: {entry.communication_style}")
+        if entry.decision_style:
+            lines.append(f"Decision style: {entry.decision_style}")
+        if entry.behaviors:
+            lines.append("Behaviors: " + "; ".join(entry.behaviors))
+        if entry.motivators:
+            lines.append("Motivators: " + "; ".join(entry.motivators))
+        if entry.stressors:
+            lines.append("Stressors: " + "; ".join(entry.stressors))
+        lines.append("")
+    context_count = len(ctx.contexts or [])
+    confidence = 0.7 if context_count >= 3 else 0.5 if context_count >= 1 else 0.3
+    return "\n".join(lines), confidence
+
+
+def _format_motivations_narrative(motiv: Any) -> tuple[str, float]:
+    """Format MotivationsProfile as a narrative essay for ExplorerNarrative."""
+    lines: list[str] = []
+    lines.append("# Motivations & Drivers Narrative\n")
+    if motiv.summary:
+        lines.append(motiv.summary + "\n")
+    by_cat: dict[str, list[Any]] = {}
+    for m in motiv.motivations or []:
+        by_cat.setdefault(m.category, []).append(m)
+    category_labels = {
+        "short_term_goal": "Near-term Goals",
+        "medium_term_goal": "Medium-term Ambitions",
+        "terminal_value": "Terminal Values",
+        "anti_goal": "Anti-goals",
+    }
+    for cat, label in category_labels.items():
+        items = by_cat.get(cat, [])
+        if not items:
+            continue
+        lines.append(f"## {label}")
+        for m in items:
+            lines.append(f"- {m.value} (confidence={m.confidence:.2f})")
+        lines.append("")
+    if motiv.motivation_chains:
+        lines.append("## Motivation → Framework → Behavior Chains")
+        for chain in motiv.motivation_chains:
+            lines.append(
+                f"- {chain.motivation} → {chain.implied_framework} → {chain.observed_behavior}"
+            )
+        lines.append("")
+    motivation_count = len(motiv.motivations or [])
+    confidence = 0.75 if motivation_count >= 5 else 0.6 if motivation_count >= 2 else 0.4
+    return "\n".join(lines), confidence
+
+
+async def _persist_inference_narrative(
+    mini_id: str,
+    aspect: str,
+    narrative: str,
+    confidence: float,
+    session_factory: Any,
+) -> None:
+    """Insert an ExplorerNarrative row produced by a pre-chief inference pass."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    async with session_factory() as session:
+        stmt = (
+            pg_insert(ExplorerNarrative)
+            .values(
+                mini_id=mini_id,
+                aspect=aspect,
+                narrative=narrative,
+                confidence=confidence,
+                evidence_ids=[],
+                explorer_source="synthesis_inference",
+            )
+            .on_conflict_do_update(
+                index_elements=["mini_id", "aspect", "explorer_source"],
+                set_={"narrative": narrative, "confidence": confidence},
+            )
+        )
+        await session.execute(stmt)
+        await session.commit()
 
 
 async def _build_structured_from_db(
@@ -1336,84 +1446,14 @@ async def run_pipeline(
             )
         )
 
-        # ── Use DB-driven synthesizer when mini_id is available ──────────
-        if mini_id is not None:
-            # DB path: run_chief_synthesizer reads directly from ExplorerFinding /
-            # ExplorerQuote tables populated by the explorer agents above.
-            async with session_factory() as synth_session:
-                spirit_content = await run_chief_synthesizer(
-                    mini_id=mini_id,
-                    db_session=synth_session,
-                )
-
-            # Build memory content from DB findings (memory:* category)
-            from app.models.evidence import ExplorerFinding as _EF
-            from sqlalchemy import select as _select
-
-            memory_parts: list[str] = []
-            async with session_factory() as mem_session:
-                mem_stmt = _select(_EF).where(
-                    _EF.mini_id == mini_id,
-                    _EF.category.like("memory:%"),
-                )
-                mem_rows = await mem_session.execute(mem_stmt)
-                findings = list(mem_rows.scalars().all())
-
-                # Shuffle items with the same confidence to counteract recency bias
-                random.shuffle(findings)
-                findings.sort(key=lambda f: f.confidence, reverse=True)
-
-                for finding in findings:
-                    try:
-                        data = json.loads(finding.content)
-                        text = data.get("text", finding.content)
-                        ctx = data.get("context_type", finding.category)
-                        memory_parts.append(f"[{ctx}] {text}")
-                    except (json.JSONDecodeError, TypeError):
-                        memory_parts.append(finding.content)
-
-            # Also collect from in-memory report entries (fallback / supplemental)
-            for report in explorer_reports:
-                for entry in report.memory_entries:
-                    memory_parts.append(f"[{entry.category}/{entry.topic}] {entry.content}")
-
-            memory_content = "\n".join(memory_parts)
-
-        else:
-            # Legacy path (tests / no DB): pass explorer reports as text blobs
-            all_context_evidence: dict[str, list[str]] = {}
-            for report in explorer_reports:
-                for ctx_key, ctx_quotes in report.context_evidence.items():
-                    all_context_evidence.setdefault(ctx_key, []).extend(ctx_quotes)
-
-            spirit_content = await run_chief_synthesis(
-                username,
-                explorer_reports,
-                context_evidence=all_context_evidence if all_context_evidence else None,
-            )
-
-            memory_parts = []
-            for report in explorer_reports:
-                for entry in report.memory_entries:
-                    memory_parts.append(f"[{entry.category}/{entry.topic}] {entry.content}")
-            memory_content = "\n".join(memory_parts)
-
-        # Extract profile info from the first source that has it (prefer github)
-        display_name = username
-        bio = ""
-        avatar_url = ""
-        for r in results:
-            profile = r.raw_data.get("profile", {})
-            if profile:
-                display_name = profile.get("name") or display_name
-                bio = profile.get("bio") or bio
-                avatar_url = profile.get("avatar_url") or avatar_url
-                break
-
-        # ── Personality typology inference (ALLIE-430) ───────────────────
-        # Run after chief synthesis so all explorer findings/quotes are in DB.
-        # Never blocks the pipeline — logged + skipped on failure.
+        # ── Pre-chief behavioral inferences ─────────────────────────────
+        # Run BEFORE chief synthesis so their narratives land in ExplorerNarrative
+        # and chief's fan-out agents can read them alongside explorer-produced narratives.
+        # All three are non-blocking — logged + skipped on failure.
         personality_typology = None
+        behavioral_ctx = None
+        motivations_profile = None
+
         if mini_id is not None:
             try:
                 from app.synthesis.personality import infer_personality_typology
@@ -1429,6 +1469,15 @@ async def run_pipeline(
                     mini_id,
                     len(personality_typology.frameworks) if personality_typology else 0,
                 )
+                if personality_typology:
+                    narrative, conf = _format_personality_typology_narrative(personality_typology)
+                    await _persist_inference_narrative(
+                        mini_id=mini_id,
+                        aspect="personality_typology",
+                        narrative=narrative,
+                        confidence=conf,
+                        session_factory=session_factory,
+                    )
             except Exception:
                 logger.warning(
                     "personality_typology inference failed for mini_id=%s — continuing",
@@ -1436,11 +1485,6 @@ async def run_pipeline(
                     exc_info=True,
                 )
 
-        # ── Behavioral context inference (ALLIE-431) ────────────────────
-        # Run after the soul doc is assembled.  Failure is non-blocking —
-        # pipeline continues and behavioral_context_json stays None.
-        behavioral_ctx = None
-        if mini_id is not None:
             try:
                 from app.synthesis.behavioral_context import infer_behavioral_context
 
@@ -1455,6 +1499,17 @@ async def run_pipeline(
                     mini_id,
                     len(behavioral_ctx.contexts) if behavioral_ctx else 0,
                 )
+                if behavioral_ctx:
+                    # Merge behavioral context into audience_modulation aspect — same
+                    # conceptual scope (situational register shifts by audience/surface).
+                    narrative, conf = _format_behavioral_context_narrative(behavioral_ctx)
+                    await _persist_inference_narrative(
+                        mini_id=mini_id,
+                        aspect="audience_modulation",
+                        narrative=narrative,
+                        confidence=conf,
+                        session_factory=session_factory,
+                    )
             except Exception:
                 logger.warning(
                     "behavioral_context inference failed for mini_id=%s — continuing",
@@ -1462,11 +1517,6 @@ async def run_pipeline(
                     exc_info=True,
                 )
 
-        # ── Motivations inference (ALLIE-429) ───────────────────────────
-        # Run after behavioral context.  Failure is non-blocking —
-        # pipeline continues and motivations_json stays None.
-        motivations_profile = None
-        if mini_id is not None:
             try:
                 from app.synthesis.motivations import infer_motivations
 
@@ -1482,12 +1532,73 @@ async def run_pipeline(
                     len(motivations_profile.motivations) if motivations_profile else 0,
                     len(motivations_profile.motivation_chains) if motivations_profile else 0,
                 )
+                if motivations_profile:
+                    narrative, conf = _format_motivations_narrative(motivations_profile)
+                    await _persist_inference_narrative(
+                        mini_id=mini_id,
+                        aspect="motivations_drivers",
+                        narrative=narrative,
+                        confidence=conf,
+                        session_factory=session_factory,
+                    )
             except Exception:
                 logger.warning(
                     "motivations inference failed for mini_id=%s — continuing",
                     mini_id,
                     exc_info=True,
                 )
+
+        # ── Run DB-driven chief synthesizer ──────────────────────────────
+        async with session_factory() as synth_session:
+            spirit_content = await run_chief_synthesizer(
+                mini_id=mini_id,
+                db_session=synth_session,
+            )
+
+        # Build memory content from DB findings (memory:* category)
+        from app.models.evidence import ExplorerFinding as _EF
+        from sqlalchemy import select as _select
+
+        memory_parts: list[str] = []
+        async with session_factory() as mem_session:
+            mem_stmt = _select(_EF).where(
+                _EF.mini_id == mini_id,
+                _EF.category.like("memory:%"),
+            )
+            mem_rows = await mem_session.execute(mem_stmt)
+            findings = list(mem_rows.scalars().all())
+
+            # Shuffle items with the same confidence to counteract recency bias
+            random.shuffle(findings)
+            findings.sort(key=lambda f: f.confidence, reverse=True)
+
+            for finding in findings:
+                try:
+                    data = json.loads(finding.content)
+                    text = data.get("text", finding.content)
+                    ctx = data.get("context_type", finding.category)
+                    memory_parts.append(f"[{ctx}] {text}")
+                except (json.JSONDecodeError, TypeError):
+                    memory_parts.append(finding.content)
+
+        # Also collect from in-memory report entries (supplemental)
+        for report in explorer_reports:
+            for entry in report.memory_entries:
+                memory_parts.append(f"[{entry.category}/{entry.topic}] {entry.content}")
+
+        memory_content = "\n".join(memory_parts)
+
+        # Extract profile info from the first source that has it (prefer github)
+        display_name = username
+        bio = ""
+        avatar_url = ""
+        for r in results:
+            profile = r.raw_data.get("profile", {})
+            if profile:
+                display_name = profile.get("name") or display_name
+                bio = profile.get("bio") or bio
+                avatar_url = profile.get("avatar_url") or avatar_url
+                break
 
         await emit(
             PipelineEvent(
@@ -1547,33 +1658,11 @@ async def run_pipeline(
 
         principles_json = attach_decision_frameworks(principles_json, motivations_profile)
 
-        # Load latest voice profile if available (audit 09)
-        voice_profile_payload = None
-        try:
-            from app.models.evidence import ExplorerFinding
-
-            async with session_factory() as session:
-                result = await session.execute(
-                    select(ExplorerFinding.content)
-                    .where(
-                        ExplorerFinding.mini_id == mini_id,
-                        ExplorerFinding.category == "voice_profile",
-                    )
-                    .order_by(ExplorerFinding.created_at.desc())
-                    .limit(1)
-                )
-                row = result.scalar_one_or_none()
-                if row:
-                    import json as _json
-
-                    voice_profile_payload = _json.loads(row)
-        except Exception as e:
-            logger.warning("Failed to load voice_profile for system prompt assembly: %s", e)
-
-        # Build system prompt now that decision_frameworks are attached to
-        # principles_json — so every mini response is shaped by learned
-        # framework confidence from the start.
-        system_prompt = build_system_prompt(
+        # Build the per-mini SOUL prompt (universal scaffolding lives in
+        # ``UNIVERSAL_MINI_PROMPT`` and is composed at chat time). Decision
+        # frameworks are now attached to principles_json so framework
+        # confidence shapes the soul from the start.
+        soul_prompt = build_soul_prompt(
             username,
             spirit_content,
             memory_content,
@@ -1581,8 +1670,10 @@ async def run_pipeline(
             behavioral_context=behavioral_ctx,
             motivations=motivations_profile,
             principles_json=principles_json,
-            voice_profile=voice_profile_payload,
         )
+        # Legacy bridge: ``Mini.system_prompt`` keeps the assembled
+        # universal+soul blob so older readers still work during rollout.
+        system_prompt = build_full_system_prompt(soul_prompt)
 
         values_json = extract_values_json(reports_for_extraction)
         roles_json, skills_json, traits_json = await asyncio.gather(
@@ -1640,6 +1731,7 @@ async def run_pipeline(
                 # Mini fields together in this single transaction.
                 mini.spirit_content = spirit_content
                 mini.memory_content = memory_content
+                mini.soul_prompt = soul_prompt
                 mini.system_prompt = system_prompt
                 mini.values_json = (
                     json.loads(values_json) if isinstance(values_json, str) else values_json

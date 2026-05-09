@@ -348,7 +348,6 @@ EXPECTED_TOOL_NAMES = {
     "save_knowledge_node",
     "save_knowledge_edge",
     "save_principle",
-    "save_voice_profile",
     "save_narrative",
     "mark_explored",
     "get_progress",
@@ -357,7 +356,7 @@ EXPECTED_TOOL_NAMES = {
 
 
 class TestExplorerToolSuiteContract:
-    """build_explorer_tools() exposes the 14 documented tools with async handlers."""
+    """build_explorer_tools() exposes the 13 documented tools with async handlers."""
 
     @pytest.fixture
     def tools(self):
@@ -378,8 +377,8 @@ class TestExplorerToolSuiteContract:
             db_session=session,
         )
 
-    def test_returns_exactly_14_tools(self, tools):
-        assert len(tools) == 14, f"Expected 14 tools, got {len(tools)}: {[t.name for t in tools]}"
+    def test_returns_exactly_13_tools(self, tools):
+        assert len(tools) == 13, f"Expected 13 tools, got {len(tools)}: {[t.name for t in tools]}"
 
     def test_all_expected_names_present(self, tools):
         names = {t.name for t in tools}
@@ -423,7 +422,7 @@ class TestExplorerToolSuiteContract:
                 pytest.fail(f"Tool '{tool.name}' parameters not JSON-serializable: {exc}")
 
     def test_write_tools_exist_for_all_save_operations(self, tools):
-        """The 8 write tools (save_* family) must all be present."""
+        """The 7 write tools (save_* family) must all be present."""
         save_tools = {t.name for t in tools if t.name.startswith("save_")}
         expected_save = {
             "save_finding",
@@ -432,7 +431,6 @@ class TestExplorerToolSuiteContract:
             "save_knowledge_node",
             "save_knowledge_edge",
             "save_principle",
-            "save_voice_profile",
             "save_narrative",
         }
         assert save_tools == expected_save, (

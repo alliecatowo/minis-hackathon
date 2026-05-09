@@ -73,7 +73,6 @@ EXPECTED_TOOL_NAMES = {
     "save_knowledge_node",
     "save_knowledge_edge",
     "save_principle",
-    "save_voice_profile",
     "save_narrative",
     "mark_explored",
     "get_progress",
@@ -85,8 +84,8 @@ class TestBuildExplorerToolsStructure:
     def test_returns_list(self, tools):
         assert isinstance(tools, list)
 
-    def test_returns_14_tools(self, tools):
-        assert len(tools) == 14
+    def test_returns_13_tools(self, tools):
+        assert len(tools) == 13
 
     def test_all_tools_are_agent_tool_instances(self, tools):
         for tool in tools:

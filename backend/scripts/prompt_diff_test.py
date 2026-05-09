@@ -19,7 +19,7 @@ Options:
     --prompts-file PATH         YAML file with test prompts (optional)
 
 This script:
-1. Loads mini state from Neon (system_prompt, memory_content, voice_profile)
+1. Loads mini state from Neon (system_prompt, memory_content)
 2. Builds "original" and "mutated" system prompts
 3. Queries both in parallel (with prompt caching) against 7 fidelity prompts
 4. Judges each A/B pair with Haiku LLM-as-judge
@@ -143,8 +143,7 @@ def _build_mutated_directive(original: str) -> str:
     This revised mutation:
     1. KEEPS the original directive exactly as-is (no deletions)
     2. APPENDS a register-match block as a NEW section AFTER existing directives
-    3. Does NOT inject voice_profile (current data is hollow defaults)
-    4. Does NOT modify max_tokens (that happens in agent.py separately)
+    3. Does NOT modify max_tokens (that happens in agent.py separately)
 
     The register-match block targets casual/short prompts ('wat', 'lol') without
     breaking opinion/framework prompts.
@@ -163,10 +162,10 @@ def _build_mutated_directive(original: str) -> str:
 
 async def _load_mini_state(
     neon_url: str, mini_id: str
-) -> tuple[str, str | None, dict[str, Any] | None]:
-    """Load mini system_prompt, memory_content, and voice_profile from Neon.
+) -> tuple[str, str | None]:
+    """Load mini system_prompt and memory_content from Neon.
 
-    Returns: (system_prompt, memory_content, voice_profile_dict)
+    Returns: (system_prompt, memory_content)
     """
     try:
         conn = await asyncpg.connect(neon_url)
@@ -175,31 +174,13 @@ async def _load_mini_state(
         raise
 
     try:
-        # Get mini state
         mini_row = await conn.fetchrow(
             "SELECT system_prompt, memory_content FROM minis WHERE id = $1", mini_id
         )
         if not mini_row:
             raise ValueError(f"Mini {mini_id} not found in database")
 
-        system_prompt = mini_row["system_prompt"] or ""
-        memory_content = mini_row["memory_content"]
-
-        # Get latest voice_profile finding
-        voice_rows = await conn.fetch(
-            "SELECT content FROM explorer_findings WHERE mini_id = $1 AND category = $2 ORDER BY created_at DESC LIMIT 1",
-            mini_id,
-            "voice_profile",
-        )
-
-        voice_profile = None
-        if voice_rows:
-            try:
-                voice_profile = json.loads(voice_rows[0]["content"])
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        return system_prompt, memory_content, voice_profile
+        return mini_row["system_prompt"] or "", mini_row["memory_content"]
 
     finally:
         await conn.close()
@@ -342,7 +323,7 @@ async def main() -> int:
     # ── Load mini state ───────────────────────────────────────────────────────
     logger.info(f"Loading mini {args.mini_id} from Neon...")
     try:
-        system_prompt, memory_content, voice_profile = await _load_mini_state(neon_url, args.mini_id)
+        system_prompt, memory_content = await _load_mini_state(neon_url, args.mini_id)
     except Exception as e:
         logger.error(f"Failed to load mini state: {e}")
         return 1
@@ -357,15 +338,7 @@ async def main() -> int:
 
     original_system = system_prompt + original_directive
     mutated_directive = _build_mutated_directive(original_directive)
-
-    voice_profile_block = ""
-    if voice_profile:
-        voice_profile_block = (
-            f"\n\n# VOICE PROFILE\n\n{json.dumps(voice_profile, indent=2)}\n\n"
-            "Match this register. Mirror frequency. Do not over-perform signature phrases."
-        )
-
-    mutated_system = mutated_directive + voice_profile_block + system_prompt
+    mutated_system = mutated_directive + system_prompt
 
     # ── Query both prompts in parallel ────────────────────────────────────────
     logger.info(f"Querying {len(FIDELITY_PROMPTS)} prompts with both system prompts...")
