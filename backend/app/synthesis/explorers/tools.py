@@ -101,20 +101,6 @@ _SIGNAL_MODE_ENUM = [
     "approvals_only",
 ]
 
-_FORMALITY_OPTIONS = ["casual", "mixed", "formal"]
-_HUMOR_TYPE_OPTIONS = ["dry_sarcastic", "self_deprecating", "witty", "slapping", "none"]
-_FRUSTRATION_STYLE_OPTIONS = [
-    "terse_silent",
-    "verbose_rant",
-    "sarcastic_deflection",
-    "direct_confrontation",
-]
-_DISAGREEMENT_STYLE_OPTIONS = [
-    "diplomatic",
-    "direct_blunt",
-    "avoidant_then_explode",
-    "evidence_based_argument",
-]
 _REGISTER_LEVEL_OPTIONS = [
     "casual_unfiltered",
     "casual_filtered",

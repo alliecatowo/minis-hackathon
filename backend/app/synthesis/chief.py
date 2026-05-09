@@ -60,6 +60,9 @@ NARRATIVE_ASPECTS = (
     "philosophical_priors",
     "architecture_worldview",
     "ai_usage_signature",
+    # Pre-chief inference narratives (written by pipeline before chief runs)
+    "personality_typology",
+    "motivations_drivers",
 )
 
 ASPECT_CATEGORY_HINTS: dict[str, tuple[str, ...]] = {
