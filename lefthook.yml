@@ -9,6 +9,8 @@ pre-commit:
 
 pre-push:
   commands:
+    ruff-check:
+      run: 'cd backend && uv run ruff check .'
     backend-unit-tests:
       run: 'cd backend && uv run pytest tests/ -m "not integration and not e2e" -x -q'
     frontend-typecheck:

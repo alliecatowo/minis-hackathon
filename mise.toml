@@ -133,3 +133,41 @@ run = "cd backend && MINIS_CASSETTE_MODE=replay MINIS_CASSETTE_RUN_ID=default uv
 [tasks.pipeline-record]
 description = "One-time cassette recording guide: MINIS_CASSETTE_MODE=record OPENAI_API_KEY=... then run the target pipeline command."
 run = "echo 'Set MINIS_CASSETTE_MODE=record MINIS_CASSETTE_RUN_ID=<run-id> OPENAI_API_KEY=... and run the pipeline once to capture fixtures.'"
+
+[tasks.sprint-status]
+description = "Print concise sprint status: branch, PRs, CD runs, regen processes, API health"
+run = """
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🎯 SPRINT STATUS"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "📍 BRANCH"
+echo "  $(git rev-parse --abbrev-ref HEAD) | $(git rev-list --left-right --count main...HEAD | awk '{print "+" $2 " -" $1 " vs main"}')"
+echo ""
+echo "🌳 WORKTREES"
+WORKTREE_COUNT=$(git worktree list 2>/dev/null | grep -v '^.*detached' | wc -l)
+echo "  $((WORKTREE_COUNT - 1)) active ($(git worktree list 2>/dev/null | tail -n +2 | head -3 | awk '{print $1}' | xargs -I {} basename {} | paste -sd, -))"
+echo ""
+echo "📤 PULL REQUESTS (open)"
+gh pr list --state open -L 8 --json number,title,author,createdAt --template '{{range .}}  [#{{.number}}] {{.title}} (@{{.author.login}}){{"\n"}}{{end}}' 2>/dev/null || echo "  (gh CLI unavailable)"
+echo ""
+echo "🚀 CD RUNS (recent)"
+gh run list -w CD -L 3 --json status,createdAt,conclusion --template '{{range .}}  {{.status}} | {{.createdAt}} {{if .conclusion}}({{.conclusion}}){{end}}{{"\n"}}{{end}}' 2>/dev/null || echo "  (gh CLI unavailable)"
+echo ""
+echo "🔄 REGEN PROCESSES"
+REGEN_PROCS=$(pgrep -af regen_mini.py 2>/dev/null | wc -l)
+if [ "$REGEN_PROCS" -gt 0 ]; then
+  pgrep -af regen_mini.py 2>/dev/null | head -3 | sed 's/^/  /'
+else
+  echo "  (none running)"
+fi
+echo ""
+echo "🏥 API HEALTH (prod)"
+API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://minis-api.fly.dev/api/minis/alliecatowo 2>/dev/null)
+case $API_STATUS in
+  200) echo "  ✓ minis-api.fly.dev/api/minis/alliecatowo: $API_STATUS" ;;
+  *)   echo "  ✗ minis-api.fly.dev/api/minis/alliecatowo: $API_STATUS" ;;
+esac
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+"""
