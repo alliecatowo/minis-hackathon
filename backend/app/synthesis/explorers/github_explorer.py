@@ -331,15 +331,26 @@ After reading and analyzing evidence, persist your findings:
 When you observe evidence of decision tradeoffs or stated preferences, emit reasoning edges — these are higher-leverage than taxonomic edges because they encode the subject's judgment, not just their stack:
 
   • rejects_because  — subject chose NOT to use X for reason R
-                       e.g. save_knowledge_edge(webpack, vite, rejects_because) when subject writes I moved off webpack because its config complexity hurts team velocity
+                       e.g. when a PR comment says "I moved off webpack because its config complexity hurts team velocity"
   • prefers_over     — subject actively favors X over Y
-                       e.g. save_knowledge_edge(Vue, React, prefers_over) when subject writes Vues reactivity model is calmer than Reacts re-render loops
-  • trades_off       — subject acknowledges a tension between X and Y
-                       e.g. save_knowledge_edge(type safety, iteration speed, trades_off) when subject writes strict TS slows early prototyping but saves refactor time later
+                       e.g. when a review comment says "Vue's reactivity model is calmer than React's re-render loops"
+  • trades_off       — subject acknowledges a tension between two concerns
+                       e.g. when a commit message says "strict TS slows early prototyping but saves refactor time later"
   • decides_based_on — subject applies criterion X when making a category of decisions
-                       e.g. save_knowledge_edge(bundle size, library selection, decides_based_on) when subject writes I check bundle impact before adding any dependency
+                       e.g. when an issue comment says "I check bundle impact before adding any dependency"
+  • escalates_when   — subject raises urgency or concern only under specific conditions
+                       e.g. when review pattern shows the subject only flags performance issues on hot paths, not on background jobs
+  • ignores_when     — subject deliberately deprioritizes or skips X under certain conditions
+                       e.g. when the subject writes "I'm not going to bikeshed on naming in a prototype"
 
-Taxonomic edges (used_in, implements, related_to) describe WHAT the subject uses. Reasoning edges describe WHY they chose it. Both are required; reasoning edges are higher-leverage for chat-time query_graph calls.
+**Call contract (required for every reasoning edge):**
+- Always pass `evidence_ids=[<item_id>, ...]` listing the 1-3 evidence item IDs that support the inference.
+- Always pass `reasoning_text="<2-3 sentences>"` explaining why this evidence warrants the edge — what you observed, what it implies about the engineer's judgment.
+- Set `weight` to reflect confidence: 0.8-1.0 for explicit statements, 0.5-0.7 for inferred patterns.
+
+Taxonomic edges (used_in, built_with, related_to) describe WHAT the subject uses. Reasoning edges describe WHY they chose it. Both are required; reasoning edges are higher-leverage for chat-time query_graph calls.
+
+GitHub evidence is especially rich for reasoning edges: PR rejection comments (rejects_because), architecture decision records (decides_based_on), "X over Y" comparisons in code review (prefers_over), and "we could do X but that trades off Y" discussions (trades_off). Look for these explicitly when mining PR comments and issue threads.
 ---
 - **save_principle** — decision rules and values
 

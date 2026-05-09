@@ -80,6 +80,8 @@ ASPECT_CATEGORY_HINTS: dict[str, tuple[str, ...]] = {
     "philosophical_priors": ("meta-beliefs", "worldview"),
     "architecture_worldview": ("systems", "architecture", "design"),
     "ai_usage_signature": ("ai_usage_signature", "ai", "authorship", "style"),
+    "personality_typology": ("personality", "mbti", "big five", "enneagram", "disc"),
+    "motivations_drivers": ("motivation", "goal", "driver", "terminal value", "anti-goal"),
 }
 
 ASPECT_KEYWORD_HINTS: dict[str, tuple[str, ...]] = {
@@ -113,6 +115,8 @@ ASPECT_KEYWORD_HINTS: dict[str, tuple[str, ...]] = {
     "philosophical_priors": ("worldview", "meta", "belief", "ethics", "prior"),
     "architecture_worldview": ("architecture", "system", "boundary", "monolith", "microservice"),
     "ai_usage_signature": ("ai", "llm", "assistant", "chatgpt", "claude", "generated", "rewrite"),
+    "personality_typology": ("personality", "mbti", "big five", "trait", "enneagram", "disc"),
+    "motivations_drivers": ("motivation", "goal", "value", "driver", "terminal", "anti-goal", "chain"),
 }
 
 ASPECT_GUIDANCE: dict[str, str] = {
