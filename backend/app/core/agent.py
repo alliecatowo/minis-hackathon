@@ -326,7 +326,7 @@ def _build_usage_limits(
     from pydantic_ai.usage import UsageLimits
 
     return UsageLimits(
-        request_limit=max_turns,
+        request_limit=None,  # token budget is the enforcer, not request count
         input_tokens_limit=max_input_tokens or _env_int("LLM_REQUEST_TOKEN_LIMIT"),
         output_tokens_limit=max_output_tokens or _env_int("LLM_RESPONSE_TOKEN_LIMIT"),
         total_tokens_limit=max_total_tokens or _env_int("LLM_TOTAL_TOKEN_LIMIT"),

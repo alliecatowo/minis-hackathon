@@ -166,7 +166,9 @@ class TestLLMUsageLimits:
 
         _, kwargs = mock_agent.run.call_args
         limits = kwargs["usage_limits"]
-        assert limits.request_limit == 2
+        # request_limit must be None — token budgets are the cost cap,
+        # not request count (PydanticAI counts per HTTP call, not per turn).
+        assert limits.request_limit is None
         assert limits.input_tokens_limit == 123
         assert limits.output_tokens_limit == 45
         assert limits.total_tokens_limit == 160
@@ -200,6 +202,37 @@ class TestLLMUsageLimits:
         assert limits.input_tokens_limit == 100
         assert limits.output_tokens_limit == 50
         assert limits.total_tokens_limit == 125
+
+    def test_request_limit_is_none_not_capped(self):
+        """_build_usage_limits must not set request_limit.
+
+        PydanticAI counts every HTTP call (tool-call + result-return) as a
+        'request', so request_limit==max_turns kills tool-heavy agents after
+        ~10 turns while wasting the full token spend. Token budgets are the
+        correct cost-cap mechanism for synthesis agents.
+        """
+        from app.core.agent import _build_usage_limits
+
+        for max_turns in (20, 40, 50):
+            limits = _build_usage_limits(max_turns=max_turns)
+            assert limits.request_limit is None, (
+                f"request_limit must be None for max_turns={max_turns}; got {limits.request_limit}"
+            )
+
+    def test_request_limit_none_with_token_caps(self):
+        """Token caps are applied while request_limit stays None."""
+        from app.core.agent import _build_usage_limits
+
+        limits = _build_usage_limits(
+            max_turns=50,
+            max_input_tokens=10000,
+            max_output_tokens=8192,
+            max_total_tokens=50000,
+        )
+        assert limits.request_limit is None
+        assert limits.input_tokens_limit == 10000
+        assert limits.output_tokens_limit == 8192
+        assert limits.total_tokens_limit == 50000
 
 
 # ---------------------------------------------------------------------------

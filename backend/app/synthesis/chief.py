@@ -811,12 +811,13 @@ async def _run_chief_synthesizer_fanout(
             authenticity_loop_block=AUTHENTICITY_LOOP_SYNTHESIS_BLOCK,
         )
 
+        # Removed max_output_tokens=8192 + max_turns cap per agency-first principle
+        # (memory:feedback_agency_first). Aspect narratives MUST be allowed to run
+        # to natural completion — capping was silently dropping 5+ aspects per regen.
         result = await run_agent(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             tools=read_tools,
-            max_turns=30,
-            max_output_tokens=8192,
             model=standard_model,
         )
 
