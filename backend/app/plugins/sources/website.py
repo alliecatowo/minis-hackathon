@@ -11,6 +11,7 @@ import hashlib
 import logging
 import re
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -94,12 +95,33 @@ class WebsiteSource(IngestionSource):
                 content_parts.append(f"URL: {page_url}")
             content_parts.append(content)
 
+            # Parse evidence_date from date field if available (trafilatura may extract it)
+            evidence_date = None
+            if page.get("date"):
+                try:
+                    evidence_date = datetime.fromisoformat(page.get("date"))
+                except (ValueError, AttributeError):
+                    pass
+
+            # source_uri is the page URL
+            source_uri = page_url if page_url else None
+
+            # raw_context_json: website page metadata
+            raw_context = {}
+            if page.get("word_count"):
+                raw_context["word_count"] = page.get("word_count")
+            if page.get("author"):
+                raw_context["author"] = page.get("author")
+
             yield EvidenceItem(
                 external_id=external_id,
                 source_type=self.name,
                 item_type="page",
                 content="\n".join(content_parts),
                 context="website_page",
+                evidence_date=evidence_date,
+                source_uri=source_uri,
+                raw_context=raw_context if raw_context else None,
                 metadata={"title": title, "url": page_url},
                 privacy="public",
             )
