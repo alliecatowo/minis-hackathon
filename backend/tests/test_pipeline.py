@@ -578,10 +578,6 @@ class TestRunPipelineHappyPath:
                 AsyncMock(return_value=soul_doc),
             ),
             patch(
-                "app.synthesis.pipeline.run_chief_synthesis",
-                AsyncMock(return_value=soul_doc),
-            ),
-            patch(
                 "app.synthesis.pipeline._store_evidence_items_in_db",
                 AsyncMock(return_value=(1, 0)),
             ),

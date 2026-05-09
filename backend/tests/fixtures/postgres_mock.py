@@ -202,6 +202,9 @@ class PostgresStyleSession:
 
     def _matches(self, criterion: Any, row: Any) -> bool:
         if hasattr(criterion, "clauses"):
+            op_name = getattr(getattr(criterion, "operator", None), "__name__", "")
+            if op_name == "or_":
+                return any(self._matches(clause, row) for clause in criterion.clauses)
             return all(self._matches(clause, row) for clause in criterion.clauses)
         if not hasattr(criterion, "left") or not hasattr(criterion, "operator"):
             return True
