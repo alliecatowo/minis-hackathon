@@ -125,3 +125,39 @@ If these are missing locally (new session), regenerate via codex/claude agent di
 ---
 
 _Last updated: 2026-04-26 by Claude session synthesis after 6 parallel audits._
+
+---
+
+## 2026-05-09 New tasks (user directives, end of session)
+
+### TI.4 — Mini revision diff / version compare
+The `MiniRevision` table tracks pipeline run history. We need a way to DIFF two revisions of the same mini side-by-side: soul prompt diff, principle additions/removals, narrative deltas, evidence count change, decision-framework changes. Could be a CLI (`mise run mini-diff alliecatowo --rev1 N --rev2 M`) and/or a frontend `/m/{user}/history` page. Also surface the Langfuse trace URL per revision so we can visually diff the LLM call timeline.
+
+### TI.5 — Full observability quantification
+Now that Langfuse is wired (post #217 merge), every regen should produce a structured "regen report" at end:
+- GitHub API: # requests, # rate-limit hits, # bytes downloaded, per-endpoint counts
+- LLM API: # calls per provider, total tokens in/out, $ cost estimate, longest span
+- DB: # inserts, # superseded (additive cache), # skipped-unchanged
+- Time per stage (already ~landing in #213 W4.6 profiling)
+- Surface all in Langfuse dashboard via `start_observation` metadata + a single SUMMARY trace per run.
+
+### CI.3 — Rolling deploy that doesn't kill long processes
+Current Fly deploy strategy likely terminates running pipeline processes when machines roll. Need either:
+- (a) Run regens on dedicated worker machines (not on the API machine), OR
+- (b) Mark pipeline runs as "in flight" in DB and have deploy script pause + drain before swap, OR
+- (c) Move regen execution off Fly entirely (a worker queue / separate service).
+Until fixed: HOLD all merges + deploys when a regen is mid-flight. (This is why I'm sitting on PRs 213-220 right now.)
+
+
+### TI.6 — Live regen TUI / observability CLI
+`mise run regen-watch alliecatowo` — interactive terminal UI that connects to a running regen and shows:
+- Current stage (FETCH | EXPLORE | SYNTHESIZE | SAVE) + per-explorer progress bars
+- Live token spend (totals + per-stage)
+- Live API request counts (GitHub + each LLM provider) with rate-limit gauges
+- Mini revision number being created
+- Estimated time remaining + ETA
+- "Cancel" hotkey that gracefully aborts (no half-saved state)
+- Tail of Langfuse trace URL so you can click through
+
+Foundation: pipeline.py already streams `PipelineEvent` SSE events. Build a textual/rich TUI consuming the events. Bonus: add `mise run regen-stats LATEST` for a post-mortem summary table.
+

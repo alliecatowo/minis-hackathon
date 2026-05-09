@@ -322,11 +322,19 @@ def _build_usage_limits(
     max_output_tokens: int | None = None,
     max_total_tokens: int | None = None,
 ):
-    """Build PydanticAI usage limits with env-backed token caps."""
+    """Build PydanticAI usage limits with env-backed token caps.
+
+    request_limit is intentionally NOT set here. PydanticAI counts every HTTP
+    call (including tool-result processing) as a "request", so a tool-heavy
+    agent can burn max_turns * 3-5 requests in normal operation. Setting
+    request_limit == max_turns causes premature termination with zero output
+    after wasting the full token spend. Token budgets (input/output/total) are
+    the correct cost-cap mechanism for synthesis agents.
+    """
     from pydantic_ai.usage import UsageLimits
 
     return UsageLimits(
-        request_limit=max_turns,
+        request_limit=None,  # see docstring — token budgets are the cost cap
         input_tokens_limit=max_input_tokens or _env_int("LLM_REQUEST_TOKEN_LIMIT"),
         output_tokens_limit=max_output_tokens or _env_int("LLM_RESPONSE_TOKEN_LIMIT"),
         total_tokens_limit=max_total_tokens or _env_int("LLM_TOTAL_TOKEN_LIMIT"),
