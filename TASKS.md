@@ -125,3 +125,7 @@ If these are missing locally (new session), regenerate via codex/claude agent di
 ---
 
 _Last updated: 2026-04-26 by Claude session synthesis after 6 parallel audits._
+
+### Newly surfaced (after CD unwedge)
+- [ ] **CI.1** CD `migrate` step tries to connect 127.0.0.1:5432 instead of Neon — missing `NEON_DATABASE_URL` (or `DATABASE_URL`) secret in `.github/workflows/cd.yml`. Fly deploy itself succeeds, but CD workflow run is red. Add the secret + verify alembic upgrade head against the prod branch.
+- [ ] **CI.2** e2e job failing post-deploy on main — likely test env / playwright artifacts. Lower priority than CI.1.
