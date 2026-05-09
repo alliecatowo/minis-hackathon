@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -75,12 +76,36 @@ class DevBlogSource(IngestionSource):
             if body:
                 content_parts.append(body)
 
+            # Parse evidence_date from published_at if available
+            evidence_date = None
+            published_at = article.get("published_at")
+            if published_at:
+                try:
+                    evidence_date = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+                except (ValueError, AttributeError):
+                    pass
+
+            # source_uri is the Dev.to article URL
+            source_uri = article.get("url")
+
+            # raw_context_json: Dev.to article metadata
+            raw_context = {
+                "positive_reactions_count": reactions,
+                "comments_count": comments,
+                "tags": tags,
+            }
+            if article.get("user", {}).get("name"):
+                raw_context["author"] = article["user"]["name"]
+
             yield EvidenceItem(
                 external_id=external_id,
                 source_type=self.name,
                 item_type="article",
                 content="\n".join(content_parts),
                 context="devto_article",
+                evidence_date=evidence_date,
+                source_uri=source_uri,
+                raw_context=raw_context,
                 metadata={
                     "article_id": article_id,
                     "title": title,
