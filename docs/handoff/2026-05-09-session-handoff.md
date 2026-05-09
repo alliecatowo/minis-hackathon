@@ -56,6 +56,22 @@ Most PRs are independent. The CRITICAL ones are the rate-leak fix (must land bef
 
 Their team is `minis-yc-sprint`. Check `~/.claude/teams/minis-yc-sprint/config.json` if you need to message them.
 
+## Final state at session-end (12:06 PT)
+
+**v9 regen killed** mid-flight after producing 5+ degraded aspects (the 8192 cap). DON'T use this regen as fidelity baseline.
+
+**6 open PRs** to merge in this exact order in next session:
+1. **PR #221** `fix: remove chief output_tokens cap + cheap-model stack` — **CRITICAL, MERGE FIRST.** Removes the 8192 cap that broke v9. Switches to gpt-4.1-nano/gpt-5/o4-mini stack (~70% cheaper).
+2. **PR #215** W4.2 strict additive cache — 25× write reduction.
+3. **PR #217** Langfuse v4 + mise auto-env + CLAUDE.md sync.
+4. **PR #218** lefthook pre-push ruff + `mise run sprint-status`.
+5. **PR #219** bare-except sweep round 2.
+6. **PR #220** GraphQL co-fetch bundles — 5-10× FETCH speedup.
+
+**3 agents went idle without pushing PRs** (rate-leak, pricing-audit, tasks-to-issues). The pricing-audit agent's models.py changes are bundled into PR #221. Tasks-to-issues didn't finish; `MIGRATION_PROGRESS.md` may exist in repo root with state.
+
+**User concern surfaced last:** "mini inference model should be a gpt one, old minis aren't responding now" — chat may be failing on prod because chat.py's model selection uses the wrong tier or a missing model. Investigate `backend/app/routes/chat.py` model resolution against the new pricing-audit defaults (gpt-5 STANDARD, etc).
+
 ## What to do first in next session
 
 1. **Wait for v9 regen to actually finish.** Check `tail -f /tmp/regen-alliecatowo-v9-gpt5-credits-2026-05-09.log`. Look for `Pipeline terminal status=...` line. Then:
