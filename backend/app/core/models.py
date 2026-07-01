@@ -46,15 +46,15 @@ PROVIDER_DEFAULTS: dict[Provider, dict[ModelTier, str]] = {
         # | Tier      | Model                  | Input $/1M | Output $/1M | Free quota   |
         # |-----------|------------------------|-----------:|------------:|--------------|
         # | FAST      | gpt-4.1-nano           |      $0.10 |       $0.40 | 10M/day pool |
-        # | STANDARD  | gpt-5                  |      $2.00 |       $8.00 | 1M/day pool  |
+        # | STANDARD  | gpt-5-mini             |      $0.25 |       $2.00 | higher RPM/TPM headroom |
         # | THINKING  | o4-mini                |      $1.10 |       $4.40 | 10M/day pool |
         # | EMBEDDING | text-embedding-3-small |      $0.02 |           — | —            |
         #
         # FAST: gpt-4.1-nano replaces non-existent "gpt-5-mini" (caused silent errors).
-        # STANDARD: gpt-5 stays — same price as gpt-4.1 with better tool-calling quality.
+        # STANDARD: gpt-5-mini for higher fan-out throughput headroom.
         # THINKING: o4-mini replaces o3 ($10/$40/1M); 9x cheaper for narrative essay synthesis.
         ModelTier.FAST: "openai:gpt-4.1-nano",
-        ModelTier.STANDARD: "openai:gpt-5",
+        ModelTier.STANDARD: "openai:gpt-5-mini",
         ModelTier.THINKING: "openai:o4-mini",
         ModelTier.EMBEDDING: "openai:text-embedding-3-small",
     },
